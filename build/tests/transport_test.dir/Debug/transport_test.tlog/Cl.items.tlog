@@ -1,0 +1,5 @@
+C:\src\DeskBeam\tests\transport_test.cpp;C:\src\DeskBeam\build\tests\transport_test.dir\Debug\transport_test.obj
+C:\src\DeskBeam\src\host\capture\dxgi_capture.cpp;C:\src\DeskBeam\build\tests\transport_test.dir\Debug\dxgi_capture.obj
+C:\src\DeskBeam\src\host\encode\amf_encoder.cpp;C:\src\DeskBeam\build\tests\transport_test.dir\Debug\amf_encoder.obj
+C:\src\DeskBeam\src\host\session\video_sender.cpp;C:\src\DeskBeam\build\tests\transport_test.dir\Debug\video_sender.obj
+C:\src\DeskBeam\src\client\net\video_receiver.cpp;C:\src\DeskBeam\build\tests\transport_test.dir\Debug\video_receiver.obj

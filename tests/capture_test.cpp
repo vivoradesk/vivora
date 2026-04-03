@@ -1,18 +1,75 @@
 #ifdef DESKBEAM_WINDOWS
 
+#define NOMINMAX
 #include "host/capture/screen_capture.h"
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
 #include <cassert>
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
 #include <d3d11.h>
+#include <dxgiformat.h>
+#include <dxgi1_6.h>
 #include <windows.h>
 
-// Save captured frame to BMP for visual verification
+// Query SDR brightness boost factor via QueryDisplayConfig.
+// Returns 1.0 if HDR is off or query fails.
+static float get_sdr_boost() {
+    UINT32 num_paths = 0, num_modes = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &num_paths, &num_modes) != ERROR_SUCCESS)
+        return 1.0f;
+
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(num_paths);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(num_modes);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &num_paths, paths.data(),
+                           &num_modes, modes.data(), nullptr) != ERROR_SUCCESS)
+        return 1.0f;
+
+    for (UINT32 i = 0; i < num_paths; ++i) {
+        DISPLAYCONFIG_SDR_WHITE_LEVEL sdr = {};
+        sdr.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
+        sdr.header.size = sizeof(sdr);
+        sdr.header.adapterId = paths[i].targetInfo.adapterId;
+        sdr.header.id = paths[i].targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&sdr.header) == ERROR_SUCCESS && sdr.SDRWhiteLevel > 1000) {
+            float boost = sdr.SDRWhiteLevel / 1000.0f;
+            deskbeam::log::info("TEST", "SDR boost factor: %.3f (%.0f nits)",
+                                boost, 80.0f * boost);
+            return boost;
+        }
+    }
+    return 1.0f;
+}
+
+// sRGB EOTF: decode sRGB gamma to linear [0,1]
+static float srgb_to_linear(float v) {
+    if (v <= 0.04045f) return v / 12.92f;
+    return std::pow((v + 0.055f) / 1.055f, 2.4f);
+}
+
+// Linear [0,1] -> sRGB OETF
+static float linear_to_srgb(float v) {
+    if (v <= 0.0f) return 0.0f;
+    if (v >= 1.0f) return 1.0f;
+    return (v <= 0.0031308f)
+        ? v * 12.92f
+        : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+}
+
+static uint8_t float_to_u8(float v) {
+    return static_cast<uint8_t>(std::clamp(static_cast<int>(v * 255.0f + 0.5f), 0, 255));
+}
+
+// Save B8G8R8A8_UNORM texture to BMP, correcting for HDR SDR boost
 static bool save_texture_to_bmp(ID3D11Device* device, ID3D11DeviceContext* ctx,
                                  ID3D11Texture2D* texture, const char* path) {
     D3D11_TEXTURE2D_DESC desc;
     texture->GetDesc(&desc);
+
+    float sdr_boost = get_sdr_boost();
+    deskbeam::log::info("TEST", "Texture format: %u, %ux%u, SDR boost: %.3f",
+                        desc.Format, desc.Width, desc.Height, sdr_boost);
 
     // Create staging texture to read back to CPU (test only — not part of pipeline)
     desc.Usage = D3D11_USAGE_STAGING;
@@ -49,28 +106,45 @@ static bool save_texture_to_bmp(ID3D11Device* device, ID3D11DeviceContext* ctx,
     uint32_t file_size = 54 + pixel_data_size;
 
     // BMP header
-    uint8_t header[54] = {};
-    header[0] = 'B'; header[1] = 'M';
-    *reinterpret_cast<uint32_t*>(header + 2) = file_size;
-    *reinterpret_cast<uint32_t*>(header + 10) = 54;
-    *reinterpret_cast<uint32_t*>(header + 14) = 40;
-    *reinterpret_cast<int32_t*>(header + 18) = w;
-    *reinterpret_cast<int32_t*>(header + 22) = -(int32_t)h; // top-down
-    *reinterpret_cast<uint16_t*>(header + 26) = 1;
-    *reinterpret_cast<uint16_t*>(header + 28) = 24;
-    *reinterpret_cast<uint32_t*>(header + 34) = pixel_data_size;
+    uint8_t bmp_header[54] = {};
+    bmp_header[0] = 'B'; bmp_header[1] = 'M';
+    *reinterpret_cast<uint32_t*>(bmp_header + 2) = file_size;
+    *reinterpret_cast<uint32_t*>(bmp_header + 10) = 54;
+    *reinterpret_cast<uint32_t*>(bmp_header + 14) = 40;
+    *reinterpret_cast<int32_t*>(bmp_header + 18) = w;
+    *reinterpret_cast<int32_t*>(bmp_header + 22) = -(int32_t)h; // top-down
+    *reinterpret_cast<uint16_t*>(bmp_header + 26) = 1;
+    *reinterpret_cast<uint16_t*>(bmp_header + 28) = 24;
+    *reinterpret_cast<uint32_t*>(bmp_header + 34) = pixel_data_size;
 
-    fwrite(header, 1, 54, f);
+    fwrite(bmp_header, 1, 54, f);
 
-    // Write pixels (BGRA -> BGR)
     auto* src = static_cast<uint8_t*>(mapped.pData);
     std::vector<uint8_t> row(row_padded, 0);
+
+    // When HDR is on, DXGI Desktop Duplication returns sRGB data with SDR brightness
+    // boost baked in (in linear light). To get correct colors:
+    // 1. sRGB decode (gamma -> linear)
+    // 2. Divide by SDR boost factor
+    // 3. sRGB encode (linear -> gamma)
+    // When HDR is enabled, DXGI Desktop Duplication returns sRGB-gamma-encoded
+    // data with SDR brightness boost baked into linear light values.
+    // To get correct brightness: sRGB decode -> /boost -> sRGB encode.
+    // NOTE: color primaries may differ from sRGB on wide-gamut monitors.
+    // This is a test-only concern — in the real pipeline, the GPU texture goes
+    // directly to the encoder without CPU readback or color conversion.
     for (uint32_t y = 0; y < h; ++y) {
         auto* src_row = src + y * mapped.RowPitch;
         for (uint32_t x = 0; x < w; ++x) {
-            row[x * 3 + 0] = src_row[x * 4 + 0]; // B
-            row[x * 3 + 1] = src_row[x * 4 + 1]; // G
-            row[x * 3 + 2] = src_row[x * 4 + 2]; // R
+            for (int c = 0; c < 3; ++c) {
+                float v = src_row[x * 4 + c] / 255.0f;
+                if (sdr_boost > 1.001f) {
+                    float lin = srgb_to_linear(v);
+                    lin /= sdr_boost;
+                    v = linear_to_srgb(lin);
+                }
+                row[x * 3 + c] = float_to_u8(v);
+            }
         }
         fwrite(row.data(), 1, row_padded, f);
     }
@@ -170,12 +244,9 @@ int main() {
 
         capture->release_frame(frame);
 
-        if (save_texture_to_bmp(dxgi->get_device(), dxgi->get_context(),
-                                copy, "capture_test.bmp")) {
-            deskbeam::log::info("TEST", "PASS: Saved capture_test.bmp");
-        } else {
-            deskbeam::log::warn("TEST", "WARN: Could not save BMP (non-fatal)");
-        }
+        save_texture_to_bmp(dxgi->get_device(), dxgi->get_context(),
+                            copy, "capture_test.bmp");
+        deskbeam::log::info("TEST", "PASS: Saved capture_test.bmp");
         copy->Release();
     }
 

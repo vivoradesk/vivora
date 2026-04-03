@@ -1,0 +1,65 @@
+#pragma once
+
+#include "common/utils/types.h"
+#include <cstdint>
+#include <vector>
+#include <memory>
+#include <functional>
+
+#ifdef DESKBEAM_WINDOWS
+#include <dxgiformat.h>
+struct ID3D11Device;
+struct ID3D11Texture2D;
+#endif
+
+namespace deskbeam {
+
+struct EncoderConfig {
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    uint32_t fps = 60;
+    uint32_t bitrate_bps = 15'000'000;  // 15 Mbps default
+    uint32_t idr_period = 120;          // IDR every N frames (0 = auto)
+    bool low_latency = true;
+#ifdef DESKBEAM_WINDOWS
+    DXGI_FORMAT input_format = DXGI_FORMAT_B8G8R8A8_UNORM;  // capture texture format
+#endif
+};
+
+struct EncodedPacket {
+    std::vector<uint8_t> data;          // H.264 NAL units
+    uint64_t pts = 0;                   // presentation timestamp (microseconds)
+    bool keyframe = false;
+    double encode_time_ms = 0.0;        // how long encoding took
+};
+
+// Platform-independent video encoder interface
+class IVideoEncoder {
+public:
+    virtual ~IVideoEncoder() = default;
+
+    // Initialize encoder. Device is the D3D11 device used for capture (zero-copy).
+    virtual bool init(const EncoderConfig& config, ID3D11Device* device) = 0;
+
+    // Encode a GPU texture. Returns false if encoder couldn't accept input.
+    // The texture must remain valid until the next encode() call.
+    virtual bool encode(ID3D11Texture2D* texture, uint64_t pts_us) = 0;
+
+    // Retrieve encoded packets. May return 0 or more packets per encode() call.
+    // Returns false when no more packets are available.
+    virtual bool get_packet(EncodedPacket& packet) = 0;
+
+    // Request an IDR (keyframe) on the next encode
+    virtual void request_idr() = 0;
+
+    // Dynamically change bitrate without reinit
+    virtual void set_bitrate(uint32_t bitrate_bps) = 0;
+
+    // Get current config
+    virtual const EncoderConfig& get_config() const = 0;
+
+    // Factory: create best available encoder for this system
+    static std::unique_ptr<IVideoEncoder> create();
+};
+
+} // namespace deskbeam

@@ -4,6 +4,12 @@
     <ClCompile Include="C:\src\DeskBeam\src\client\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\client\net\video_receiver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\client\net\client_session.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\src\DeskBeam\src\client\CMakeLists.txt" />

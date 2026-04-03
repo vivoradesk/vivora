@@ -7,6 +7,15 @@
     <ClCompile Include="C:\src\DeskBeam\src\host\capture\dxgi_capture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\host\encode\amf_encoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\host\session\video_sender.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\host\session\host_session.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\src\DeskBeam\src\host\CMakeLists.txt" />

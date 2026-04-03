@@ -10,6 +10,15 @@
     <ClCompile Include="C:\src\DeskBeam\src\common\protocol\packet.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\common\net\frame_fragmenter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\common\net\frame_assembler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\common\net\winsock_socket.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\src\DeskBeam\src\common\CMakeLists.txt" />

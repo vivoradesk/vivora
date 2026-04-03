@@ -174,21 +174,41 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </ProjectReference>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\capture_diag.vcxproj">
+      <Project>{985D6B49-78AB-3459-9111-F23AA8C934B5}</Project>
+      <Name>capture_diag</Name>
+    </ProjectReference>
     <ProjectReference Include="C:\src\DeskBeam\build\tests\capture_test.vcxproj">
       <Project>{602195D7-8AA1-3051-BAA6-8D1E65DC82B9}</Project>
       <Name>capture_test</Name>
     </ProjectReference>
-    <ProjectReference Include="C:\src\DeskBeam\build\src\client\deskbeam_client.vcxproj">
-      <Project>{98DFC320-AE97-36CB-BB36-1766EEA7EF18}</Project>
-      <Name>deskbeam_client</Name>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\decode_test.vcxproj">
+      <Project>{4691D5F3-D211-3232-AD44-9F89901A2AFC}</Project>
+      <Name>decode_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\src\DeskBeam\build\src\app\deskbeam.vcxproj">
+      <Project>{0468B67B-6821-3A67-9662-CFD581968351}</Project>
+      <Name>deskbeam</Name>
     </ProjectReference>
     <ProjectReference Include="C:\src\DeskBeam\build\src\common\deskbeam_common.vcxproj">
       <Project>{F4AC889B-9523-3D00-8082-F1BECE20E1CA}</Project>
       <Name>deskbeam_common</Name>
     </ProjectReference>
-    <ProjectReference Include="C:\src\DeskBeam\build\src\host\deskbeam_host.vcxproj">
-      <Project>{3282FA1C-4A3E-3328-8C51-3254EA9D36DA}</Project>
-      <Name>deskbeam_host</Name>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\encode_test.vcxproj">
+      <Project>{017F6695-7556-3EF6-82DD-BD190CAC92DF}</Project>
+      <Name>encode_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\fragment_test.vcxproj">
+      <Project>{5BF50D18-D80D-3C08-B13C-458F354C0ACF}</Project>
+      <Name>fragment_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\sdr_white_test.vcxproj">
+      <Project>{9295E8B8-49B4-3BB1-A6AA-F66E947DA520}</Project>
+      <Name>sdr_white_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\src\DeskBeam\build\tests\transport_test.vcxproj">
+      <Project>{0C74A55A-507F-3D48-8907-F05A6F6693F0}</Project>
+      <Name>transport_test</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

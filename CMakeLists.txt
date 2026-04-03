@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Static CRT to match static Qt build
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # Global output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -12,8 +15,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Options
 option(DESKBEAM_BUILD_TESTS "Build tests" ON)
-option(DESKBEAM_BUILD_HOST "Build host application" ON)
-option(DESKBEAM_BUILD_CLIENT "Build client application" ON)
 
 # Platform detection
 if(WIN32)
@@ -24,16 +25,15 @@ elseif(APPLE)
     add_compile_definitions(DESKBEAM_MACOS)
 endif()
 
-# Common library (shared between host and client)
+# Common library
 add_subdirectory(src/common)
 
-if(DESKBEAM_BUILD_HOST)
-    add_subdirectory(src/host)
-endif()
+# Main application (single binary: host + client)
+add_subdirectory(src/app)
 
-if(DESKBEAM_BUILD_CLIENT)
-    add_subdirectory(src/client)
-endif()
+# Legacy targets (kept for test compilation that references sources directly)
+# add_subdirectory(src/host)   # sources used directly by src/app and tests
+# add_subdirectory(src/client) # sources used directly by src/app and tests
 
 if(DESKBEAM_BUILD_TESTS)
     enable_testing()

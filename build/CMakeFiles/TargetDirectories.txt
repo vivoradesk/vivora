@@ -3,9 +3,13 @@ C:/src/DeskBeam/build/CMakeFiles/ALL_BUILD.dir
 C:/src/DeskBeam/build/CMakeFiles/ZERO_CHECK.dir
 C:/src/DeskBeam/build/src/common/CMakeFiles/deskbeam_common.dir
 C:/src/DeskBeam/build/src/common/CMakeFiles/RUN_TESTS.dir
-C:/src/DeskBeam/build/src/host/CMakeFiles/deskbeam_host.dir
-C:/src/DeskBeam/build/src/host/CMakeFiles/RUN_TESTS.dir
-C:/src/DeskBeam/build/src/client/CMakeFiles/deskbeam_client.dir
-C:/src/DeskBeam/build/src/client/CMakeFiles/RUN_TESTS.dir
+C:/src/DeskBeam/build/src/app/CMakeFiles/deskbeam.dir
+C:/src/DeskBeam/build/src/app/CMakeFiles/RUN_TESTS.dir
 C:/src/DeskBeam/build/tests/CMakeFiles/capture_test.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/encode_test.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/sdr_white_test.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/capture_diag.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/fragment_test.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/transport_test.dir
+C:/src/DeskBeam/build/tests/CMakeFiles/decode_test.dir
 C:/src/DeskBeam/build/tests/CMakeFiles/RUN_TESTS.dir

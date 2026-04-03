@@ -1,0 +1,9 @@
+[2024231374][INF][DECODE]   [0] HEVCVideoExtension
+[2024231403][INF][DECODE] Using HEVC decoder #0 of 1
+[2024231404][INF][DECODE] D3D11VA hardware decoding enabled
+[2024231405][INF][DECODE] Output will be configured after first frame
+[2024231405][INF][DECODE] Media Foundation HEVC decoder initialized (D3D11VA)
+[2024231679][INF][ClientSession] Connecting to 127.0.0.1:9882
+[2024231680][INF][VIEW] Connecting to 127.0.0.1:9882...
+[2024231691][INF][ClientSession] Connected (handshake took 11ms)
+[2024231713][INF][VIEW] Got keyframe seq=37 (194268 bytes), starting decode

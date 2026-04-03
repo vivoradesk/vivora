@@ -1,0 +1,6 @@
+C:\src\DeskBeam\src\common\utils\log.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\log.obj
+C:\src\DeskBeam\src\common\utils\metrics.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\metrics.obj
+C:\src\DeskBeam\src\common\protocol\packet.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\packet.obj
+C:\src\DeskBeam\src\common\net\frame_fragmenter.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\frame_fragmenter.obj
+C:\src\DeskBeam\src\common\net\frame_assembler.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\frame_assembler.obj
+C:\src\DeskBeam\src\common\net\winsock_socket.cpp;C:\src\DeskBeam\build\src\common\deskbeam_common.dir\Release\winsock_socket.obj

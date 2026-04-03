@@ -4,7 +4,7 @@
 
 #include "host/capture/screen_capture.h"
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_5.h>
 #include <wrl/client.h>
 
 namespace deskbeam {
@@ -25,6 +25,7 @@ public:
     // Access to D3D11 device (needed by encoder for zero-copy)
     ID3D11Device* get_device() const { return device_.Get(); }
     ID3D11DeviceContext* get_context() const { return context_.Get(); }
+    DXGI_FORMAT get_capture_format() const { return capture_format_; }
 
 private:
     bool init_d3d11();
@@ -33,7 +34,8 @@ private:
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<IDXGIOutputDuplication> duplication_;
-    ComPtr<IDXGIOutput1> output_;
+    ComPtr<IDXGIOutput5> output5_;
+    DXGI_FORMAT capture_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
 
     Resolution resolution_;
     uint64_t frame_count_ = 0;

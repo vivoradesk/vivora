@@ -84,24 +84,51 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
         return false;
     }
 
-    hr = output.As(&output_);
-    if (FAILED(hr)) {
-        log::error(TAG, "Failed to get IDXGIOutput1: 0x%08X", hr);
-        return false;
-    }
-
     // Get output description for resolution
     DXGI_OUTPUT_DESC desc;
-    output_->GetDesc(&desc);
+    output->GetDesc(&desc);
     resolution_.width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
     resolution_.height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
 
-    // Create output duplication
-    hr = output_->DuplicateOutput(device_.Get(), duplication_.GetAddressOf());
-    if (FAILED(hr)) {
-        log::error(TAG, "DuplicateOutput failed: 0x%08X. "
-                   "Ensure running as desktop app (not UWP) and no other capture active.", hr);
-        return false;
+    // Try IDXGIOutput5::DuplicateOutput1 for FP16 HDR capture
+    hr = output.As(&output5_);
+    if (SUCCEEDED(hr)) {
+        DXGI_FORMAT formats[] = {
+            DXGI_FORMAT_R16G16B16A16_FLOAT,  // HDR preferred
+            DXGI_FORMAT_B8G8R8A8_UNORM,      // SDR fallback
+        };
+        hr = output5_->DuplicateOutput1(device_.Get(), 0,
+                                         _countof(formats), formats,
+                                         duplication_.GetAddressOf());
+        if (SUCCEEDED(hr)) {
+            DXGI_OUTDUPL_DESC dup_desc;
+            duplication_->GetDesc(&dup_desc);
+            capture_format_ = dup_desc.ModeDesc.Format;
+            log::info(TAG, "DuplicateOutput1: format=%u (%s)", capture_format_,
+                      capture_format_ == DXGI_FORMAT_R16G16B16A16_FLOAT ? "FP16 HDR" : "BGRA SDR");
+        } else {
+            log::warn(TAG, "DuplicateOutput1 failed: 0x%08X, falling back", hr);
+        }
+    } else {
+        log::warn(TAG, "IDXGIOutput5 not available: 0x%08X", hr);
+    }
+
+    // Fallback to DuplicateOutput (always BGRA)
+    if (!duplication_) {
+        ComPtr<IDXGIOutput1> output1;
+        hr = output.As(&output1);
+        if (FAILED(hr)) {
+            log::error(TAG, "Failed to get IDXGIOutput1: 0x%08X", hr);
+            return false;
+        }
+        hr = output1->DuplicateOutput(device_.Get(), duplication_.GetAddressOf());
+        if (FAILED(hr)) {
+            log::error(TAG, "DuplicateOutput failed: 0x%08X. "
+                       "Ensure running as desktop app (not UWP) and no other capture active.", hr);
+            return false;
+        }
+        capture_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
+        log::info(TAG, "DuplicateOutput fallback: BGRA SDR");
     }
 
     return true;

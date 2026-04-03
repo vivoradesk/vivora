@@ -1,0 +1,10 @@
+^C:\SRC\DESKBEAM\BUILD\CMAKEFILES\7A268FC67F1D1FDC7DFCAD5809E9C78E\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/src/DeskBeam -BC:/src/DeskBeam/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/src/DeskBeam/build/DeskBeam.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
