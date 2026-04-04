@@ -2,6 +2,7 @@
 
 #include "common/net/socket.h"
 #include "client/net/video_receiver.h"
+#include "common/protocol/input_event.h"
 #include "common/utils/types.h"
 #include <cstdint>
 #include <memory>
@@ -25,6 +26,9 @@ public:
 
     // Pop next complete video frame. Returns false if none available.
     bool pop_frame(net::AssembledFrame& frame);
+
+    // Send an input event to the host
+    void send_input(const protocol::InputEvent& event);
 
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }

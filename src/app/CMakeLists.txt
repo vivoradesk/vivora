@@ -14,6 +14,7 @@ if(WIN32)
         ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/session/video_sender.cpp
         ${CMAKE_SOURCE_DIR}/src/host/session/host_session.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/input/input_injector.cpp
     )
     # Client-side sources
     target_sources(deskbeam PRIVATE

@@ -159,4 +159,21 @@ void ClientSession::send_hello() {
     last_hello_time_ = Clock::now();
 }
 
+void ClientSession::send_input(const protocol::InputEvent& event) {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    auto payload = event.serialize();
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::Input;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.payload = std::move(payload);
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+
+    auto wire = pkt.serialize();
+    socket_->send_to(wire.data(), wire.size(), host_addr_);
+}
+
 } // namespace deskbeam::client

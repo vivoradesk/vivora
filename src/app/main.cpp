@@ -65,6 +65,7 @@ static int run_host(uint16_t port) {
 
     // Start session
     host::HostSession session;
+    session.set_screen_resolution(res.width, res.height);
     if (!session.start(port)) {
         log::error("HOST", "Failed to start session on port %u", port);
         return 1;
@@ -174,6 +175,11 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
     }
     log::info("VIEW", "Connecting to %s:%u...", host_ip, port);
 
+    // Wire input: window events → session → host
+    window.set_input_callback([&session](const protocol::InputEvent& ev) {
+        session.send_input(ev);
+    });
+
     bool renderer_ready = false;
     bool got_keyframe = false;
     uint64_t frames_decoded = 0;
@@ -214,6 +220,7 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
                 renderer_ready = window.init_renderer(
                     decoder->get_device(), decoded.width, decoded.height);
                 if (renderer_ready) {
+                    window.set_host_resolution(decoded.width, decoded.height);
                     log::info("VIEW", "Renderer started: %ux%u", decoded.width, decoded.height);
                 }
             }

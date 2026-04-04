@@ -309,4 +309,5 @@ C:/src/DeskBeam/build/src/app/deskbeam_autogen/include_Release/SWT4GKVB7J/moc_st
   C:/qt6/qtbase/src/widgets/kernel/qsizepolicy.h \
   C:/qt6/qtbase/src/widgets/kernel/qtwidgetsglobal.h \
   C:/qt6/qtbase/src/widgets/kernel/qwidget.h \
-  C:/src/DeskBeam/src/client/render/d3d_renderer.h
+  C:/src/DeskBeam/src/client/render/d3d_renderer.h \
+  C:/src/DeskBeam/src/common/protocol/input_event.h

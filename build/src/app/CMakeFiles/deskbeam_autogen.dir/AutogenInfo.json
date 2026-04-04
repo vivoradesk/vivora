@@ -481,6 +481,12 @@
 			null
 		],
 		[
+			"C:/src/DeskBeam/src/host/input/input_injector.h",
+			"MU",
+			"L74WMYGHFD/moc_input_injector.cpp",
+			null
+		],
+		[
 			"C:/src/DeskBeam/src/host/session/host_session.h",
 			"MU",
 			"7PP7WZAACD/moc_host_session.cpp",
@@ -657,6 +663,7 @@
 		[ "C:/src/DeskBeam/src/client/render/stream_window.cpp", "MU", null ],
 		[ "C:/src/DeskBeam/src/host/capture/dxgi_capture.cpp", "MU", null ],
 		[ "C:/src/DeskBeam/src/host/encode/amf_encoder.cpp", "MU", null ],
+		[ "C:/src/DeskBeam/src/host/input/input_injector.cpp", "MU", null ],
 		[ "C:/src/DeskBeam/src/host/session/host_session.cpp", "MU", null ],
 		[ "C:/src/DeskBeam/src/host/session/video_sender.cpp", "MU", null ]
 	],

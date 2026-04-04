@@ -1,5 +1,6 @@
 #include "host/session/host_session.h"
 #include "common/protocol/packet.h"
+#include "common/protocol/input_event.h"
 #include "common/utils/log.h"
 #include <cstring>
 #include <chrono>
@@ -98,6 +99,9 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
         case protocol::PacketType::Pong:
             handle_pong(payload, payload_len);
             break;
+        case protocol::PacketType::Input:
+            handle_input(payload, payload_len);
+            break;
         default:
             break;
     }
@@ -155,6 +159,15 @@ void HostSession::send_ping() {
 
     auto wire = ping.serialize();
     socket_->send_to(wire.data(), wire.size(), client_addr_);
+}
+
+void HostSession::handle_input(const uint8_t* payload, size_t len) {
+    if (state_ != SessionState::Connected) return;
+
+    protocol::InputEvent event;
+    if (protocol::InputEvent::deserialize(payload, len, event)) {
+        input_injector_.inject(event);
+    }
 }
 
 } // namespace deskbeam::host

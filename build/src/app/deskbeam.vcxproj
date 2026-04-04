@@ -414,6 +414,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClCompile Include="C:\src\DeskBeam\src\host\encode\amf_encoder.cpp" />
     <ClCompile Include="C:\src\DeskBeam\src\host\session\video_sender.cpp" />
     <ClCompile Include="C:\src\DeskBeam\src\host\session\host_session.cpp" />
+    <ClCompile Include="C:\src\DeskBeam\src\host\input\input_injector.cpp" />
     <ClCompile Include="C:\src\DeskBeam\src\client\net\video_receiver.cpp" />
     <ClCompile Include="C:\src\DeskBeam\src\client\net\client_session.cpp" />
     <ClCompile Include="C:\src\DeskBeam\src\client\decode\mf_decoder.cpp" />

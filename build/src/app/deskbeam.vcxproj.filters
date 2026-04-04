@@ -19,6 +19,9 @@
     <ClCompile Include="C:\src\DeskBeam\src\host\session\host_session.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\src\DeskBeam\src\host\input\input_injector.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\src\DeskBeam\src\client\net\video_receiver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
