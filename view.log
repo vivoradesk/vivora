@@ -1,7 +1,0 @@
-[2021996683][INF][DECODE] Found HEVC decoder MFT (1 candidates)
-[2021996686][INF][DECODE] Output will be configured after first frame
-[2021996686][INF][DECODE] Media Foundation HEVC decoder initialized (D3D11VA)
-[2021996954][INF][ClientSession] Connecting to 127.0.0.1:9879
-[2021996954][INF][VIEW] Connecting to 127.0.0.1:9879...
-[2021996963][INF][ClientSession] Connected (handshake took 9ms)
-[2021997033][INF][VIEW] Got keyframe seq=135 (170727 bytes), starting decode

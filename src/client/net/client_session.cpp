@@ -176,4 +176,22 @@ void ClientSession::send_input(const protocol::InputEvent& event) {
     socket_->send_to(wire.data(), wire.size(), host_addr_);
 }
 
+void ClientSession::request_idr() {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::IdrRequest;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.header.payload_len = 0;
+
+    auto wire = pkt.serialize();
+    socket_->send_to(wire.data(), wire.size(), host_addr_);
+}
+
+uint64_t ClientSession::frames_dropped() const {
+    return receiver_ ? receiver_->frames_dropped() : 0;
+}
+
 } // namespace deskbeam::client

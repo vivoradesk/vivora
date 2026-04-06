@@ -102,6 +102,12 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
         case protocol::PacketType::Input:
             handle_input(payload, payload_len);
             break;
+        case protocol::PacketType::IdrRequest:
+            if (state_ == SessionState::Connected) {
+                idr_needed_ = true;
+                log::info("HostSession", "Client requested IDR (frame loss recovery)");
+            }
+            break;
         default:
             break;
     }

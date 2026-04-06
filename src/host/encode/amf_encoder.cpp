@@ -89,9 +89,11 @@ bool AmfEncoder::init(const EncoderConfig& config, ID3D11Device* device) {
 
     if (!create_encoder()) return false;
 
-    log::info(TAG, "AMF HEVC 10-bit encoder initialized: %ux%u @ %u fps, %u kbps, %s",
+    bool hdr_log = (config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    log::info(TAG, "AMF HEVC %s encoder initialized: %ux%u @ %u fps, %u kbps, %s",
+              hdr_log ? "Main10 (10-bit)" : "Main (8-bit)",
               config_.width, config_.height, config_.fps, config_.bitrate_bps / 1000,
-              config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT ? "HDR" : "SDR");
+              hdr_log ? "HDR" : "SDR");
     return true;
 }
 
@@ -102,11 +104,21 @@ bool AmfEncoder::create_encoder() {
         return false;
     }
 
-    // HEVC Main10 profile for 10-bit HDR
+    bool hdr = (config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    AMF_SURFACE_FORMAT amf_fmt = hdr ? AMF_SURFACE_RGBA_F16 : AMF_SURFACE_BGRA;
+
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_USAGE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_USAGE_ULTRA_LOW_LATENCY);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET, (amf_int64)AMF_VIDEO_ENCODER_HEVC_QUALITY_PRESET_SPEED);
-    encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN_10);
-    encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
+
+    // HDR: Main10 profile, 10-bit. SDR: Main profile, 8-bit (standard NV12).
+    if (hdr) {
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN_10);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_10);
+    } else {
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PROFILE, (amf_int64)AMF_VIDEO_ENCODER_HEVC_PROFILE_MAIN);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_COLOR_BIT_DEPTH, (amf_int64)AMF_COLOR_BIT_DEPTH_8);
+    }
+
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD, (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CBR);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, (amf_int64)config_.bitrate_bps);
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate(config_.fps, 1));
@@ -116,13 +128,18 @@ bool AmfEncoder::create_encoder() {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_GOP_SIZE, (amf_int64)config_.idr_period);
     }
 
-    bool hdr = (config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT);
-    AMF_SURFACE_FORMAT amf_fmt = hdr ? AMF_SURFACE_RGBA_F16 : AMF_SURFACE_BGRA;
-
-    // Let AMF auto-detect color conversion — just set full range
+    // Input is always full range (BGRA/RGBA_F16 from DXGI is full range)
     encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INPUT_FULL_RANGE_COLOR, true);
-    encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_FULL_RANGE_COLOR,
-                          (amf_int64)AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_FULL);
+
+    if (hdr) {
+        // HDR: standard P010 with BT.2020/PQ uses studio/limited range
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_FULL_RANGE_COLOR,
+                              (amf_int64)AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_STUDIO);
+    } else {
+        // SDR: full range NV12 — values pass through 1:1, no precision loss
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_FULL_RANGE_COLOR,
+                              (amf_int64)AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_FULL);
+    }
 
     res = encoder_->Init(amf_fmt, config_.width, config_.height);
     if (res != AMF_OK) {

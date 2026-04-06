@@ -5,6 +5,8 @@
 #include <QResizeEvent>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QScreen>
+#include <algorithm>
 
 namespace deskbeam {
 
@@ -19,15 +21,32 @@ StreamWindow::StreamWindow(QWidget* parent)
     setMinimumSize(640, 360);
 }
 
-bool StreamWindow::init_renderer(ID3D11Device* device, uint32_t width, uint32_t height) {
+bool StreamWindow::init_renderer(ID3D11Device* device, uint32_t width, uint32_t height, DXGI_FORMAT format) {
     HWND hwnd = reinterpret_cast<HWND>(winId());
     if (!hwnd) {
         log::error("RENDER", "No HWND available");
         return false;
     }
 
-    resize(width, height);
-    initialized_ = renderer_.init(device, hwnd, width, height);
+    // Size the window to match host resolution if it fits on screen,
+    // otherwise keep current window size. The swap chain uses the actual
+    // client area size, and the Video Processor scales frame -> window.
+    QSize screen_size = screen() ? screen()->availableSize() : QSize(1920, 1080);
+    uint32_t target_w = std::min<uint32_t>(width, screen_size.width() * 9 / 10);
+    uint32_t target_h = std::min<uint32_t>(height, screen_size.height() * 9 / 10);
+    // Preserve aspect ratio
+    double frame_aspect = static_cast<double>(width) / height;
+    if (target_w / frame_aspect <= target_h) {
+        target_h = static_cast<uint32_t>(target_w / frame_aspect);
+    } else {
+        target_w = static_cast<uint32_t>(target_h * frame_aspect);
+    }
+    resize(target_w, target_h);
+
+    // Use actual widget client size for swap chain, frame size for VP input
+    uint32_t client_w = static_cast<uint32_t>(this->width());
+    uint32_t client_h = static_cast<uint32_t>(this->height());
+    initialized_ = renderer_.init(device, hwnd, width, height, client_w, client_h, format);
     return initialized_;
 }
 

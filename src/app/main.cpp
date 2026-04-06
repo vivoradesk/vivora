@@ -75,6 +75,8 @@ static int run_host(uint16_t port) {
     uint16_t frame_seq = 0;
     uint64_t total_frames = 0;
     auto start = Clock::now();
+    auto last_idr_time = Clock::now();
+    static constexpr int64_t IDR_INTERVAL_MS = 2000; // Force IDR every 2 seconds
 
     // Force initial mouse movement for DXGI
     INPUT mi = {};
@@ -99,11 +101,32 @@ static int run_host(uint16_t port) {
         uint64_t pts = std::chrono::duration_cast<std::chrono::microseconds>(
             frame.capture_time.time_since_epoch()).count();
 
+        bool force_encode = false;
+
         // Request IDR when new client connects
         if (session.idr_needed()) {
             encoder->request_idr();
             session.clear_idr_needed();
+            last_idr_time = Clock::now();
+            force_encode = true;
             log::info("HOST", "IDR requested for new client");
+        }
+
+        // Periodic IDR for recovery from packet loss
+        if (session.state() == host::SessionState::Connected) {
+            auto since_idr = std::chrono::duration_cast<std::chrono::milliseconds>(
+                Clock::now() - last_idr_time).count();
+            if (since_idr >= IDR_INTERVAL_MS) {
+                encoder->request_idr();
+                last_idr_time = Clock::now();
+                force_encode = true;
+            }
+        }
+
+        // Skip encoding if screen content didn't change (cursor-only update)
+        if (!frame.content_changed && !force_encode) {
+            capture->release_frame(frame);
+            continue;
         }
 
         if (!encoder->encode(frame.texture, pts)) {
@@ -183,6 +206,8 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
     bool renderer_ready = false;
     bool got_keyframe = false;
     uint64_t frames_decoded = 0;
+    uint64_t last_drops = 0;
+    auto last_idr_request = TimePoint{};
     auto start = Clock::now();
 
     // Poll timer — drives network + decode + render at ~1ms intervals
@@ -194,6 +219,23 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
             log::info("VIEW", "Disconnected from host");
             app.quit();
             return;
+        }
+
+        // Detect frame drops and request IDR for recovery
+        uint64_t drops = session.frames_dropped();
+        if (drops > last_drops) {
+            auto now = Clock::now();
+            auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_idr_request).count();
+            // Rate-limit IDR requests to at most once per 500ms
+            if (since_idr_req > 500) {
+                session.request_idr();
+                last_idr_request = now;
+                got_keyframe = false; // Wait for new keyframe before decoding
+                log::warn("VIEW", "Frame loss detected (%llu dropped), requested IDR",
+                    (unsigned long long)(drops - last_drops));
+            }
+            last_drops = drops;
         }
 
         // Feed received frames to decoder
@@ -216,12 +258,16 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
         // Get decoded frames and render
         DecodedFrame decoded;
         while (decoder->get_frame(decoded)) {
-            if (!renderer_ready && decoded.width > 0 && decoded.height > 0) {
+            if (!renderer_ready && decoded.width > 0 && decoded.height > 0 && decoded.texture) {
+                // Query texture format to detect HDR (P010) vs SDR (NV12)
+                D3D11_TEXTURE2D_DESC tex_desc = {};
+                decoded.texture->GetDesc(&tex_desc);
                 renderer_ready = window.init_renderer(
-                    decoder->get_device(), decoded.width, decoded.height);
+                    decoder->get_device(), decoded.width, decoded.height, tex_desc.Format);
                 if (renderer_ready) {
                     window.set_host_resolution(decoded.width, decoded.height);
-                    log::info("VIEW", "Renderer started: %ux%u", decoded.width, decoded.height);
+                    log::info("VIEW", "Renderer started: %ux%u, format=%u",
+                              decoded.width, decoded.height, tex_desc.Format);
                 }
             }
 

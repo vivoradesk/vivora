@@ -30,8 +30,12 @@ public:
     // Send an input event to the host
     void send_input(const protocol::InputEvent& event);
 
+    // Request IDR frame from host (e.g. after detecting frame loss)
+    void request_idr();
+
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }
+    uint64_t frames_dropped() const;
     VideoReceiver* receiver() { return receiver_.get(); }
 
 private:

@@ -10,6 +10,7 @@ enum class PacketType : uint8_t {
     Audio       = 0x02,
     Input       = 0x03,
     Control     = 0x04,
+    IdrRequest  = 0x05,  // Client requests IDR from host
     Ping        = 0x10,
     Pong        = 0x11,
 };

@@ -14,7 +14,7 @@ class StreamWindow : public QWidget {
 public:
     explicit StreamWindow(QWidget* parent = nullptr);
 
-    bool init_renderer(ID3D11Device* device, uint32_t width, uint32_t height);
+    bool init_renderer(ID3D11Device* device, uint32_t width, uint32_t height, DXGI_FORMAT format);
     bool render_frame(ID3D11Texture2D* texture, uint32_t subresource);
 
     // Set host screen resolution for coordinate mapping

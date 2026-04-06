@@ -22,6 +22,9 @@ struct CapturedFrame {
     ID3D11Texture2D* texture = nullptr;
 #endif
 
+    // True if desktop image content changed (not just cursor movement)
+    bool content_changed = false;
+
     // Dirty rectangles — regions that changed since last frame
     std::vector<Rect> dirty_rects;
 

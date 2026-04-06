@@ -184,6 +184,10 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
     frame.frame_index = ++frame_count_;
     frame.capture_time = Clock::now();
 
+    // Desktop image changed if a present occurred or frames accumulated
+    frame.content_changed = (frame_info.LastPresentTime.QuadPart != 0) ||
+                            (frame_info.AccumulatedFrames > 0);
+
     // Get dirty rects
     frame.dirty_rects.clear();
     if (frame_info.TotalMetadataBufferSize > 0) {
