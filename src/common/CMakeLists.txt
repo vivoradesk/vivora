@@ -9,6 +9,8 @@ add_library(deskbeam_common STATIC
 if(WIN32)
     target_sources(deskbeam_common PRIVATE net/winsock_socket.cpp)
     target_link_libraries(deskbeam_common PUBLIC ws2_32)
+else()
+    target_sources(deskbeam_common PRIVATE net/posix_socket.cpp)
 endif()
 
 target_include_directories(deskbeam_common PUBLIC

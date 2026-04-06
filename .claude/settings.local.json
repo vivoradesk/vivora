@@ -56,7 +56,15 @@
       "Bash(./decode_test.exe)",
       "Bash(git rm:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(ssh:*)",
+      "Bash(rsync -az --delete --exclude 'build/' --exclude '.git/' --exclude '.claude/' --exclude '*.log' --exclude 'diff.png' ./ myronov@macbookair.mshome.net:~/src/DeskBeam/)",
+      "Bash(tar --exclude='./build' --exclude='./.git' --exclude='./.claude' --exclude='*.log' --exclude='./diff.png' -cf - .)",
+      "Bash(ipconfig)",
+      "Bash(tar --exclude='./build' --exclude='./.git' --exclude='./.claude' --exclude='*.log' --exclude='./diff.png' -cf - src)",
+      "Bash(./build/bin/Release/deskbeam.exe:*)",
+      "Bash(tar -cf - src/app/main.cpp src/client/render/mac_video_view.h src/client/render/mac_video_view.mm src/app/CMakeLists.txt CMakeLists.txt)",
+      "Bash(tar -cf - src/client/render/mac_video_view.mm)"
     ]
   }
 }

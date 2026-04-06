@@ -14,10 +14,17 @@
 #include "client/net/client_session.h"
 #include "client/decode/video_decoder.h"
 #include "client/render/stream_window.h"
-#endif
-
 #include <QApplication>
 #include <QTimer>
+#endif
+
+#ifdef DESKBEAM_MACOS
+#include "client/net/client_session.h"
+#include "client/render/mac_video_view.h"
+#include "common/utils/types.h"
+#include <thread>
+#include <chrono>
+#endif
 
 static void print_usage(const char* prog) {
     std::printf("DeskBeam v0.1.0 — low-latency remote desktop\n\n");
@@ -296,6 +303,82 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
 
 #endif // DESKBEAM_WINDOWS
 
+#ifdef DESKBEAM_MACOS
+
+static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t port) {
+    using namespace deskbeam;
+
+    MacVideoView view;
+    if (!view.create_window("DeskBeam", 1280, 720)) {
+        log::error("VIEW", "Failed to create window");
+        return 1;
+    }
+
+    client::ClientSession session;
+    if (!session.start(host_ip, port)) {
+        log::error("VIEW", "Failed to start client session");
+        return 1;
+    }
+    log::info("VIEW", "Connecting to %s:%u", host_ip, port);
+
+    auto start = Clock::now();
+    uint64_t frames_received = 0;
+    uint64_t frames_rendered = 0;
+    uint64_t bytes_received = 0;
+    uint64_t last_logged_frames = 0;
+    bool got_keyframe = false;
+
+    while (!view.should_close()) {
+        view.pump_events();
+        session.poll();
+
+        if (session.state() == client::SessionState::Disconnected && frames_received > 0) {
+            log::info("VIEW", "Disconnected from host");
+            break;
+        }
+
+        net::AssembledFrame frame;
+        while (session.pop_frame(frame)) {
+            frames_received++;
+            bytes_received += frame.data.size();
+
+            if (!got_keyframe) {
+                if (frame.keyframe) {
+                    got_keyframe = true;
+                    log::info("VIEW", "Got keyframe seq=%u (%zu bytes), starting render",
+                              frame.seq_no, frame.data.size());
+                } else {
+                    continue;
+                }
+            }
+
+            if (view.submit_frame(frame.data.data(), frame.data.size(),
+                                  frame.timestamp, frame.keyframe)) {
+                frames_rendered++;
+            }
+        }
+
+        if (frames_received >= last_logged_frames + 60) {
+            last_logged_frames = frames_received;
+            auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+            log::info("VIEW", "RX: %llu (%.1f fps, %.2f MB, %llu dropped), rendered: %llu, RTT: %.1fms",
+                (unsigned long long)frames_received,
+                frames_received / elapsed,
+                bytes_received / 1024.0 / 1024.0,
+                (unsigned long long)session.frames_dropped(),
+                (unsigned long long)frames_rendered,
+                session.rtt_ms());
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    session.stop();
+    return 0;
+}
+
+#endif // DESKBEAM_MACOS
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -332,12 +415,20 @@ int main(int argc, char* argv[]) {
     if (mode_host) {
         return run_host(port);
     }
+#endif
+#if defined(DESKBEAM_WINDOWS) || defined(DESKBEAM_MACOS)
     if (mode_view) {
         if (!host_ip) {
             std::fprintf(stderr, "Error: --view requires an IP address\n");
             return 1;
         }
         return run_view(argc, argv, host_ip, port);
+    }
+#endif
+#ifdef DESKBEAM_MACOS
+    if (mode_host) {
+        std::fprintf(stderr, "Error: host mode not yet implemented on macOS\n");
+        return 1;
     }
 #endif
 
