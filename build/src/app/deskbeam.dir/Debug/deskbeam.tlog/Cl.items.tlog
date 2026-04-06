@@ -1,7 +1,0 @@
-C:\src\DeskBeam\src\app\main.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\main.obj
-C:\src\DeskBeam\src\host\capture\dxgi_capture.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\dxgi_capture.obj
-C:\src\DeskBeam\src\host\encode\amf_encoder.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\amf_encoder.obj
-C:\src\DeskBeam\src\host\session\video_sender.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\video_sender.obj
-C:\src\DeskBeam\src\host\session\host_session.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\host_session.obj
-C:\src\DeskBeam\src\client\net\video_receiver.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\video_receiver.obj
-C:\src\DeskBeam\src\client\net\client_session.cpp;C:\src\DeskBeam\build\src\app\deskbeam.dir\Debug\client_session.obj
