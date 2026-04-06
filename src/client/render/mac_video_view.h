@@ -2,8 +2,11 @@
 
 #ifdef DESKBEAM_MACOS
 
+#include "common/protocol/input_event.h"
+
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 
 namespace deskbeam {
 
@@ -30,6 +33,10 @@ public:
 
     // True if the user closed the window.
     bool should_close() const { return should_close_; }
+
+    // Set input event callback. Called from main thread during pump_events().
+    using InputCallback = std::function<void(const protocol::InputEvent&)>;
+    void set_input_callback(InputCallback cb);
 
 private:
     void* impl_;           // opaque pointer to Obj-C++ impl struct

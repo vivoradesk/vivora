@@ -321,6 +321,10 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
     }
     log::info("VIEW", "Connecting to %s:%u", host_ip, port);
 
+    view.set_input_callback([&session](const protocol::InputEvent& ev) {
+        session.send_input(ev);
+    });
+
     auto start = Clock::now();
     uint64_t frames_received = 0;
     uint64_t frames_rendered = 0;
