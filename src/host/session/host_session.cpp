@@ -4,6 +4,7 @@
 #include "common/utils/log.h"
 #include <cstring>
 #include <chrono>
+#include <vector>
 
 namespace deskbeam::host {
 
@@ -106,6 +107,19 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             if (state_ == SessionState::Connected) {
                 idr_needed_ = true;
                 log::info("HostSession", "Client requested IDR (frame loss recovery)");
+            }
+            break;
+        case protocol::PacketType::NackRequest:
+            if (state_ == SessionState::Connected && sender_ && payload_len >= 3) {
+                uint16_t seq = payload[0] | (payload[1] << 8);
+                uint8_t count = payload[2];
+                if (payload_len >= 3u + count * 2u) {
+                    std::vector<uint16_t> indices(count);
+                    for (uint8_t i = 0; i < count; ++i) {
+                        indices[i] = payload[3 + i * 2] | (payload[4 + i * 2] << 8);
+                    }
+                    sender_->handle_nack(seq, indices.data(), count, client_addr_);
+                }
             }
             break;
         default:

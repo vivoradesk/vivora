@@ -86,6 +86,22 @@ void ClientSession::poll() {
         if (since_recv > DISCONNECT_TIMEOUT_MS) {
             log::warn("ClientSession", "Host timed out");
             state_ = SessionState::Disconnected;
+            return;
+        }
+
+        // NACK processing: ask host to retransmit missing fragments.
+        // gap_ms: how long to wait before NACKing gaps within a frame (small,
+        //   ~2x RTT floor or 4ms — fragments arrive within 1ms on LAN).
+        // rate_limit_ms: minimum interval between re-requesting the same fragment,
+        //   roughly 1.5x measured RTT, floored at 8ms.
+        if (receiver_) {
+            int64_t gap_ms = 4;
+            int64_t rl_ms = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_ * 1.5) : 8;
+            if (rl_ms < 8) rl_ms = 8;
+            auto batches = receiver_->collect_nacks(gap_ms, rl_ms);
+            for (const auto& b : batches) {
+                send_nack(b.seq_no, b.frag_indices.data(), b.frag_indices.size());
+            }
         }
     }
 }
@@ -170,6 +186,28 @@ void ClientSession::send_input(const protocol::InputEvent& event) {
     pkt.header.timestamp = 0;
     pkt.header.flags = 0;
     pkt.payload = std::move(payload);
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+
+    auto wire = pkt.serialize();
+    socket_->send_to(wire.data(), wire.size(), host_addr_);
+}
+
+void ClientSession::send_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count) {
+    if (state_ != SessionState::Connected || !socket_ || count == 0 || count > 255) return;
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::NackRequest;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.payload.resize(3 + count * 2);
+    pkt.payload[0] = static_cast<uint8_t>(seq_no & 0xFF);
+    pkt.payload[1] = static_cast<uint8_t>((seq_no >> 8) & 0xFF);
+    pkt.payload[2] = static_cast<uint8_t>(count);
+    for (size_t i = 0; i < count; ++i) {
+        pkt.payload[3 + i * 2]     = static_cast<uint8_t>(frag_indices[i] & 0xFF);
+        pkt.payload[3 + i * 2 + 1] = static_cast<uint8_t>((frag_indices[i] >> 8) & 0xFF);
+    }
     pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
 
     auto wire = pkt.serialize();

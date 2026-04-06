@@ -53,7 +53,10 @@
       "Bash(taskkill /f /im deskbeam.exe)",
       "Bash(taskkill:*)",
       "Bash(tasklist)",
-      "Bash(./decode_test.exe)"
+      "Bash(./decode_test.exe)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

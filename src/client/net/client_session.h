@@ -33,6 +33,9 @@ public:
     // Request IDR frame from host (e.g. after detecting frame loss)
     void request_idr();
 
+    // Send NACK to host requesting retransmit of specific lost fragments.
+    void send_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count);
+
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }
     uint64_t frames_dropped() const;

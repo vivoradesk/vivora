@@ -22,6 +22,11 @@ public:
     // Pop next complete reassembled frame. Returns false if none available.
     bool pop_frame(net::AssembledFrame& frame) { return assembler_.pop_frame(frame); }
 
+    // Collect pending fragments that need retransmit (see FrameAssembler::collect_nacks).
+    std::vector<net::NackBatch> collect_nacks(int64_t gap_ms, int64_t rate_limit_ms) {
+        return assembler_.collect_nacks(gap_ms, rate_limit_ms);
+    }
+
     uint64_t packets_received() const { return packets_received_; }
     uint64_t bytes_received() const { return bytes_received_; }
     uint64_t frames_completed() const { return assembler_.frames_completed(); }
