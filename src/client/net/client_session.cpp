@@ -148,6 +148,14 @@ void ClientSession::handle_control(const uint8_t* payload, size_t len) {
 }
 
 void ClientSession::handle_ping(const uint8_t* payload, size_t len) {
+    // Ping payload carries host-measured RTT (microseconds) in bytes [4..8).
+    if (len >= 8) {
+        uint32_t rtt_us = static_cast<uint32_t>(payload[4])
+                        | (static_cast<uint32_t>(payload[5]) << 8)
+                        | (static_cast<uint32_t>(payload[6]) << 16)
+                        | (static_cast<uint32_t>(payload[7]) << 24);
+        rtt_ms_ = rtt_us / 1000.0;
+    }
     // Reply with Pong, echoing the ping payload
     protocol::Packet pong;
     pong.header.type = protocol::PacketType::Pong;

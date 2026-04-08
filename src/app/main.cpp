@@ -156,10 +156,12 @@ static int run_host(uint16_t port) {
 
             if (total_frames % 60 == 0) {
                 auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
-                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, state: %s",
+                uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
+                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, state: %s",
                     (unsigned long long)total_frames,
                     total_frames / elapsed,
                     session.rtt_ms(),
+                    (unsigned long long)retx,
                     session.state() == host::SessionState::Connected ? "connected" :
                     session.state() == host::SessionState::WaitingForClient ? "waiting" :
                     "disconnected");
@@ -330,6 +332,8 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
     uint64_t frames_rendered = 0;
     uint64_t bytes_received = 0;
     uint64_t last_logged_frames = 0;
+    uint64_t last_drops = 0;
+    auto last_idr_request = TimePoint{};
     bool got_keyframe = false;
 
     while (!view.should_close()) {
@@ -339,6 +343,22 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
         if (session.state() == client::SessionState::Disconnected && frames_received > 0) {
             log::info("VIEW", "Disconnected from host");
             break;
+        }
+
+        // Drop detection → IDR request for recovery (rate-limited).
+        uint64_t drops = session.frames_dropped();
+        if (drops > last_drops) {
+            auto now = Clock::now();
+            auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_idr_request).count();
+            if (since_idr_req > 500) {
+                session.request_idr();
+                last_idr_request = now;
+                got_keyframe = false;
+                log::warn("VIEW", "Frame loss detected (%llu dropped), requested IDR",
+                    (unsigned long long)(drops - last_drops));
+            }
+            last_drops = drops;
         }
 
         net::AssembledFrame frame;

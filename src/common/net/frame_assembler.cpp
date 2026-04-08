@@ -5,6 +5,19 @@
 
 namespace deskbeam::net {
 
+void FrameAssembler::finalize_frame(uint16_t /*seq*/, PendingFrame& pf) {
+    size_t total = 0;
+    for (auto& f : pf.fragments) total += f.size();
+    pf.assembled.reserve(total);
+    for (auto& f : pf.fragments) {
+        pf.assembled.insert(pf.assembled.end(), f.begin(), f.end());
+    }
+    // Fragments no longer needed; free memory.
+    pf.fragments.clear();
+    pf.fragments.shrink_to_fit();
+    pf.complete = true;
+}
+
 bool FrameAssembler::feed(const protocol::Packet& packet) {
     if (packet.header.type != protocol::PacketType::Video)
         return false;
@@ -14,15 +27,40 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
     uint16_t seq = packet.header.seq_no;
     bool is_fragment = (packet.header.flags & protocol::FLAG_FRAGMENT) != 0;
 
+    // Drop late-arriving fragments for seqs we've already delivered past.
+    if (has_deliver_seq_) {
+        int16_t delta = static_cast<int16_t>(seq - next_deliver_seq_);
+        if (delta < 0) return false;
+    }
+
+    // Track newest seen sequence (wraparound-aware).
+    if (!has_seq_) {
+        newest_seq_ = seq;
+        has_seq_ = true;
+    } else {
+        int16_t delta = static_cast<int16_t>(seq - newest_seq_);
+        if (delta > 0) newest_seq_ = seq;
+    }
+
+    // Initialize delivery cursor on the very first frame we ever see.
+    if (!has_deliver_seq_) {
+        next_deliver_seq_ = seq;
+        has_deliver_seq_ = true;
+    }
+
     if (!is_fragment) {
-        // Non-fragmented frame — pass through directly
-        AssembledFrame frame;
-        frame.data = packet.payload;
-        frame.seq_no = seq;
-        frame.timestamp = packet.header.timestamp;
-        frame.keyframe = (packet.header.flags & protocol::FLAG_KEYFRAME) != 0;
-        completed_.push(std::move(frame));
-        frames_completed_++;
+        // Non-fragmented frame — create a synthetic complete PendingFrame
+        // so it goes through in-order delivery.
+        auto& pf = pending_[seq];
+        if (pf.frag_count == 0) {
+            pf.frag_count = 1;
+            pf.timestamp = packet.header.timestamp;
+            pf.first_arrival = Clock::now();
+        }
+        pf.keyframe = (packet.header.flags & protocol::FLAG_KEYFRAME) != 0;
+        pf.assembled = packet.payload;
+        pf.complete = true;
+        try_deliver();
         return true;
     }
 
@@ -46,16 +84,6 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
         pf.first_arrival = Clock::now();
     }
 
-    // Track newest seen sequence for NACK "newer frame has started" heuristic.
-    // 16-bit wraparound aware: `seq - newest_seq_` treated as signed 16-bit.
-    if (!has_seq_) {
-        newest_seq_ = seq;
-        has_seq_ = true;
-    } else {
-        int16_t delta = static_cast<int16_t>(seq - newest_seq_);
-        if (delta > 0) newest_seq_ = seq;
-    }
-
     if (packet.header.flags & protocol::FLAG_KEYFRAME)
         pf.keyframe = true;
 
@@ -68,26 +96,41 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
     }
 
     // Check if complete
-    if (pf.received == pf.frag_count) {
-        AssembledFrame frame;
-        frame.seq_no = seq;
-        frame.timestamp = pf.timestamp;
-        frame.keyframe = pf.keyframe;
-
-        // Concatenate all fragments
-        size_t total = 0;
-        for (auto& f : pf.fragments) total += f.size();
-        frame.data.reserve(total);
-        for (auto& f : pf.fragments)
-            frame.data.insert(frame.data.end(), f.begin(), f.end());
-
-        completed_.push(std::move(frame));
-        frames_completed_++;
-        pending_.erase(seq);
+    if (pf.received == pf.frag_count && !pf.complete) {
+        finalize_frame(seq, pf);
+        try_deliver();
         return true;
     }
 
     return false;
+}
+
+void FrameAssembler::try_deliver() {
+    if (!has_deliver_seq_) return;
+
+    while (true) {
+        auto it = pending_.find(next_deliver_seq_);
+        if (it == pending_.end()) {
+            // Frame not in pending. Either never received or was expired.
+            // Skip only if we know newer frames exist — otherwise wait.
+            int16_t ahead = static_cast<int16_t>(newest_seq_ - next_deliver_seq_);
+            if (ahead <= 0) return;
+            next_deliver_seq_++;
+            continue;
+        }
+        auto& pf = it->second;
+        if (!pf.complete) return; // wait for this frame to finish
+
+        AssembledFrame frame;
+        frame.seq_no = next_deliver_seq_;
+        frame.timestamp = pf.timestamp;
+        frame.keyframe = pf.keyframe;
+        frame.data = std::move(pf.assembled);
+        completed_.push(std::move(frame));
+        frames_completed_++;
+        pending_.erase(it);
+        next_deliver_seq_++;
+    }
 }
 
 bool FrameAssembler::pop_frame(AssembledFrame& frame) {
@@ -105,6 +148,7 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
     for (auto& kv : pending_) {
         uint16_t seq = kv.first;
         auto& pf = kv.second;
+        if (pf.complete) continue;
         if (pf.received >= pf.frag_count) continue;
 
         // Eligibility: newer frame has started, OR this frame is older than gap_ms.
@@ -141,17 +185,20 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
 
 void FrameAssembler::expire_stale() {
     auto now = Clock::now();
+    bool any_dropped = false;
     auto it = pending_.begin();
     while (it != pending_.end()) {
         auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - it->second.first_arrival).count();
-        if (age_ms > FRAME_TIMEOUT_MS) {
+        if (!it->second.complete && age_ms > FRAME_TIMEOUT_MS) {
             frames_dropped_++;
+            any_dropped = true;
             it = pending_.erase(it);
         } else {
             ++it;
         }
     }
+    if (any_dropped) try_deliver();
 }
 
 } // namespace deskbeam::net

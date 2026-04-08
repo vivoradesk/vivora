@@ -66,7 +66,9 @@
       "Bash(tar -cf - src/app/main.cpp src/client/render/mac_video_view.h src/client/render/mac_video_view.mm src/app/CMakeLists.txt CMakeLists.txt)",
       "Bash(tar -cf - src/client/render/mac_video_view.mm)",
       "Bash(ls src/client/render/stream_window.*)",
-      "Bash(tar -cf - src/app/main.cpp src/client/render/mac_video_view.h src/client/render/mac_video_view.mm)"
+      "Bash(tar -cf - src/app/main.cpp src/client/render/mac_video_view.h src/client/render/mac_video_view.mm)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 build/bin/Release/host.log)",
+      "Bash(tar -cf - src/common/net/frame_assembler.cpp src/common/net/frame_assembler.h src/host/session/host_session.cpp src/client/net/client_session.cpp src/app/main.cpp)"
     ]
   }
 }

@@ -170,12 +170,18 @@ void HostSession::send_ping() {
     ping.header.seq_no = 0;
     ping.header.timestamp = 0;
     ping.header.flags = 0;
-    ping.payload.resize(4);
+    // Payload: seq(4) | rtt_us(4 LE). Client uses rtt_us to tune NACK timing.
+    uint32_t rtt_us = static_cast<uint32_t>(rtt_ms_ * 1000.0);
+    ping.payload.resize(8);
     ping.payload[0] = static_cast<uint8_t>(ping_seq_ & 0xFF);
     ping.payload[1] = static_cast<uint8_t>((ping_seq_ >> 8) & 0xFF);
     ping.payload[2] = static_cast<uint8_t>((ping_seq_ >> 16) & 0xFF);
     ping.payload[3] = static_cast<uint8_t>((ping_seq_ >> 24) & 0xFF);
-    ping.header.payload_len = 4;
+    ping.payload[4] = static_cast<uint8_t>(rtt_us & 0xFF);
+    ping.payload[5] = static_cast<uint8_t>((rtt_us >> 8) & 0xFF);
+    ping.payload[6] = static_cast<uint8_t>((rtt_us >> 16) & 0xFF);
+    ping.payload[7] = static_cast<uint8_t>((rtt_us >> 24) & 0xFF);
+    ping.header.payload_len = 8;
 
     auto wire = ping.serialize();
     socket_->send_to(wire.data(), wire.size(), client_addr_);

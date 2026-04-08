@@ -47,13 +47,17 @@ private:
         uint16_t received = 0;
         uint32_t timestamp = 0;
         bool keyframe = false;
+        bool complete = false;
         std::vector<std::vector<uint8_t>> fragments;
+        std::vector<uint8_t> assembled;  // populated when complete
         TimePoint first_arrival;
         // Last NACK request time per fragment index (0 = never requested).
         std::vector<TimePoint> nack_sent_at;
     };
 
     void expire_stale();
+    void try_deliver();
+    void finalize_frame(uint16_t seq, PendingFrame& pf);
 
     std::unordered_map<uint16_t, PendingFrame> pending_;
     std::queue<AssembledFrame> completed_;
@@ -61,6 +65,8 @@ private:
     uint64_t frames_dropped_ = 0;
     uint16_t newest_seq_ = 0;
     bool has_seq_ = false;
+    uint16_t next_deliver_seq_ = 0;
+    bool has_deliver_seq_ = false;
 
     static constexpr int64_t FRAME_TIMEOUT_MS = 100;
 };

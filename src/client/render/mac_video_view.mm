@@ -61,6 +61,10 @@ static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev);
 // Returns true if a mapping exists. Extended-key handling relies on vk_code
 // on the Windows injector side (arrows, nav keys, etc.).
 static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk);
+// Compute video-space normalized coords accounting for letterbox/pillarbox.
+// px, py are in view space with top-left origin.
+static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
+                            double vw, double vh, float* out_xn, float* out_yn);
 }
 
 @implementation DBStreamView
@@ -102,14 +106,12 @@ static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk
 
 - (void)sendMouseMove:(NSEvent*)event {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
-    CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
-    if (w <= 0 || h <= 0) return;
-    // NSView default coord: origin bottom-left. Flip Y.
-    float xn = (float)(p.x / w);
-    float yn = (float)((h - p.y) / h);
-    if (xn < 0) xn = 0; if (xn > 1) xn = 1;
-    if (yn < 0) yn = 0; if (yn > 1) yn = 1;
+    CGFloat vw = self.bounds.size.width;
+    CGFloat vh = self.bounds.size.height;
+    if (vw <= 0 || vh <= 0 || !impl) return;
+
+    float xn = 0, yn = 0;
+    deskbeam::normalize_mouse(impl, p.x, vh - p.y, vw, vh, &xn, &yn);
 
     deskbeam::protocol::InputEvent ev;
     ev.type = deskbeam::protocol::InputEventType::MouseMove;
@@ -225,12 +227,47 @@ struct MacVideoViewImpl {
     std::vector<uint8_t> vps, sps, pps;
     bool have_params = false;
     uint64_t frames_submitted = 0;
+    uint32_t host_w = 0;
+    uint32_t host_h = 0;
 
     MacVideoView::InputCallback input_cb;
 };
 
 static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev) {
     if (impl && impl->input_cb) impl->input_cb(ev);
+}
+
+static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
+                            double vw, double vh, float* out_xn, float* out_yn) {
+    float xn, yn;
+    if (impl && impl->host_w > 0 && impl->host_h > 0) {
+        // AVLayerVideoGravityResizeAspect — fit preserving aspect ratio.
+        double host_aspect = (double)impl->host_w / (double)impl->host_h;
+        double view_aspect = vw / vh;
+        double video_w, video_h, off_x, off_y;
+        if (view_aspect > host_aspect) {
+            // Pillarbox: bars on left/right.
+            video_h = vh;
+            video_w = vh * host_aspect;
+            off_x = (vw - video_w) * 0.5;
+            off_y = 0;
+        } else {
+            // Letterbox: bars on top/bottom.
+            video_w = vw;
+            video_h = vw / host_aspect;
+            off_x = 0;
+            off_y = (vh - video_h) * 0.5;
+        }
+        xn = (float)((px - off_x) / video_w);
+        yn = (float)((py - off_y) / video_h);
+    } else {
+        xn = (float)(px / vw);
+        yn = (float)(py / vh);
+    }
+    if (xn < 0) xn = 0; if (xn > 1) xn = 1;
+    if (yn < 0) yn = 0; if (yn > 1) yn = 1;
+    *out_xn = xn;
+    *out_yn = yn;
 }
 
 // Mac kVK_ → (Windows PS/2 set 1 scan code, Windows VK).
@@ -458,6 +495,8 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl->view) return false;
 
+    @autoreleasepool {
+
     auto nals = split_annexb(data, len);
     if (nals.empty()) return false;
 
@@ -494,6 +533,8 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
             }
             impl->have_params = true;
             CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(impl->format_desc);
+            impl->host_w = static_cast<uint32_t>(dims.width);
+            impl->host_h = static_cast<uint32_t>(dims.height);
             log::info(TAG, "HEVC format description ready: %dx%d", dims.width, dims.height);
         }
     }
@@ -516,25 +557,25 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     }
     if (avcc.empty()) return false;
 
-    // Wrap in CMBlockBuffer (copy — layer keeps it until displayed).
+    // Wrap in CMBlockBuffer. Allocate with malloc and hand ownership to CM
+    // (kCFAllocatorMalloc → CM frees with free() when the block is released).
+    void* block_mem = std::malloc(avcc.size());
+    if (!block_mem) return false;
+    std::memcpy(block_mem, avcc.data(), avcc.size());
+
     CMBlockBufferRef block = nullptr;
     OSStatus st = CMBlockBufferCreateWithMemoryBlock(
         kCFAllocatorDefault,
-        nullptr,                 // allocate internally
+        block_mem,
         avcc.size(),
-        kCFAllocatorDefault,
+        kCFAllocatorMalloc,      // CM owns block_mem, frees via free()
         nullptr,
         0, avcc.size(),
         0,
         &block);
     if (st != noErr || !block) {
         log::error(TAG, "CMBlockBufferCreateWithMemoryBlock failed: %d", (int)st);
-        return false;
-    }
-    st = CMBlockBufferReplaceDataBytes(avcc.data(), block, 0, avcc.size());
-    if (st != noErr) {
-        log::error(TAG, "CMBlockBufferReplaceDataBytes failed: %d", (int)st);
-        CFRelease(block);
+        std::free(block_mem);
         return false;
     }
 
@@ -581,6 +622,9 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
 
     impl->frames_submitted++;
     return true;
+
+    } // @autoreleasepool
+    return false;
 }
 
 } // namespace deskbeam
