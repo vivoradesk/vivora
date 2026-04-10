@@ -18,8 +18,25 @@ int VideoReceiver::poll() {
         if (static_cast<size_t>(n) < protocol::PacketHeader::WIRE_SIZE)
             continue; // runt packet
 
-        auto packet = protocol::Packet::deserialize(buf, static_cast<size_t>(n));
-        assembler_.feed(packet);
+        // Feed raw wire bytes to FEC decoder. It may recover lost packets.
+        std::vector<std::vector<uint8_t>> recovered;
+        fec_decoder_.feed(buf, static_cast<size_t>(n), recovered);
+
+        // Feed recovered packets to assembler
+        for (const auto& rec_wire : recovered) {
+            if (rec_wire.size() >= protocol::PacketHeader::WIRE_SIZE) {
+                auto rec_pkt = protocol::Packet::deserialize(
+                    rec_wire.data(), rec_wire.size());
+                assembler_.feed(rec_pkt);
+            }
+        }
+
+        // Feed original packet to assembler (skip FEC parity packets)
+        auto hdr = protocol::PacketHeader::deserialize(buf);
+        if (!(hdr.flags & protocol::FLAG_FEC)) {
+            auto packet = protocol::Packet::deserialize(buf, static_cast<size_t>(n));
+            assembler_.feed(packet);
+        }
     }
 
     return count;

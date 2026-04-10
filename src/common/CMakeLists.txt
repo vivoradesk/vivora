@@ -4,6 +4,7 @@ add_library(deskbeam_common STATIC
     protocol/packet.cpp
     net/frame_fragmenter.cpp
     net/frame_assembler.cpp
+    net/fec_codec.cpp
 )
 
 if(WIN32)

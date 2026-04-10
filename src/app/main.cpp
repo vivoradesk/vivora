@@ -196,11 +196,13 @@ static int run_host(uint16_t port, uint32_t manual_bitrate_bps) {
                 last_log_time = now;
                 last_log_frames = total_frames;
                 uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
-                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, state: %s",
+                uint8_t fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
+                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, fec_k: %d, state: %s",
                     (unsigned long long)total_frames,
                     inst_fps,
                     session.rtt_ms(),
                     (unsigned long long)retx,
+                    (int)fec_k,
                     session.state() == host::SessionState::Connected ? "connected" :
                     session.state() == host::SessionState::WaitingForClient ? "waiting" :
                     "disconnected");
@@ -594,11 +596,13 @@ static int run_host_mac(uint16_t port, uint32_t display_index, bool prefer_hdr,
                 last_log_time = now;
                 last_log_frames = total_frames;
                 uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
-                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, state: %s",
+                uint8_t fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
+                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, fec_k: %d, state: %s",
                     (unsigned long long)total_frames,
                     inst_fps,
                     session.rtt_ms(),
                     (unsigned long long)retx,
+                    (int)fec_k,
                     session.state() == host::SessionState::Connected ? "connected" :
                     session.state() == host::SessionState::WaitingForClient ? "waiting" :
                     "disconnected");

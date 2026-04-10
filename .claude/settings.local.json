@@ -86,7 +86,12 @@
       "Bash(wait)",
       "Bash(scp /tmp/patch2.tgz myronov@macbookair.mshome.net:/tmp/)",
       "Bash(scp /tmp/patch3.tgz myronov@macbookair.mshome.net:/tmp/)",
-      "Bash(scp /tmp/patch4.tgz myronov@macbookair.mshome.net:/tmp/)"
+      "Bash(scp /tmp/patch4.tgz myronov@macbookair.mshome.net:/tmp/)",
+      "Bash(scp src/common/net/fec_codec.h src/common/net/fec_codec.cpp myronov@192.168.137.153:~/src/DeskBeam/src/common/net/)",
+      "Bash(scp src/common/CMakeLists.txt myronov@192.168.137.153:~/src/DeskBeam/src/common/)",
+      "Bash(scp src/common/protocol/packet.h myronov@192.168.137.153:~/src/DeskBeam/src/common/protocol/)",
+      "Bash(scp src/host/session/video_sender.h src/host/session/video_sender.cpp myronov@192.168.137.153:~/src/DeskBeam/src/host/session/)",
+      "Bash(scp src/host/session/host_session.cpp myronov@192.168.137.153:~/src/DeskBeam/src/host/session/)"
     ]
   }
 }

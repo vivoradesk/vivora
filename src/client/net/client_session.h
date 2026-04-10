@@ -47,6 +47,8 @@ private:
     void handle_ping(const uint8_t* payload, size_t len);
     void send_hello();
 
+    void send_fec_report();
+
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<VideoReceiver> receiver_;
     SessionState state_ = SessionState::Disconnected;
@@ -54,9 +56,11 @@ private:
     TimePoint connect_start_;
     TimePoint last_hello_time_;
     TimePoint last_recv_time_;
+    TimePoint last_fec_report_time_;
     double rtt_ms_ = 0.0;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
+    static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;
 };
 
 } // namespace deskbeam::client

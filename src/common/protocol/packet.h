@@ -12,6 +12,7 @@ enum class PacketType : uint8_t {
     Control     = 0x04,
     IdrRequest  = 0x05,  // Client requests IDR from host
     NackRequest = 0x06,  // Client requests retransmit of lost fragments
+    FecReport   = 0x07,  // Client reports packet loss rate for adaptive FEC
     Ping        = 0x10,
     Pong        = 0x11,
 };

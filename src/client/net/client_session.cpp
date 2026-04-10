@@ -90,10 +90,6 @@ void ClientSession::poll() {
         }
 
         // NACK processing: ask host to retransmit missing fragments.
-        // gap_ms: how long to wait before NACKing gaps within a frame (small,
-        //   ~2x RTT floor or 4ms — fragments arrive within 1ms on LAN).
-        // rate_limit_ms: minimum interval between re-requesting the same fragment,
-        //   roughly 1.5x measured RTT, floored at 8ms.
         if (receiver_) {
             int64_t gap_ms = 4;
             int64_t rl_ms = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_ * 1.5) : 8;
@@ -101,6 +97,16 @@ void ClientSession::poll() {
             auto batches = receiver_->collect_nacks(gap_ms, rl_ms);
             for (const auto& b : batches) {
                 send_nack(b.seq_no, b.frag_indices.data(), b.frag_indices.size());
+            }
+        }
+
+        // Periodic FEC loss report — host uses this to adapt FEC group size K.
+        {
+            auto since_report = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_fec_report_time_).count();
+            if (since_report >= FEC_REPORT_INTERVAL_MS) {
+                send_fec_report();
+                last_fec_report_time_ = now;
             }
         }
     }
@@ -126,8 +132,24 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             handle_ping(payload, payload_len);
             break;
         case protocol::PacketType::Video: {
-            auto packet = protocol::Packet::deserialize(data, len);
-            receiver_->feed(packet);
+            // Feed raw wire bytes through FEC decoder → assembler.
+            // FEC packets (FLAG_FEC) are consumed by the decoder and
+            // don't reach the assembler; recovered packets are injected.
+            std::vector<std::vector<uint8_t>> recovered;
+            if (receiver_) {
+                receiver_->fec_feed(data, len, recovered);
+                for (const auto& rec : recovered) {
+                    if (rec.size() >= protocol::PacketHeader::WIRE_SIZE) {
+                        auto pkt = protocol::Packet::deserialize(rec.data(), rec.size());
+                        receiver_->feed(pkt);
+                    }
+                }
+                // Feed original to assembler (skip FEC parity packets)
+                if (!(header.flags & protocol::FLAG_FEC)) {
+                    auto packet = protocol::Packet::deserialize(data, len);
+                    receiver_->feed(packet);
+                }
+            }
             break;
         }
         default:
@@ -231,6 +253,24 @@ void ClientSession::request_idr() {
     pkt.header.timestamp = 0;
     pkt.header.flags = 0;
     pkt.header.payload_len = 0;
+
+    auto wire = pkt.serialize();
+    socket_->send_to(wire.data(), wire.size(), host_addr_);
+}
+
+void ClientSession::send_fec_report() {
+    if (state_ != SessionState::Connected || !socket_ || !receiver_) return;
+
+    float loss = receiver_->loss_rate();
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::FecReport;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.payload.resize(4);
+    std::memcpy(pkt.payload.data(), &loss, 4);  // float32 LE
+    pkt.header.payload_len = 4;
 
     auto wire = pkt.serialize();
     socket_->send_to(wire.data(), wire.size(), host_addr_);

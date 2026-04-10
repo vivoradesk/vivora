@@ -126,6 +126,13 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
                 }
             }
             break;
+        case protocol::PacketType::FecReport:
+            if (state_ == SessionState::Connected && sender_ && payload_len >= 4) {
+                float loss_rate;
+                std::memcpy(&loss_rate, payload, 4);
+                sender_->update_fec_from_loss(loss_rate);
+            }
+            break;
         default:
             break;
     }
