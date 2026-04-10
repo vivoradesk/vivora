@@ -29,7 +29,11 @@ public:
     int send_frame(const uint8_t* data, size_t data_len,
                    uint16_t frame_seq, uint32_t timestamp, bool keyframe);
 
-    void set_screen_resolution(uint32_t w, uint32_t h) { input_injector_.set_screen_resolution(w, h); }
+    void set_screen_resolution(uint32_t w, uint32_t h) {
+        pending_screen_w_ = w;
+        pending_screen_h_ = h;
+        if (input_injector_) input_injector_->set_screen_resolution(w, h);
+    }
     SessionState state() const { return state_; }
     bool idr_needed() const { return idr_needed_; }
     void clear_idr_needed() { idr_needed_ = false; }
@@ -46,7 +50,7 @@ private:
 
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<VideoSender> sender_;
-    InputInjector input_injector_;
+    std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
     net::SocketAddr client_addr_{};
     TimePoint last_recv_time_;
@@ -55,6 +59,8 @@ private:
     TimePoint ping_sent_time_;
     double rtt_ms_ = 0.0;
     bool idr_needed_ = false;
+    uint32_t pending_screen_w_ = 0;
+    uint32_t pending_screen_h_ = 0;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
 };

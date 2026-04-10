@@ -26,6 +26,10 @@ bool HostSession::start(uint16_t port) {
     socket_->set_recvbuf(1024 * 1024);
 
     sender_ = std::make_unique<VideoSender>(*socket_);
+    input_injector_ = InputInjector::create();
+    if (input_injector_ && pending_screen_w_ && pending_screen_h_) {
+        input_injector_->set_screen_resolution(pending_screen_w_, pending_screen_h_);
+    }
     state_ = SessionState::WaitingForClient;
     last_recv_time_ = Clock::now();
     last_ping_time_ = Clock::now();
@@ -192,7 +196,7 @@ void HostSession::handle_input(const uint8_t* payload, size_t len) {
 
     protocol::InputEvent event;
     if (protocol::InputEvent::deserialize(payload, len, event)) {
-        input_injector_.inject(event);
+        if (input_injector_) input_injector_->inject(event);
     }
 }
 

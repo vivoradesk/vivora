@@ -80,12 +80,33 @@ protocol::MouseButton StreamWindow::qt_to_button(Qt::MouseButton btn) {
 void StreamWindow::mouseMoveEvent(QMouseEvent* event) {
     protocol::InputEvent ev;
     ev.type = protocol::InputEventType::MouseMove;
-    // Map widget coords to 0..1 normalized coords
-    ev.x_norm = static_cast<float>(event->pos().x()) / static_cast<float>(std::max(width(), 1));
-    ev.y_norm = static_cast<float>(event->pos().y()) / static_cast<float>(std::max(height(), 1));
-    // Clamp
-    ev.x_norm = std::max(0.0f, std::min(1.0f, ev.x_norm));
-    ev.y_norm = std::max(0.0f, std::min(1.0f, ev.y_norm));
+
+    // The video is aspect-fitted inside the widget (the VideoProcessor
+    // letterboxes to match frame aspect). We must map the widget mouse
+    // coords to the video rect, not the full widget, otherwise the cursor
+    // drifts through the letterbox bars.
+    const double win_w = std::max(width(), 1);
+    const double win_h = std::max(height(), 1);
+    const double frame_aspect = (host_h_ > 0)
+        ? static_cast<double>(host_w_) / static_cast<double>(host_h_)
+        : win_w / win_h;
+    const double window_aspect = win_w / win_h;
+
+    double vid_w, vid_h;
+    if (frame_aspect > window_aspect) {
+        vid_w = win_w;
+        vid_h = win_w / frame_aspect;
+    } else {
+        vid_h = win_h;
+        vid_w = win_h * frame_aspect;
+    }
+    const double vid_x = (win_w - vid_w) * 0.5;
+    const double vid_y = (win_h - vid_h) * 0.5;
+
+    const double px = (static_cast<double>(event->pos().x()) - vid_x) / vid_w;
+    const double py = (static_cast<double>(event->pos().y()) - vid_y) / vid_h;
+    ev.x_norm = static_cast<float>(std::max(0.0, std::min(1.0, px)));
+    ev.y_norm = static_cast<float>(std::max(0.0, std::min(1.0, py)));
     send_event(ev);
 }
 

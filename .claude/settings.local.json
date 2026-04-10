@@ -68,7 +68,25 @@
       "Bash(ls src/client/render/stream_window.*)",
       "Bash(tar -cf - src/app/main.cpp src/client/render/mac_video_view.h src/client/render/mac_video_view.mm)",
       "Bash(iconv -f UTF-16LE -t UTF-8 build/bin/Release/host.log)",
-      "Bash(tar -cf - src/common/net/frame_assembler.cpp src/common/net/frame_assembler.h src/host/session/host_session.cpp src/client/net/client_session.cpp src/app/main.cpp)"
+      "Bash(tar -cf - src/common/net/frame_assembler.cpp src/common/net/frame_assembler.h src/host/session/host_session.cpp src/client/net/client_session.cpp src/app/main.cpp)",
+      "Bash(rsync -az --delete src/app/main.cpp src/app/CMakeLists.txt myronov@macbookair.mshome.net:src/DeskBeam/src/app/)",
+      "Bash(rsync -az src/host/capture/mac_screen_capture.h src/host/capture/mac_screen_capture.mm myronov@macbookair.mshome.net:src/DeskBeam/src/host/capture/)",
+      "Bash(rsync -az src/host/encode/mac_videotoolbox_encoder.h src/host/encode/mac_videotoolbox_encoder.mm myronov@macbookair.mshome.net:src/DeskBeam/src/host/encode/)",
+      "Bash(rsync -az --delete-excluded '--include=*.h' --include=input_injector_mac.mm --include=input_injector_windows.cpp --exclude=input_injector.cpp src/host/input/input_injector.h src/host/input/input_injector_mac.mm src/host/input/input_injector_windows.cpp myronov@macbookair.mshome.net:src/DeskBeam/src/host/input/)",
+      "Bash(rsync -az src/host/session/host_session.cpp src/host/session/host_session.h myronov@macbookair.mshome.net:src/DeskBeam/src/host/session/)",
+      "Bash(tar czf:*)",
+      "Bash(scp /tmp/mac_host_patch.tgz myronov@macbookair.mshome.net:/tmp/)",
+      "Bash(scp C:/src/DeskBeam/src/host/encode/mac_videotoolbox_encoder.h myronov@macbookair.mshome.net:src/DeskBeam/src/host/encode/)",
+      "Bash(scp C:/src/DeskBeam/src/host/capture/mac_screen_capture.mm myronov@macbookair.mshome.net:src/DeskBeam/src/host/capture/)",
+      "Bash(ls:*)",
+      "Bash(wc -l C:/src/DeskBeam/build/bin/Release/*.log)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 C:/src/DeskBeam/build/bin/Release/host.log)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 C:/src/DeskBeam/build/bin/Release/view.log)",
+      "Bash(scp src/host/capture/mac_screen_capture.mm myronov@macbookair.mshome.net:src/DeskBeam/src/host/capture/)",
+      "Bash(wait)",
+      "Bash(scp /tmp/patch2.tgz myronov@macbookair.mshome.net:/tmp/)",
+      "Bash(scp /tmp/patch3.tgz myronov@macbookair.mshome.net:/tmp/)",
+      "Bash(scp /tmp/patch4.tgz myronov@macbookair.mshome.net:/tmp/)"
     ]
   }
 }

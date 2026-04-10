@@ -1,4 +1,5 @@
 #include "common/utils/log.h"
+#include "common/codec/bitrate_controller.h"
 #include <cstdio>
 #include <cstring>
 
@@ -21,6 +22,9 @@
 #ifdef DESKBEAM_MACOS
 #include "client/net/client_session.h"
 #include "client/render/mac_video_view.h"
+#include "host/capture/mac_screen_capture.h"
+#include "host/encode/mac_videotoolbox_encoder.h"
+#include "host/session/host_session.h"
 #include "common/utils/types.h"
 #include <thread>
 #include <chrono>
@@ -29,14 +33,18 @@
 static void print_usage(const char* prog) {
     std::printf("DeskBeam v0.1.0 — low-latency remote desktop\n\n");
     std::printf("Usage:\n");
-    std::printf("  %s --host [--port PORT]        Start hosting (share this screen)\n", prog);
-    std::printf("  %s --view IP [--port PORT]     Connect to a host\n", prog);
-    std::printf("\nDefaults: port 9876\n");
+    std::printf("  %s --host [options]            Start hosting (share this screen)\n", prog);
+    std::printf("  %s --view IP [options]         Connect to a host\n", prog);
+    std::printf("\nOptions:\n");
+    std::printf("  --port PORT       UDP port (default 9876)\n");
+    std::printf("  --display N       Display index to capture (host, default 0)\n");
+    std::printf("  --hdr             Request HDR10 capture if the display supports it\n");
+    std::printf("  --bitrate Mbps    Manual encoder bitrate; default is auto from resolution\n");
 }
 
 #ifdef DESKBEAM_WINDOWS
 
-static int run_host(uint16_t port) {
+static int run_host(uint16_t port, uint32_t manual_bitrate_bps) {
     using namespace deskbeam;
 
     net::WinsockInit wsa;
@@ -55,13 +63,26 @@ static int run_host(uint16_t port) {
     auto res = capture->get_resolution();
     log::info("HOST", "Capture: %ux%u", res.width, res.height);
 
+    // Bitrate controller — picks a sensible default from resolution, allows
+    // a manual override via --bitrate, and exposes hooks for future
+    // congestion-control feedback (RTT / loss / bandwidth estimate).
+    codec::BitrateController bitrate_ctl(
+        codec::default_bitrate_for(res.width, res.height, 60));
+    if (manual_bitrate_bps != 0) {
+        bitrate_ctl.set_manual_target(manual_bitrate_bps);
+        bitrate_ctl.tick();
+    }
+    log::info("HOST", "Initial bitrate: %u kbps (%s)",
+              bitrate_ctl.current() / 1000,
+              manual_bitrate_bps ? "manual" : "auto");
+
     // Initialize encoder
     auto encoder = IVideoEncoder::create();
     EncoderConfig cfg;
     cfg.width = res.width;
     cfg.height = res.height;
     cfg.fps = 60;
-    cfg.bitrate_bps = 15'000'000;
+    cfg.bitrate_bps = bitrate_ctl.current();
     cfg.idr_period = 60;
     if (dxgi) cfg.input_format = dxgi->get_capture_format();
 
@@ -81,7 +102,8 @@ static int run_host(uint16_t port) {
 
     uint16_t frame_seq = 0;
     uint64_t total_frames = 0;
-    auto start = Clock::now();
+    auto last_log_time = Clock::now();
+    uint64_t last_log_frames = 0;
     auto last_idr_time = Clock::now();
     static constexpr int64_t IDR_INTERVAL_MS = 2000; // Force IDR every 2 seconds
 
@@ -99,6 +121,17 @@ static int run_host(uint16_t port) {
             total_frames > 0) {
             log::info("HOST", "Client disconnected");
             break;
+        }
+
+        // Feed telemetry to bitrate controller and apply if it changed.
+        bitrate_ctl.on_rtt(session.rtt_ms());
+        {
+            bool changed = false;
+            uint32_t br = bitrate_ctl.tick(&changed);
+            if (changed) {
+                encoder->set_bitrate(br);
+                log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+            }
         }
 
         CapturedFrame frame;
@@ -155,11 +188,17 @@ static int run_host(uint16_t port) {
             total_frames++;
 
             if (total_frames % 60 == 0) {
-                auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+                auto now = Clock::now();
+                double window_sec = std::chrono::duration<double>(now - last_log_time).count();
+                double inst_fps = window_sec > 0
+                    ? (total_frames - last_log_frames) / window_sec
+                    : 0.0;
+                last_log_time = now;
+                last_log_frames = total_frames;
                 uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
                 log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, state: %s",
                     (unsigned long long)total_frames,
-                    total_frames / elapsed,
+                    inst_fps,
                     session.rtt_ms(),
                     (unsigned long long)retx,
                     session.state() == host::SessionState::Connected ? "connected" :
@@ -217,7 +256,8 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
     uint64_t frames_decoded = 0;
     uint64_t last_drops = 0;
     auto last_idr_request = TimePoint{};
-    auto start = Clock::now();
+    auto last_log_time = Clock::now();
+    uint64_t last_log_frames = 0;
 
     // Poll timer — drives network + decode + render at ~1ms intervals
     QTimer poll_timer;
@@ -290,9 +330,15 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
             frames_decoded++;
 
             if (frames_decoded % 60 == 0) {
-                auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+                auto now = Clock::now();
+                double window_sec = std::chrono::duration<double>(now - last_log_time).count();
+                double inst_fps = window_sec > 0
+                    ? (frames_decoded - last_log_frames) / window_sec
+                    : 0.0;
+                last_log_time = now;
+                last_log_frames = frames_decoded;
                 log::info("VIEW", "Decoded: %llu, FPS: %.1f",
-                    (unsigned long long)frames_decoded, frames_decoded / elapsed);
+                    (unsigned long long)frames_decoded, inst_fps);
             }
         }
     });
@@ -327,7 +373,7 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
         session.send_input(ev);
     });
 
-    auto start = Clock::now();
+    auto last_log_time = Clock::now();
     uint64_t frames_received = 0;
     uint64_t frames_rendered = 0;
     uint64_t bytes_received = 0;
@@ -383,11 +429,16 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
         }
 
         if (frames_received >= last_logged_frames + 60) {
+            auto now = Clock::now();
+            double window_sec = std::chrono::duration<double>(now - last_log_time).count();
+            double inst_fps = window_sec > 0
+                ? (frames_received - last_logged_frames) / window_sec
+                : 0.0;
+            last_log_time = now;
             last_logged_frames = frames_received;
-            auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
             log::info("VIEW", "RX: %llu (%.1f fps, %.2f MB, %llu dropped), rendered: %llu, RTT: %.1fms",
                 (unsigned long long)frames_received,
-                frames_received / elapsed,
+                inst_fps,
                 bytes_received / 1024.0 / 1024.0,
                 (unsigned long long)session.frames_dropped(),
                 (unsigned long long)frames_rendered,
@@ -398,6 +449,170 @@ static int run_view(int /*argc*/, char** /*argv*/, const char* host_ip, uint16_t
     }
 
     session.stop();
+    return 0;
+}
+
+static int run_host_mac(uint16_t port, uint32_t display_index, bool prefer_hdr,
+                        uint32_t manual_bitrate_bps) {
+    using namespace deskbeam;
+
+    // Enumerate displays for the log.
+    auto displays = host::MacScreenCapture::enumerate_displays();
+    if (displays.empty()) {
+        log::error("HOST", "No displays found (check Screen Recording permission)");
+        return 1;
+    }
+    log::info("HOST", "Available displays:");
+    for (const auto& d : displays) {
+        log::info("HOST", "  [%u] %s %s", d.index, d.name.c_str(),
+                  d.hdr_capable ? "(HDR capable)" : "");
+    }
+    if (display_index >= displays.size()) {
+        log::error("HOST", "Display index %u out of range", display_index);
+        return 1;
+    }
+
+    host::MacScreenCapture capture;
+    host::MacCaptureConfig ccfg;
+    ccfg.display_index = display_index;
+    ccfg.fps = 60;
+    ccfg.show_cursor = false;
+    ccfg.prefer_hdr = prefer_hdr;
+    if (!capture.init(ccfg)) {
+        log::error("HOST", "Failed to init capture");
+        return 1;
+    }
+    if (!capture.start()) {
+        log::error("HOST", "Failed to start capture");
+        return 1;
+    }
+
+    codec::BitrateController bitrate_ctl(
+        codec::default_bitrate_for(capture.width(), capture.height(), 60));
+    if (manual_bitrate_bps != 0) {
+        bitrate_ctl.set_manual_target(manual_bitrate_bps);
+        bitrate_ctl.tick();
+    }
+    log::info("HOST", "Initial bitrate: %u kbps (%s)",
+              bitrate_ctl.current() / 1000,
+              manual_bitrate_bps ? "manual" : "auto");
+
+    host::MacVideoToolboxEncoder encoder;
+    host::MacEncoderConfig ecfg;
+    ecfg.width = capture.width();
+    ecfg.height = capture.height();
+    ecfg.fps = 60;
+    ecfg.bitrate_bps = bitrate_ctl.current();
+    ecfg.idr_period = 120;
+    ecfg.hdr = capture.hdr_active();
+    if (!encoder.init(ecfg)) {
+        log::error("HOST", "Failed to init encoder");
+        capture.stop();
+        return 1;
+    }
+
+    host::HostSession session;
+    // Input injection happens in the display's "points" coordinate space
+    // (CGEventPost operates in points, not backing pixels), so we send the
+    // points dimensions to the injector — not the capture pixel dimensions,
+    // which on Retina are 2x larger.
+    session.set_screen_resolution(capture.points_width(), capture.points_height());
+    if (!session.start(port)) {
+        log::error("HOST", "Failed to start session on port %u", port);
+        return 1;
+    }
+    log::info("HOST", "Waiting for client on port %u...", port);
+
+    uint16_t frame_seq = 0;
+    uint64_t total_frames = 0;
+    auto last_log_time = Clock::now();
+    uint64_t last_log_frames = 0;
+    auto last_idr_time = Clock::now();
+    static constexpr int64_t IDR_INTERVAL_MS = 2000;
+
+    while (true) {
+        session.poll();
+
+        if (session.state() == host::SessionState::Disconnected && total_frames > 0) {
+            log::info("HOST", "Client disconnected");
+            break;
+        }
+
+        // Feed telemetry to bitrate controller and apply if it changed.
+        bitrate_ctl.on_rtt(session.rtt_ms());
+        {
+            bool changed = false;
+            uint32_t br = bitrate_ctl.tick(&changed);
+            if (changed) {
+                encoder.set_bitrate(br);
+                log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+            }
+        }
+
+        // Request IDR on client (re)connect.
+        if (session.idr_needed()) {
+            encoder.request_idr();
+            session.clear_idr_needed();
+            last_idr_time = Clock::now();
+            log::info("HOST", "IDR requested for new client");
+        }
+
+        // Periodic IDR for loss recovery.
+        if (session.state() == host::SessionState::Connected) {
+            auto since_idr = std::chrono::duration_cast<std::chrono::milliseconds>(
+                Clock::now() - last_idr_time).count();
+            if (since_idr >= IDR_INTERVAL_MS) {
+                encoder.request_idr();
+                last_idr_time = Clock::now();
+            }
+        }
+
+        // Pull newest captured frame (drop-oldest).
+        uint64_t pts_us = 0;
+        CVPixelBufferRef pb = capture.try_get_frame(&pts_us);
+        if (pb) {
+            encoder.encode(pb, pts_us);  // takes ownership
+        }
+
+        // Drain encoder output.
+        host::MacEncodedPacket pkt;
+        while (encoder.get_packet(pkt)) {
+            uint32_t timestamp = static_cast<uint32_t>(pkt.pts & 0xFFFFFFFF);
+            if (session.state() == host::SessionState::Connected) {
+                session.send_frame(pkt.data.data(), pkt.data.size(),
+                                   frame_seq, timestamp, pkt.keyframe);
+            }
+            frame_seq++;
+            total_frames++;
+
+            if (total_frames % 60 == 0) {
+                auto now = Clock::now();
+                double window_sec = std::chrono::duration<double>(now - last_log_time).count();
+                double inst_fps = window_sec > 0
+                    ? (total_frames - last_log_frames) / window_sec
+                    : 0.0;
+                last_log_time = now;
+                last_log_frames = total_frames;
+                uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
+                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, state: %s",
+                    (unsigned long long)total_frames,
+                    inst_fps,
+                    session.rtt_ms(),
+                    (unsigned long long)retx,
+                    session.state() == host::SessionState::Connected ? "connected" :
+                    session.state() == host::SessionState::WaitingForClient ? "waiting" :
+                    "disconnected");
+            }
+        }
+
+        if (!pb) {
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+    }
+
+    session.stop();
+    encoder.shutdown();
+    capture.stop();
     return 0;
 }
 
@@ -413,10 +628,20 @@ int main(int argc, char* argv[]) {
     const char* host_ip = nullptr;
     bool mode_host = false;
     bool mode_view = false;
+    uint32_t display_index = 0;
+    bool prefer_hdr = false;
+    uint32_t manual_bitrate_bps = 0;   // 0 = auto from resolution
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--host") == 0) {
             mode_host = true;
+        } else if (std::strcmp(argv[i], "--display") == 0 && i + 1 < argc) {
+            display_index = static_cast<uint32_t>(std::atoi(argv[++i]));
+        } else if (std::strcmp(argv[i], "--hdr") == 0) {
+            prefer_hdr = true;
+        } else if (std::strcmp(argv[i], "--bitrate") == 0 && i + 1 < argc) {
+            // Manual bitrate override in Mbps (overrides resolution-based default).
+            manual_bitrate_bps = static_cast<uint32_t>(std::atoi(argv[++i])) * 1'000'000u;
         } else if (std::strcmp(argv[i], "--view") == 0) {
             mode_view = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -437,7 +662,7 @@ int main(int argc, char* argv[]) {
 
 #ifdef DESKBEAM_WINDOWS
     if (mode_host) {
-        return run_host(port);
+        return run_host(port, manual_bitrate_bps);
     }
 #endif
 #if defined(DESKBEAM_WINDOWS) || defined(DESKBEAM_MACOS)
@@ -451,8 +676,7 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef DESKBEAM_MACOS
     if (mode_host) {
-        std::fprintf(stderr, "Error: host mode not yet implemented on macOS\n");
-        return 1;
+        return run_host_mac(port, display_index, prefer_hdr, manual_bitrate_bps);
     }
 #endif
 

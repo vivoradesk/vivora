@@ -34,6 +34,8 @@ public:
 
 private:
     bool create_video_processor();
+    bool create_intermediate();
+    bool create_shader_pipeline();
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -42,6 +44,19 @@ private:
     ComPtr<ID3D11VideoContext> video_context_;
     ComPtr<ID3D11VideoProcessorEnumerator> vp_enum_;
     ComPtr<ID3D11VideoProcessor> vp_;
+
+    // Pass 1: VP renders NV12/P010 -> RGB into this intermediate at native
+    // frame resolution (no scaling). Pass 2: shader bicubic-scales the
+    // intermediate to the swap chain back buffer.
+    ComPtr<ID3D11Texture2D> intermediate_;
+    ComPtr<ID3D11VideoProcessorOutputView> intermediate_vpov_;
+    ComPtr<ID3D11ShaderResourceView> intermediate_srv_;
+
+    // Bicubic upsample/downsample shader pipeline.
+    ComPtr<ID3D11VertexShader> vs_;
+    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11SamplerState> sampler_;
+    ComPtr<ID3D11Buffer> cbuffer_;
 
     uint32_t frame_width_ = 0;
     uint32_t frame_height_ = 0;
