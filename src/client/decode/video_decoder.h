@@ -36,6 +36,10 @@ public:
     // Retrieve decoded frames. Returns false when no more available.
     virtual bool get_frame(DecodedFrame& frame) = 0;
 
+    // Flush decoder state — discard buffered frames and reset internal
+    // reference pictures. Call before feeding a new IDR after frame loss.
+    virtual void flush() = 0;
+
     // Get the D3D11 device used by the decoder (for renderer sharing).
     virtual ID3D11Device* get_device() = 0;
 

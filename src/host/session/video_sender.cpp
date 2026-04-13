@@ -89,40 +89,106 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
 {
     int resent = 0;
     for (size_t i = 0; i < count; ++i) {
+        if (retx_budget_ <= 0) break; // don't starve capture pipeline
+
         uint32_t key = retx_key(seq_no, frag_indices[i]);
         auto it = retx_index_.find(key);
         if (it == retx_index_.end()) continue; // aged out or never existed
+
+        // Mark the wire as a retransmission so the receiver's FEC EWMA
+        // can distinguish it from an original transmission.  FEC parity
+        // was already computed over the clean wire on first send, so
+        // modifying the flag byte here is safe — the receiver strips
+        // FLAG_RETX before XOR recovery, restoring byte-identity.
+        if (it->second.size() > 7) {
+            it->second[7] |= protocol::FLAG_RETX;
+        }
 
         int r = socket_.send_to(it->second.data(), it->second.size(), dest);
         if (r < 0) continue;
         bytes_sent_ += r;
         packets_sent_++;
         retransmits_++;
+        retx_budget_--;
         resent++;
     }
     return resent;
 }
 
 void VideoSender::update_fec_from_loss(float loss_rate) {
-    // Map loss rate to target K
-    uint8_t target_k;
-    if (loss_rate < 0.01f)       target_k = 20;
-    else if (loss_rate < 0.03f)  target_k = 10;
-    else if (loss_rate < 0.05f)  target_k = 5;
-    else                         target_k = 3;
+    last_loss_rate_ = loss_rate;
 
-    // Hysteresis: only change K after HYSTERESIS_COUNT consecutive same-target reports
-    if (target_k == pending_k_) {
-        ++pending_k_count_;
-    } else {
-        pending_k_ = target_k;
-        pending_k_count_ = 1;
+    // Cooldown: after a K change, ignore reports for a while to let the
+    // new K take effect and the EWMA settle.  This breaks the
+    // "FEC hides its own losses" oscillation loop.
+    if (cooldown_ > 0) {
+        --cooldown_;
+        return;
     }
 
-    if (pending_k_count_ >= HYSTERESIS_COUNT && target_k != fec_encoder_.group_size()) {
-        log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%)",
-                  fec_encoder_.group_size(), target_k, loss_rate * 100.0f);
+    // Map loss rate to target K.
+    // K=20 disabled: retransmits mask channel loss from FEC EWMA
+    // (retransmitted packets fill ring buffer before FEC resolves),
+    // causing persistent 10↔20 flapping. K=10 is the max for now.
+    uint8_t target_k;
+    if (loss_rate < 0.02f)       target_k = 10;
+    else if (loss_rate < 0.04f)  target_k = 5;
+    else                         target_k = 3;
+
+    uint8_t current_k = fec_encoder_.group_size();
+
+    // Tightening (lower K): immediate — don't wait for hysteresis.
+    if (target_k < current_k) {
+        log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%, tighten)",
+                  current_k, target_k, loss_rate * 100.0f);
         fec_encoder_.set_group_size(target_k);
+        cooldown_ = TIGHTEN_COOLDOWN;
+        pending_k_ = target_k;
+        pending_k_count_ = 0;
+        return;
+    }
+
+    // Block relaxation while RTT-locked at K=3.
+    if (rtt_locked_k3_ && target_k > current_k) return;
+
+    // Relaxation (higher K): graduated, one step at a time.
+    // Steps: 3 -> 5 -> 10 -> 20. Never skip levels.
+    // Count any report suggesting relaxation (target > current), regardless
+    // of exact target value. Reset only when target suggests tightening.
+    if (target_k > current_k) {
+        ++pending_k_count_;
+
+        if (pending_k_count_ >= HYSTERESIS_UP) {
+            uint8_t next_k = next_relax_step(current_k);
+            log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%, relax step)",
+                      current_k, next_k, loss_rate * 100.0f);
+            fec_encoder_.set_group_size(next_k);
+            cooldown_ = RELAX_COOLDOWN;
+            pending_k_count_ = 0;
+        }
+    } else if (target_k == current_k) {
+        // Stable at current level — don't accumulate, don't reset.
+    }
+}
+
+void VideoSender::on_rtt(double rtt_ms) {
+    if (rtt_ms > RTT_SPIKE_MS && !rtt_locked_k3_) {
+        pre_lock_k_ = fec_encoder_.group_size();
+        fec_encoder_.set_group_size(3);
+        rtt_locked_k3_ = true;
+        rtt_normal_count_ = 0;
+        cooldown_ = TIGHTEN_COOLDOWN;
+        log::info("FEC", "RTT spike %.0fms -> force K=3 (was %d)", rtt_ms, pre_lock_k_);
+    } else if (rtt_locked_k3_) {
+        if (rtt_ms < RTT_NORMAL_MS) {
+            if (++rtt_normal_count_ >= RTT_NORMAL_CYCLES) {
+                rtt_locked_k3_ = false;
+                rtt_normal_count_ = 0;
+                log::info("FEC", "RTT stable %.0fms -> unlock K (was locked at 3)", rtt_ms);
+            }
+        } else {
+            rtt_normal_count_ = 0;
+        }
     }
 }
 

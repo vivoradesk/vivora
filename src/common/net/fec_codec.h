@@ -3,23 +3,25 @@
 #include "common/protocol/packet.h"
 #include <cstdint>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 
 namespace deskbeam::net {
 
-// ---------------------------------------------------------------------------
-// FEC parity packet payload layout (inside a PacketType::Video, FLAG_FEC):
-//
-//   [group_id    2B LE]   monotonic group counter
-//   [K           1B    ]  data packets in this group
-//   [first_idx   2B LE]   global packet index of first data packet
-//   [pkt_len[0]  2B LE]   wire-length of data packet 0
-//   ...
-//   [pkt_len[K-1] 2B LE]
-//   [xor_parity   NB   ]  XOR of all K wire-packets, zero-padded to max_len
-//
-// Header overhead: 5 + 2*K bytes.
-// ---------------------------------------------------------------------------
+// Extract a unique 32-bit key from a data packet's wire bytes:
+// (seq_no << 16) | frag_index. Works for both fragmented and non-fragmented.
+inline uint32_t wire_pkt_key(const uint8_t* wire, size_t len) {
+    if (len < protocol::PacketHeader::WIRE_SIZE) return 0;
+    uint16_t seq_no = wire[1] | (static_cast<uint16_t>(wire[2]) << 8);
+    uint8_t flags = wire[7];
+    uint16_t frag_idx = 0;
+    if ((flags & protocol::FLAG_FRAGMENT) &&
+        len > protocol::PacketHeader::WIRE_SIZE + 2) {
+        const uint8_t* p = wire + protocol::PacketHeader::WIRE_SIZE;
+        frag_idx = p[0] | (static_cast<uint16_t>(p[1]) << 8);
+    }
+    return (static_cast<uint32_t>(seq_no) << 16) | frag_idx;
+}
 
 // ---- Encoder (host side) --------------------------------------------------
 
@@ -27,16 +29,11 @@ class FecEncoder {
 public:
     void set_group_size(uint8_t k);
     uint8_t group_size() const { return k_; }
-    uint16_t global_index() const { return global_idx_; }
 
-    // Feed a serialized wire packet (header+payload).
-    // Returns true if an FEC packet was produced and written to `fec_out`.
     bool feed(const uint8_t* wire, size_t len,
               uint16_t frame_seq, uint32_t timestamp,
               std::vector<uint8_t>& fec_out);
 
-    // Flush a partial group (< K packets). Call at keyframe boundary or K change.
-    // Returns true if FEC packet produced.
     bool flush(uint16_t frame_seq, uint32_t timestamp,
                std::vector<uint8_t>& fec_out);
 
@@ -47,12 +44,11 @@ private:
 
     uint8_t k_ = 10;
     uint16_t group_id_ = 0;
-    uint16_t global_idx_ = 0;
-    uint16_t first_idx_in_group_ = 0;
 
-    std::vector<uint16_t> pkt_lens_;          // wire-length of each pkt in group
-    std::vector<uint8_t>  parity_;            // running XOR accumulator
-    uint8_t               count_ = 0;         // packets fed into current group
+    std::vector<uint32_t> pkt_keys_;
+    std::vector<uint16_t> pkt_lens_;
+    std::vector<uint8_t>  parity_;
+    uint8_t               count_ = 0;
 };
 
 // ---- Decoder (client side) ------------------------------------------------
@@ -64,44 +60,45 @@ public:
     void feed(const uint8_t* wire, size_t len,
               std::vector<std::vector<uint8_t>>& recovered);
 
-    // EWMA of packet loss rate (0.0 – 1.0).
+    // Must be called periodically (e.g. every poll cycle) to trigger
+    // deferred recoveries after the reordering grace period expires.
+    void tick(std::vector<std::vector<uint8_t>>& recovered);
+
     float loss_rate() const { return ewma_loss_; }
 
 private:
     struct FecGroup {
         uint8_t  k = 0;
-        uint16_t first_idx = 0;
-        std::vector<std::vector<uint8_t>> packets;   // [k] slots, empty = missing
-        std::vector<uint16_t>             pkt_lens;   // from FEC header
+        std::vector<uint32_t>             pkt_keys;
+        std::vector<uint16_t>             pkt_lens;
+        std::vector<std::vector<uint8_t>> packets;   // [k] slots
         std::vector<uint8_t>              parity;
         uint8_t  received_data = 0;
+        // Count of slots filled by ORIGINAL-transmission packets (not retx).
+        // Used to measure channel loss BEFORE retransmissions mask it.
+        // received_data - fresh_received = retx packets that filled gaps.
+        uint8_t  fresh_received = 0;
         bool     fec_received = false;
-        bool     resolved = false;           // recovery attempted or not needed
+        bool     resolved = false;
     };
 
     void populate_group_from_ring(FecGroup& group);
     void try_recover(FecGroup& group,
-                     std::vector<std::vector<uint8_t>>& recovered);
+                     std::vector<std::vector<uint8_t>>& recovered,
+                     bool attempt_xor);
     void expire_old_groups();
-    void update_loss(const FecGroup& group);
+    void update_loss(int missing, int k);
 
-    std::unordered_map<uint16_t, FecGroup> groups_;   // group_id -> group
-    uint16_t global_idx_ = 0;                         // monotonic data-pkt counter
-    float    ewma_loss_ = 0.0f;
+    std::unordered_map<uint16_t, FecGroup> groups_;
 
-    // Ring buffer of recent data packets keyed by global_idx.
-    // Data packets arrive BEFORE the FEC packet, so we must buffer them
-    // to populate the group when FEC arrives and reveals first_idx + K.
-    static constexpr size_t RING_SIZE = 256;          // covers ~4 frames @ 60 frags/frame
-    struct RingEntry {
-        uint16_t idx = 0;
-        std::vector<uint8_t> wire;
-        bool valid = false;
-    };
-    std::vector<RingEntry> ring_{RING_SIZE};
+    // Ring buffer: pkt_key -> wire bytes.  FIFO eviction via deque.
+    std::unordered_map<uint32_t, std::vector<uint8_t>> ring_;
+    std::deque<uint32_t> ring_fifo_;
+    static constexpr size_t MAX_RING = 512;
 
-    static constexpr float  EWMA_ALPHA = 0.05f;
-    static constexpr size_t MAX_GROUPS = 64;          // expire beyond this
+    float ewma_loss_ = 0.0f;
+    static constexpr float  EWMA_ALPHA = 0.15f;
+    static constexpr size_t MAX_GROUPS = 64;
 };
 
 } // namespace deskbeam::net

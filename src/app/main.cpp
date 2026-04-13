@@ -107,6 +107,19 @@ static int run_host(uint16_t port, uint32_t manual_bitrate_bps) {
     auto last_idr_time = Clock::now();
     static constexpr int64_t IDR_INTERVAL_MS = 2000; // Force IDR every 2 seconds
 
+    // Retx-rate tracking: fed into bitrate controller as a congestion
+    // signal in addition to client-reported FEC loss.  Committed in
+    // windows of >=20 packets to filter single-iter noise.
+    uint64_t last_retx_sample = 0;
+    uint64_t last_pkts_sample = 0;
+
+    // Deadband: compare proposed bitrate against the last one we actually
+    // applied to the encoder (not the controller's internal current), so
+    // small accumulating drift still eventually crosses the 5% threshold.
+    uint32_t last_applied_br = bitrate_ctl.current();
+
+    host::SessionState prev_state = session.state();
+
     // Force initial mouse movement for DXGI
     INPUT mi = {};
     mi.type = INPUT_MOUSE;
@@ -123,14 +136,71 @@ static int run_host(uint16_t port, uint32_t manual_bitrate_bps) {
             break;
         }
 
+        // Detect WaitingForClient -> Connected and arm warm-up ramp.
+        // Push the warm-up start bitrate to the encoder immediately so
+        // the first IDR goes out cold at low bitrate, then ramps up.
+        if (prev_state != host::SessionState::Connected &&
+            session.state() == host::SessionState::Connected) {
+            bitrate_ctl.notify_client_connected();
+            encoder->set_bitrate(bitrate_ctl.current());
+            last_applied_br = bitrate_ctl.current();
+            log::info("HOST", "Warmup start -> %u kbps", last_applied_br / 1000);
+            last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
+            last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+        }
+        prev_state = session.state();
+
+        // Feed BW probe result to bitrate controller (once).
+        if (session.probe_bw_bps() > 0 && !session.probe_pending()) {
+            uint32_t raw = session.probe_bw_bps();
+            bitrate_ctl.set_probe_bandwidth(raw);
+        }
+
         // Feed telemetry to bitrate controller and apply if it changed.
+        // Loss signal combines:
+        //   (a) client-reported FEC loss (channel loss before recovery)
+        //   (b) host-observed retx rate (packets we had to resend)
+        // The max of the two drives congestion response, so either an
+        // unhappy client or a busy retx loop can trigger bitrate cuts.
         bitrate_ctl.on_rtt(session.rtt_ms());
         {
+            double loss_signal = session.last_loss_rate();
+            if (session.sender()) {
+                uint64_t cur_retx = session.sender()->retransmits();
+                uint64_t cur_pkts = session.sender()->packets_sent();
+                uint64_t d_retx = cur_retx - last_retx_sample;
+                uint64_t d_pkts = cur_pkts - last_pkts_sample;
+                if (d_pkts >= 20) {
+                    double retx_ratio = static_cast<double>(d_retx)
+                                      / static_cast<double>(d_pkts);
+                    if (retx_ratio > loss_signal) loss_signal = retx_ratio;
+                    last_retx_sample = cur_retx;
+                    last_pkts_sample = cur_pkts;
+                }
+            }
+            bitrate_ctl.on_loss_ratio(loss_signal);
+
             bool changed = false;
             uint32_t br = bitrate_ctl.tick(&changed);
+            // End-of-grace one-shot: rebaseline retx counters so that
+            // bursts accumulated during grace don't land in the first
+            // post-grace adaptation sample.
+            if (bitrate_ctl.consume_grace_ended_flag() && session.sender()) {
+                last_retx_sample = session.sender()->retransmits();
+                last_pkts_sample = session.sender()->packets_sent();
+            }
             if (changed) {
-                encoder->set_bitrate(br);
-                log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+                // Deadband: skip encoder reconfig for sub-5% changes vs
+                // last applied — oscillation noise at the floor would
+                // otherwise cause a GOP disturbance on every tick.
+                uint32_t delta = br > last_applied_br
+                                 ? br - last_applied_br
+                                 : last_applied_br - br;
+                if (delta * 20 >= last_applied_br) {
+                    encoder->set_bitrate(br);
+                    last_applied_br = br;
+                    log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+                }
             }
         }
 
@@ -283,7 +353,8 @@ static int run_view(int argc, char* argv[], const char* host_ip, uint16_t port) 
                 session.request_idr();
                 last_idr_request = now;
                 got_keyframe = false; // Wait for new keyframe before decoding
-                log::warn("VIEW", "Frame loss detected (%llu dropped), requested IDR",
+                decoder->flush();     // Clear stale reference frames
+                log::warn("VIEW", "Frame loss detected (%llu dropped), requested IDR + flush",
                     (unsigned long long)(drops - last_drops));
             }
             last_drops = drops;
@@ -532,6 +603,13 @@ static int run_host_mac(uint16_t port, uint32_t display_index, bool prefer_hdr,
     auto last_idr_time = Clock::now();
     static constexpr int64_t IDR_INTERVAL_MS = 2000;
 
+    // Retx-rate tracking for congestion response (see Windows host loop).
+    uint64_t last_retx_sample = 0;
+    uint64_t last_pkts_sample = 0;
+    uint32_t last_applied_br  = bitrate_ctl.current();
+
+    host::SessionState prev_state = session.state();
+
     while (true) {
         session.poll();
 
@@ -540,14 +618,59 @@ static int run_host_mac(uint16_t port, uint32_t display_index, bool prefer_hdr,
             break;
         }
 
+        // Arm warm-up ramp on client (re)connect — see Windows host loop.
+        if (prev_state != host::SessionState::Connected &&
+            session.state() == host::SessionState::Connected) {
+            bitrate_ctl.notify_client_connected();
+            encoder.set_bitrate(bitrate_ctl.current());
+            last_applied_br = bitrate_ctl.current();
+            log::info("HOST", "Warmup start -> %u kbps", last_applied_br / 1000);
+            last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
+            last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+        }
+        prev_state = session.state();
+
+        // Feed BW probe result to bitrate controller (once).
+        if (session.probe_bw_bps() > 0 && !session.probe_pending()) {
+            uint32_t raw = session.probe_bw_bps();
+            bitrate_ctl.set_probe_bandwidth(raw);
+        }
+
         // Feed telemetry to bitrate controller and apply if it changed.
+        // Loss signal = max(client-reported FEC loss, host retx rate).
         bitrate_ctl.on_rtt(session.rtt_ms());
         {
+            double loss_signal = session.last_loss_rate();
+            if (session.sender()) {
+                uint64_t cur_retx = session.sender()->retransmits();
+                uint64_t cur_pkts = session.sender()->packets_sent();
+                uint64_t d_retx = cur_retx - last_retx_sample;
+                uint64_t d_pkts = cur_pkts - last_pkts_sample;
+                if (d_pkts >= 20) {
+                    double retx_ratio = static_cast<double>(d_retx)
+                                      / static_cast<double>(d_pkts);
+                    if (retx_ratio > loss_signal) loss_signal = retx_ratio;
+                    last_retx_sample = cur_retx;
+                    last_pkts_sample = cur_pkts;
+                }
+            }
+            bitrate_ctl.on_loss_ratio(loss_signal);
+
             bool changed = false;
             uint32_t br = bitrate_ctl.tick(&changed);
+            if (bitrate_ctl.consume_grace_ended_flag() && session.sender()) {
+                last_retx_sample = session.sender()->retransmits();
+                last_pkts_sample = session.sender()->packets_sent();
+            }
             if (changed) {
-                encoder.set_bitrate(br);
-                log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+                uint32_t delta = br > last_applied_br
+                                 ? br - last_applied_br
+                                 : last_applied_br - br;
+                if (delta * 20 >= last_applied_br) {
+                    encoder.set_bitrate(br);
+                    last_applied_br = br;
+                    log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
+                }
             }
         }
 

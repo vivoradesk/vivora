@@ -38,15 +38,22 @@ public:
     bool idr_needed() const { return idr_needed_; }
     void clear_idr_needed() { idr_needed_ = false; }
     double rtt_ms() const { return rtt_ms_; }
+    float last_loss_rate() const { return sender_ ? sender_->last_loss_rate() : 0.0f; }
     const net::SocketAddr& client_addr() const { return client_addr_; }
     VideoSender* sender() { return sender_.get(); }
+
+    // Bandwidth probe result (0 = not yet received).
+    uint32_t probe_bw_bps() const { return probe_bw_bps_; }
+    bool probe_pending() const { return probe_pending_; }
 
 private:
     void handle_packet(const uint8_t* data, size_t len, const net::SocketAddr& sender);
     void handle_hello(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
     void handle_pong(const uint8_t* payload, size_t len);
     void handle_input(const uint8_t* payload, size_t len);
+    void handle_bw_probe_ack(const uint8_t* payload, size_t len);
     void send_ping();
+    void send_bw_probe();
 
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<VideoSender> sender_;
@@ -58,9 +65,19 @@ private:
     uint32_t ping_seq_ = 0;
     TimePoint ping_sent_time_;
     double rtt_ms_ = 0.0;
+    double last_rtt_sent_ = -1.0;
     bool idr_needed_ = false;
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;
+
+    // Bandwidth probe state.
+    static constexpr uint8_t  BW_PROBE_COUNT = 20;
+    static constexpr uint16_t BW_PROBE_SIZE  = 1200;
+    static constexpr int64_t  BW_PROBE_TIMEOUT_MS = 500;
+    uint16_t probe_id_ = 0;
+    uint32_t probe_bw_bps_ = 0;
+    bool     probe_pending_ = false;
+    TimePoint probe_sent_time_;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
 };

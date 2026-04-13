@@ -89,8 +89,20 @@ void ClientSession::poll() {
             return;
         }
 
-        // NACK processing: ask host to retransmit missing fragments.
         if (receiver_) {
+            // FEC recovery FIRST: recover lost packets before NACK fires.
+            // The recv loop above already drained all buffered packets, so
+            // any FEC group still missing exactly 1 packet = true loss.
+            std::vector<std::vector<uint8_t>> fec_recovered;
+            receiver_->fec_tick(fec_recovered);
+            for (const auto& rec : fec_recovered) {
+                if (rec.size() >= protocol::PacketHeader::WIRE_SIZE) {
+                    auto pkt = protocol::Packet::deserialize(rec.data(), rec.size());
+                    receiver_->feed(pkt);
+                }
+            }
+
+            // NACK processing: retransmit only what FEC couldn't recover.
             int64_t gap_ms = 4;
             int64_t rl_ms = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_ * 1.5) : 8;
             if (rl_ms < 8) rl_ms = 8;
@@ -130,6 +142,9 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             break;
         case protocol::PacketType::Ping:
             handle_ping(payload, payload_len);
+            break;
+        case protocol::PacketType::BwProbe:
+            handle_bw_probe(payload, payload_len);
             break;
         case protocol::PacketType::Video: {
             // Feed raw wire bytes through FEC decoder → assembler.
@@ -253,6 +268,61 @@ void ClientSession::request_idr() {
     pkt.header.timestamp = 0;
     pkt.header.flags = 0;
     pkt.header.payload_len = 0;
+
+    auto wire = pkt.serialize();
+    socket_->send_to(wire.data(), wire.size(), host_addr_);
+}
+
+void ClientSession::handle_bw_probe(const uint8_t* payload, size_t len) {
+    if (len < 4) return;
+    uint16_t id = payload[0] | (static_cast<uint16_t>(payload[1]) << 8);
+    uint8_t index = payload[2];
+    uint8_t count = payload[3];
+
+    if (id != probe_id_) {
+        probe_id_ = id;
+        probe_received_ = 0;
+        probe_count_ = count;
+        probe_first_time_ = Clock::now();
+    }
+
+    probe_received_++;
+    probe_last_time_ = Clock::now();
+
+    if (index == count - 1 || probe_received_ == count) {
+        send_bw_probe_ack();
+    }
+}
+
+void ClientSession::send_bw_probe_ack() {
+    if (!socket_ || probe_received_ < 2) return;
+
+    auto span = std::chrono::duration<double>(probe_last_time_ - probe_first_time_);
+    double span_sec = span.count();
+    if (span_sec < 0.0001) span_sec = 0.0001;
+
+    double bits = static_cast<double>(probe_received_) * 1200.0 * 8.0;
+    uint32_t bw_bps = static_cast<uint32_t>(bits / span_sec);
+
+    log::info("ClientSession", "BW probe: %u/%u received in %.1fms -> %u kbps",
+              probe_received_, probe_count_, span_sec * 1000.0, bw_bps / 1000);
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::BwProbeAck;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    // Payload: probe_id(2B) + received(1B) + reserved(1B) + bw_bps(4B LE)
+    pkt.payload.resize(8);
+    pkt.payload[0] = static_cast<uint8_t>(probe_id_ & 0xFF);
+    pkt.payload[1] = static_cast<uint8_t>((probe_id_ >> 8) & 0xFF);
+    pkt.payload[2] = probe_received_;
+    pkt.payload[3] = 0;
+    pkt.payload[4] = static_cast<uint8_t>(bw_bps & 0xFF);
+    pkt.payload[5] = static_cast<uint8_t>((bw_bps >> 8) & 0xFF);
+    pkt.payload[6] = static_cast<uint8_t>((bw_bps >> 16) & 0xFF);
+    pkt.payload[7] = static_cast<uint8_t>((bw_bps >> 24) & 0xFF);
+    pkt.header.payload_len = 8;
 
     auto wire = pkt.serialize();
     socket_->send_to(wire.data(), wire.size(), host_addr_);

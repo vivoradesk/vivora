@@ -226,8 +226,61 @@ bool MfDecoder::configure_output() {
     return false;
 }
 
+// SEH-guarded leaf wrappers. These functions have NO C++ objects requiring
+// destructor unwinding — that's why they can safely use __try/__except.
+// Each returns true on success, false if the MF call access-violated.
+
+static bool seh_process_input(IMFTransform* mft, IMFSample* sample, HRESULT* out_hr) {
+    __try {
+        *out_hr = mft->ProcessInput(0, sample, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static bool seh_process_output(IMFTransform* mft, MFT_OUTPUT_DATA_BUFFER* out,
+                               DWORD* status, HRESULT* out_hr) {
+    __try {
+        *out_hr = mft->ProcessOutput(0, 1, out, status);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static bool seh_process_message(IMFTransform* mft, MFT_MESSAGE_TYPE msg, ULONG_PTR param) {
+    __try {
+        mft->ProcessMessage(msg, param);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void MfDecoder::flush() {
+    if (!transform_ || failed_) return;
+
+    // Drain any pending output frames and release their textures.
+    drain_output();
+    while (!output_frames_.empty()) {
+        auto& f = output_frames_.front();
+        if (f.texture) f.texture->Release();
+        output_frames_.pop();
+    }
+
+    // Tell the MFT to drop all buffered data and reset reference pictures.
+    if (!seh_process_message(transform_, MFT_MESSAGE_COMMAND_FLUSH, 0)) {
+        log::error("DECODE", "SEH in FLUSH ProcessMessage — marking decoder dead");
+        failed_ = true;
+        return;
+    }
+    log::info("DECODE", "Decoder flushed (IDR reset)");
+}
+
 bool MfDecoder::decode(const uint8_t* data, size_t len, uint64_t pts) {
-    if (!transform_) return false;
+    if (!transform_ || failed_) return false;
+    if (len == 0) return false;
 
     if (!started_) {
         started_ = true;
@@ -252,11 +305,22 @@ bool MfDecoder::decode(const uint8_t* data, size_t len, uint64_t pts) {
     sample->SetSampleTime(static_cast<LONGLONG>(pts) * 10);
     buffer->Release();
 
-    hr = transform_->ProcessInput(0, sample, 0);
+    if (!seh_process_input(transform_, sample, &hr)) {
+        log::error("DECODE", "SEH in ProcessInput — marking decoder dead");
+        sample->Release();
+        failed_ = true;
+        return false;
+    }
 
     if (hr == MF_E_NOTACCEPTING) {
         drain_output();
-        hr = transform_->ProcessInput(0, sample, 0);
+        if (failed_) { sample->Release(); return false; }
+        if (!seh_process_input(transform_, sample, &hr)) {
+            log::error("DECODE", "SEH in ProcessInput retry — marking decoder dead");
+            sample->Release();
+            failed_ = true;
+            return false;
+        }
     }
 
     sample->Release();
@@ -271,13 +335,18 @@ bool MfDecoder::decode(const uint8_t* data, size_t len, uint64_t pts) {
 }
 
 void MfDecoder::drain_output() {
-    if (!transform_) return;
+    if (!transform_ || failed_) return;
 
     for (;;) {
         MFT_OUTPUT_DATA_BUFFER output = {};
         DWORD status = 0;
 
-        HRESULT hr = transform_->ProcessOutput(0, 1, &output, &status);
+        HRESULT hr = S_OK;
+        if (!seh_process_output(transform_, &output, &status, &hr)) {
+            log::error("DECODE", "SEH in ProcessOutput — marking decoder dead");
+            failed_ = true;
+            return;
+        }
 
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
             break;

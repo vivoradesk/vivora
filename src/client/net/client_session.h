@@ -45,7 +45,9 @@ private:
     void handle_packet(const uint8_t* data, size_t len);
     void handle_control(const uint8_t* payload, size_t len);
     void handle_ping(const uint8_t* payload, size_t len);
+    void handle_bw_probe(const uint8_t* payload, size_t len);
     void send_hello();
+    void send_bw_probe_ack();
 
     void send_fec_report();
 
@@ -58,6 +60,13 @@ private:
     TimePoint last_recv_time_;
     TimePoint last_fec_report_time_;
     double rtt_ms_ = 0.0;
+
+    // Bandwidth probe measurement state.
+    uint16_t  probe_id_ = 0;
+    uint8_t   probe_received_ = 0;
+    uint8_t   probe_count_ = 0;
+    TimePoint probe_first_time_;
+    TimePoint probe_last_time_;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
     static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;

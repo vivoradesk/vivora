@@ -352,9 +352,20 @@ bool D3dRenderer::render(ID3D11Texture2D* texture, uint32_t subresource) {
         return false;
     }
 
+    has_frame_ = true;
+
     // ---- Pass 2: bicubic shader intermediate -> swapchain back buffer ----
+    return present_intermediate();
+}
+
+bool D3dRenderer::re_present() {
+    if (!has_frame_) return false;
+    return present_intermediate();
+}
+
+bool D3dRenderer::present_intermediate() {
     ComPtr<ID3D11Texture2D> back_buffer;
-    hr = swapchain_->GetBuffer(0, IID_PPV_ARGS(back_buffer.GetAddressOf()));
+    HRESULT hr = swapchain_->GetBuffer(0, IID_PPV_ARGS(back_buffer.GetAddressOf()));
     if (FAILED(hr)) return false;
 
     ComPtr<ID3D11RenderTargetView> rtv;

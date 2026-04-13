@@ -13,6 +13,8 @@ enum class PacketType : uint8_t {
     IdrRequest  = 0x05,  // Client requests IDR from host
     NackRequest = 0x06,  // Client requests retransmit of lost fragments
     FecReport   = 0x07,  // Client reports packet loss rate for adaptive FEC
+    BwProbe     = 0x08,  // Host → client: bandwidth probe burst packet
+    BwProbeAck  = 0x09,  // Client → host: measured bandwidth from probe
     Ping        = 0x10,
     Pong        = 0x11,
 };
@@ -23,6 +25,7 @@ enum PacketFlags : uint8_t {
     FLAG_FEC        = 0x02,
     FLAG_FRAGMENT   = 0x04,  // packet is a fragment of a larger frame
     FLAG_LAST_FRAG  = 0x08,  // last fragment of a frame
+    FLAG_RETX       = 0x10,  // packet is a NACK retransmission (set on wire by sender)
 };
 
 // Wire format: 10 bytes header

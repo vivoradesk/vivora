@@ -144,8 +144,11 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
     std::vector<NackBatch> out;
     if (pending_.empty()) return out;
 
+    size_t total_nacked = 0;
     auto now = Clock::now();
     for (auto& kv : pending_) {
+        if (total_nacked >= MAX_NACK_PER_CYCLE) break;
+
         uint16_t seq = kv.first;
         auto& pf = kv.second;
         if (pf.complete) continue;
@@ -161,6 +164,7 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
         NackBatch batch;
         batch.seq_no = seq;
         for (uint16_t i = 0; i < pf.frag_count; ++i) {
+            if (total_nacked >= MAX_NACK_PER_CYCLE) break;
             if (!pf.fragments[i].empty()) continue; // already have it
 
             // Rate-limit: skip if we requested recently
@@ -172,6 +176,7 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
             }
             batch.frag_indices.push_back(i);
             pf.nack_sent_at[i] = now;
+            total_nacked++;
 
             // Protocol limits: 1 byte count field → max 255 per batch
             if (batch.frag_indices.size() >= 255) break;

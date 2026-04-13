@@ -26,6 +26,11 @@ public:
         fec_decoder_.feed(wire, len, recovered);
     }
 
+    // Trigger deferred FEC recoveries after grace period.
+    void fec_tick(std::vector<std::vector<uint8_t>>& recovered) {
+        fec_decoder_.tick(recovered);
+    }
+
     // Feed an already-deserialized video packet to the assembler.
     bool feed(const protocol::Packet& packet) { return assembler_.feed(packet); }
 

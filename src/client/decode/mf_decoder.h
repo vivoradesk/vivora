@@ -22,6 +22,7 @@ public:
     bool init(ID3D11Device* device = nullptr) override;
     bool decode(const uint8_t* data, size_t len, uint64_t pts) override;
     bool get_frame(DecodedFrame& frame) override;
+    void flush() override;
     ID3D11Device* get_device() override { return device_.Get(); }
 
 private:
@@ -36,6 +37,7 @@ private:
     IMFDXGIDeviceManager* device_manager_ = nullptr;
     UINT reset_token_ = 0;
     bool started_ = false;
+    bool failed_ = false;  // set after any SEH crash; decoder becomes inert
 
     std::queue<DecodedFrame> output_frames_;
 };

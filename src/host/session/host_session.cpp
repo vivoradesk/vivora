@@ -50,6 +50,9 @@ void HostSession::stop() {
 void HostSession::poll() {
     if (!socket_) return;
 
+    // Reset retransmit budget so NACK handling doesn't starve capture.
+    if (sender_) sender_->reset_retx_budget();
+
     uint8_t buf[RECV_BUF_SIZE];
     net::SocketAddr sender;
 
@@ -77,6 +80,23 @@ void HostSession::poll() {
         if (since_ping > PING_INTERVAL_MS) {
             send_ping();
             last_ping_time_ = now;
+        }
+
+        // Feed RTT to sender for proactive K lowering on WiFi stalls.
+        // Only on fresh pong (RTT changed) to avoid counting stale samples.
+        if (sender_ && rtt_ms_ != last_rtt_sent_) {
+            sender_->on_rtt(rtt_ms_);
+            last_rtt_sent_ = rtt_ms_;
+        }
+
+        // Probe timeout: give up waiting if no result within deadline.
+        if (probe_pending_) {
+            auto since_probe = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - probe_sent_time_).count();
+            if (since_probe > BW_PROBE_TIMEOUT_MS) {
+                probe_pending_ = false;
+                log::warn("HostSession", "BW probe timeout — using default ceiling");
+            }
         }
     }
 }
@@ -133,6 +153,11 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
                 sender_->update_fec_from_loss(loss_rate);
             }
             break;
+        case protocol::PacketType::BwProbeAck:
+            if (state_ == SessionState::Connected) {
+                handle_bw_probe_ack(payload, payload_len);
+            }
+            break;
         default:
             break;
     }
@@ -158,6 +183,7 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client_addr_ = sender;
     state_ = SessionState::Connected;
     idr_needed_ = true;
+    send_bw_probe();
     log::info("HostSession", "Client connected from %u.%u.%u.%u:%u",
         (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
         (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
@@ -196,6 +222,49 @@ void HostSession::send_ping() {
 
     auto wire = ping.serialize();
     socket_->send_to(wire.data(), wire.size(), client_addr_);
+}
+
+void HostSession::send_bw_probe() {
+    probe_id_++;
+    probe_pending_ = true;
+    probe_bw_bps_ = 0;
+    probe_sent_time_ = Clock::now();
+
+    for (uint8_t i = 0; i < BW_PROBE_COUNT; ++i) {
+        protocol::Packet pkt;
+        pkt.header.type = protocol::PacketType::BwProbe;
+        pkt.header.seq_no = 0;
+        pkt.header.timestamp = 0;
+        pkt.header.flags = 0;
+        // Payload: probe_id(2B LE) + index(1B) + count(1B) + padding
+        pkt.payload.resize(BW_PROBE_SIZE, 0);
+        pkt.payload[0] = static_cast<uint8_t>(probe_id_ & 0xFF);
+        pkt.payload[1] = static_cast<uint8_t>((probe_id_ >> 8) & 0xFF);
+        pkt.payload[2] = i;
+        pkt.payload[3] = BW_PROBE_COUNT;
+        pkt.header.payload_len = BW_PROBE_SIZE;
+
+        auto wire = pkt.serialize();
+        socket_->send_to(wire.data(), wire.size(), client_addr_);
+    }
+    log::info("HostSession", "Sent BW probe (%d x %dB), id=%u",
+              BW_PROBE_COUNT, BW_PROBE_SIZE, probe_id_);
+}
+
+void HostSession::handle_bw_probe_ack(const uint8_t* payload, size_t len) {
+    if (len < 8) return;
+    uint16_t ack_id = payload[0] | (static_cast<uint16_t>(payload[1]) << 8);
+    if (ack_id != probe_id_) return;
+
+    uint32_t bw_bps = payload[4]
+                    | (static_cast<uint32_t>(payload[5]) << 8)
+                    | (static_cast<uint32_t>(payload[6]) << 16)
+                    | (static_cast<uint32_t>(payload[7]) << 24);
+    probe_bw_bps_ = bw_bps;
+    probe_pending_ = false;
+    uint8_t received = payload[2];
+    log::info("HostSession", "BW probe result: %u kbps (%u/%u received)",
+              bw_bps / 1000, received, BW_PROBE_COUNT);
 }
 
 void HostSession::handle_input(const uint8_t* payload, size_t len) {

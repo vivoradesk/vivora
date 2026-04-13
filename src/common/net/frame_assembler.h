@@ -69,6 +69,8 @@ private:
     bool has_deliver_seq_ = false;
 
     static constexpr int64_t FRAME_TIMEOUT_MS = 100;
+    // Max total NACK fragments per collect_nacks() call to avoid flooding.
+    static constexpr size_t MAX_NACK_PER_CYCLE = 60;
 };
 
 } // namespace deskbeam::net

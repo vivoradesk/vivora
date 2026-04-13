@@ -29,6 +29,10 @@ public:
     // subresource = texture array index from DecodedFrame.
     bool render(ID3D11Texture2D* texture, uint32_t subresource);
 
+    // Re-present the last frame from intermediate texture (Pass 2 only).
+    // Call after resize to avoid showing a blank/stale frame.
+    bool re_present();
+
     // Resize swapchain (call when window resizes).
     bool resize(uint32_t width, uint32_t height);
 
@@ -36,6 +40,7 @@ private:
     bool create_video_processor();
     bool create_intermediate();
     bool create_shader_pipeline();
+    bool present_intermediate();
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -64,6 +69,7 @@ private:
     uint32_t window_height_ = 0;
     DXGI_FORMAT frame_format_ = DXGI_FORMAT_NV12;
     bool is_hdr_ = false;
+    bool has_frame_ = false;
 };
 
 } // namespace deskbeam

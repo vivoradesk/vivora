@@ -11,7 +11,7 @@ DeskBeam is an open-source, low-latency remote desktop application. The goal is 
 - **Build tool:** CMake
 - **Dependencies:** Qt 6.5+, NVIDIA Video Codec SDK, FFmpeg (libavcodec, libavutil), Opus, OpenSSL 3.x
 - **Optional deps:** AMD AMF SDK, Intel oneVPL, x264
-- **Target platforms (MVP):** Windows host + client, Linux client
+- **Target platforms (MVP):** Windows host + client, macOS host + client, Linux host + client
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -22,7 +22,7 @@ ctest --test-dir build
 
 ## Architecture
 
-Two executables (host and client) plus a relay server, sharing common protocol/codec/utils code.
+A single `deskbeam` executable that runs in either host or client mode (selected at launch), plus a standalone relay server. All modes share the common protocol/codec/utils code.
 
 **Host pipeline:** Screen Capture (DXGI) -> GPU Encoder (NVENC/AMF/QSV) -> Custom UDP Protocol -> Network. Zero-copy: frame stays in GPU memory from capture through encoding (ID3D11Texture2D -> NVENC directly). Input injection receives events via separate reliable UDP channel and uses SendInput API.
 

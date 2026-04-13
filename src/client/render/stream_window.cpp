@@ -43,9 +43,11 @@ bool StreamWindow::init_renderer(ID3D11Device* device, uint32_t width, uint32_t 
     }
     resize(target_w, target_h);
 
-    // Use actual widget client size for swap chain, frame size for VP input
-    uint32_t client_w = static_cast<uint32_t>(this->width());
-    uint32_t client_h = static_cast<uint32_t>(this->height());
+    // Swap chain needs PHYSICAL pixels, not Qt logical pixels.
+    // On high-DPI monitors devicePixelRatio() > 1.
+    qreal dpr = devicePixelRatio();
+    uint32_t client_w = static_cast<uint32_t>(this->width() * dpr);
+    uint32_t client_h = static_cast<uint32_t>(this->height() * dpr);
     initialized_ = renderer_.init(device, hwnd, width, height, client_w, client_h, format);
     return initialized_;
 }
@@ -58,7 +60,14 @@ bool StreamWindow::render_frame(ID3D11Texture2D* texture, uint32_t subresource) 
 void StreamWindow::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (initialized_) {
-        renderer_.resize(event->size().width(), event->size().height());
+        // Convert Qt logical pixels to physical pixels for the swap chain.
+        qreal dpr = devicePixelRatio();
+        uint32_t phys_w = static_cast<uint32_t>(event->size().width() * dpr);
+        uint32_t phys_h = static_cast<uint32_t>(event->size().height() * dpr);
+        renderer_.resize(phys_w, phys_h);
+        // Re-render last frame at new size so the window isn't blank/stale
+        // until the next stream frame arrives.
+        renderer_.re_present();
     }
 }
 
