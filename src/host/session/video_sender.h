@@ -14,6 +14,9 @@ namespace deskbeam::host {
 // Fragments an encoded frame and sends all packets over UDP.
 // Keeps a ring buffer of recently-sent fragments so they can be retransmitted
 // on client NACK (selective repeat). Generates XOR FEC parity packets.
+//
+// Supports multi-client: prepare_frame() fragments + FEC once, then
+// send_prepared() sends to each destination.
 class VideoSender {
 public:
     // Retransmit buffer capacity (fragments). At 60fps + IDR bursts, ~2048
@@ -27,8 +30,16 @@ public:
 
     void reset_retx_budget() { retx_budget_ = MAX_RETX_PER_POLL; }
 
-    // Send an encoded frame to the given destination.
-    // Returns number of packets sent (including FEC), or -1 on error.
+    // Prepare a frame for sending: fragment, generate FEC, store in retx buffer.
+    // Call once per frame, then send_prepared() for each destination.
+    void prepare_frame(const uint8_t* data, size_t data_len,
+                       uint16_t frame_seq, uint32_t timestamp, bool keyframe);
+
+    // Send the most recently prepared frame to |dest|.
+    // Returns number of packets sent, or -1 on error.
+    int send_prepared(const net::SocketAddr& dest);
+
+    // Convenience: prepare + send to a single destination (backwards compat).
     int send_frame(const uint8_t* data, size_t data_len,
                    uint16_t frame_seq, uint32_t timestamp,
                    bool keyframe, const net::SocketAddr& dest);
@@ -57,16 +68,12 @@ private:
     }
 
     // Graduated relaxation: 3 -> 5 -> 10, one step at a time.
-    // K=20 disabled: retransmits mask channel loss from FEC EWMA,
-    // causing 10↔20 flapping. K=10 (10% overhead) is the stable
-    // operating point for WiFi.
     static uint8_t next_relax_step(uint8_t current_k) {
         if (current_k < 5)  return 5;
         return 10;
     }
 
     void store_retx(uint32_t key, std::vector<uint8_t> wire);
-    int send_wire(const std::vector<uint8_t>& wire, const net::SocketAddr& dest);
 
     net::IUdpSocket& socket_;
     net::FrameFragmenter fragmenter_;
@@ -76,21 +83,23 @@ private:
     uint64_t retransmits_ = 0;
     float last_loss_rate_ = 0.0f;
 
+    // Prepared wire packets (data + FEC) ready for send_prepared().
+    std::vector<std::vector<uint8_t>> prepared_wires_;
+
     // Adaptive K: hysteresis + cooldown to prevent oscillation.
-    // After tightening K, we don't relax for RELAX_COOLDOWN reports (~5 sec).
-    // After relaxing, a shorter cooldown prevents immediate re-tightening.
     uint8_t pending_k_ = 10;
     uint8_t pending_k_count_ = 0;
-    uint16_t cooldown_ = 0;       // reports remaining before K can change again
-    static constexpr uint8_t HYSTERESIS_DOWN = 2;    // tighten quickly
-    static constexpr uint8_t HYSTERESIS_UP   = 8;    // relax slowly (~4 sec)
-    static constexpr uint16_t TIGHTEN_COOLDOWN = 4;  // ~2 sec after tightening
-    static constexpr uint16_t RELAX_COOLDOWN   = 20; // ~10 sec after relaxing
+    uint16_t cooldown_ = 0;
+    static constexpr uint8_t HYSTERESIS_DOWN = 2;
+    static constexpr uint8_t HYSTERESIS_UP   = 8;
+    static constexpr uint16_t TIGHTEN_COOLDOWN = 4;
+    static constexpr uint16_t RELAX_COOLDOWN   = 20;
 
     // RTT-based proactive K lowering: spike detection.
-    static constexpr double RTT_SPIKE_MS  = 30.0;   // force K=3 above this
-    static constexpr double RTT_NORMAL_MS = 15.0;    // release lock below this
-    static constexpr uint8_t RTT_NORMAL_CYCLES = 6;  // ~3 sec of normal RTT to unlock
+    // 80ms threshold avoids false positives from normal WiFi jitter (20-40ms).
+    static constexpr double RTT_SPIKE_MS  = 80.0;
+    static constexpr double RTT_NORMAL_MS = 25.0;
+    static constexpr uint8_t RTT_NORMAL_CYCLES = 20;
     bool     rtt_locked_k3_ = false;
     uint8_t  rtt_normal_count_ = 0;
     uint8_t  pre_lock_k_ = 10;

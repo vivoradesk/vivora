@@ -12,6 +12,9 @@ struct SocketAddr {
 
     bool operator==(const SocketAddr& o) const { return ip == o.ip && port == o.port; }
     bool operator!=(const SocketAddr& o) const { return !(*this == o); }
+    bool operator<(const SocketAddr& o) const {
+        return ip < o.ip || (ip == o.ip && port < o.port);
+    }
 };
 
 // Parse "1.2.3.4" -> network byte order IP. Returns 0 on failure.

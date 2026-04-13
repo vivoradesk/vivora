@@ -13,57 +13,39 @@ void VideoSender::store_retx(uint32_t key, std::vector<uint8_t> wire) {
     }
 }
 
-int VideoSender::send_wire(const std::vector<uint8_t>& wire,
-                           const net::SocketAddr& dest) {
-    int r = socket_.send_to(wire.data(), wire.size(), dest);
-    if (r > 0) bytes_sent_ += r;
-    return r;
-}
-
-int VideoSender::send_frame(const uint8_t* data, size_t data_len,
-                            uint16_t frame_seq, uint32_t timestamp,
-                            bool keyframe, const net::SocketAddr& dest)
+void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
+                                uint16_t frame_seq, uint32_t timestamp,
+                                bool keyframe)
 {
+    prepared_wires_.clear();
+
     // Flush any in-progress FEC group before a keyframe so that the
     // keyframe starts a fresh group (with potentially lower K).
     if (keyframe) {
         std::vector<uint8_t> fec_wire;
         if (fec_encoder_.flush(frame_seq, timestamp, fec_wire)) {
-            if (send_wire(fec_wire, dest) < 0)
-                log::warn("VideoSender", "FEC flush send failed");
-            else {
-                packets_sent_++;
-                // FEC packets not stored in retx — they're regeneratable
-            }
+            prepared_wires_.push_back(std::move(fec_wire));
         }
     }
 
     auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp, keyframe);
 
-    int sent = 0;
     uint16_t frag_idx = 0;
     for (auto& pkt : packets) {
         auto wire = pkt.serialize();
 
-        if (send_wire(wire, dest) < 0) {
-            log::error("VideoSender", "send_to failed at packet %d/%zu", sent, packets.size());
-            return -1;
-        }
-        sent++;
-
-        // Store in retransmit buffer
+        // Store in retransmit buffer.
         uint32_t key = retx_key(frame_seq, frag_idx);
-        store_retx(key, wire);  // wire is copied here, we need it for FEC below
+        store_retx(key, wire);  // wire is copied here
 
-        // Feed to FEC encoder — may produce a parity packet
+        prepared_wires_.push_back(wire);
+
+        // Feed to FEC encoder — may produce a parity packet.
         std::vector<uint8_t> fec_wire;
-        const auto& retx_wire = retx_index_[key]; // use the stored copy
+        const auto& retx_wire = retx_index_[key];
         if (fec_encoder_.feed(retx_wire.data(), retx_wire.size(),
                               frame_seq, timestamp, fec_wire)) {
-            if (send_wire(fec_wire, dest) >= 0) {
-                packets_sent_++;
-                sent++;
-            }
+            prepared_wires_.push_back(std::move(fec_wire));
         }
 
         frag_idx++;
@@ -73,15 +55,33 @@ int VideoSender::send_frame(const uint8_t* data, size_t data_len,
     if (keyframe) {
         std::vector<uint8_t> fec_wire;
         if (fec_encoder_.flush(frame_seq, timestamp, fec_wire)) {
-            if (send_wire(fec_wire, dest) >= 0) {
-                packets_sent_++;
-                sent++;
-            }
+            prepared_wires_.push_back(std::move(fec_wire));
         }
     }
 
-    packets_sent_ += static_cast<uint64_t>(frag_idx); // data packets only
+    packets_sent_ += static_cast<uint64_t>(frag_idx);
+}
+
+int VideoSender::send_prepared(const net::SocketAddr& dest) {
+    int sent = 0;
+    for (const auto& wire : prepared_wires_) {
+        int r = socket_.send_to(wire.data(), wire.size(), dest);
+        if (r < 0) {
+            log::error("VideoSender", "send_to failed at packet %d/%zu", sent, prepared_wires_.size());
+            return -1;
+        }
+        bytes_sent_ += r;
+        sent++;
+    }
     return sent;
+}
+
+int VideoSender::send_frame(const uint8_t* data, size_t data_len,
+                            uint16_t frame_seq, uint32_t timestamp,
+                            bool keyframe, const net::SocketAddr& dest)
+{
+    prepare_frame(data, data_len, frame_seq, timestamp, keyframe);
+    return send_prepared(dest);
 }
 
 int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count,
@@ -89,17 +89,14 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
 {
     int resent = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (retx_budget_ <= 0) break; // don't starve capture pipeline
+        if (retx_budget_ <= 0) break;
 
         uint32_t key = retx_key(seq_no, frag_indices[i]);
         auto it = retx_index_.find(key);
-        if (it == retx_index_.end()) continue; // aged out or never existed
+        if (it == retx_index_.end()) continue;
 
         // Mark the wire as a retransmission so the receiver's FEC EWMA
-        // can distinguish it from an original transmission.  FEC parity
-        // was already computed over the clean wire on first send, so
-        // modifying the flag byte here is safe — the receiver strips
-        // FLAG_RETX before XOR recovery, restoring byte-identity.
+        // can distinguish it from an original transmission.
         if (it->second.size() > 7) {
             it->second[7] |= protocol::FLAG_RETX;
         }
@@ -118,18 +115,11 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
 void VideoSender::update_fec_from_loss(float loss_rate) {
     last_loss_rate_ = loss_rate;
 
-    // Cooldown: after a K change, ignore reports for a while to let the
-    // new K take effect and the EWMA settle.  This breaks the
-    // "FEC hides its own losses" oscillation loop.
     if (cooldown_ > 0) {
         --cooldown_;
         return;
     }
 
-    // Map loss rate to target K.
-    // K=20 disabled: retransmits mask channel loss from FEC EWMA
-    // (retransmitted packets fill ring buffer before FEC resolves),
-    // causing persistent 10↔20 flapping. K=10 is the max for now.
     uint8_t target_k;
     if (loss_rate < 0.02f)       target_k = 10;
     else if (loss_rate < 0.04f)  target_k = 5;
@@ -137,7 +127,6 @@ void VideoSender::update_fec_from_loss(float loss_rate) {
 
     uint8_t current_k = fec_encoder_.group_size();
 
-    // Tightening (lower K): immediate — don't wait for hysteresis.
     if (target_k < current_k) {
         log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%, tighten)",
                   current_k, target_k, loss_rate * 100.0f);
@@ -148,13 +137,8 @@ void VideoSender::update_fec_from_loss(float loss_rate) {
         return;
     }
 
-    // Block relaxation while RTT-locked at K=3.
     if (rtt_locked_k3_ && target_k > current_k) return;
 
-    // Relaxation (higher K): graduated, one step at a time.
-    // Steps: 3 -> 5 -> 10 -> 20. Never skip levels.
-    // Count any report suggesting relaxation (target > current), regardless
-    // of exact target value. Reset only when target suggests tightening.
     if (target_k > current_k) {
         ++pending_k_count_;
 
@@ -166,8 +150,6 @@ void VideoSender::update_fec_from_loss(float loss_rate) {
             cooldown_ = RELAX_COOLDOWN;
             pending_k_count_ = 0;
         }
-    } else if (target_k == current_k) {
-        // Stable at current level — don't accumulate, don't reset.
     }
 }
 

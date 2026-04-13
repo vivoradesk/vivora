@@ -48,29 +48,47 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // applied to the encoder (not the controller's internal current), so
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
-
-    host::SessionState prev_state = session.state();
+    bool had_clients = false;
 
     while (true) {
         session.poll();
 
-        if (session.state() == host::SessionState::Disconnected &&
-            total_frames > 0) {
-            log::info("HOST", "Client disconnected");
+        // Exit when all clients disconnect after we've had at least one.
+        if (session.state() == host::SessionState::Disconnected && had_clients) {
+            log::info("HOST", "All clients disconnected");
             break;
         }
 
-        // Detect WaitingForClient -> Connected and arm warm-up ramp.
-        if (prev_state != host::SessionState::Connected &&
-            session.state() == host::SessionState::Connected) {
-            bitrate_ctl.notify_client_connected();
-            platform.set_bitrate(bitrate_ctl.current());
-            last_applied_br = bitrate_ctl.current();
-            log::info("HOST", "Warmup start -> %u kbps", last_applied_br / 1000);
-            last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
-            last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+        // Handle new client connections.
+        if (session.consume_new_client_flag()) {
+            if (!had_clients) {
+                // First client: arm warm-up ramp (cold start).
+                bitrate_ctl.notify_client_connected();
+                platform.set_bitrate(bitrate_ctl.current());
+                last_applied_br = bitrate_ctl.current();
+                log::info("HOST", "First client connected, warmup -> %u kbps",
+                          last_applied_br / 1000);
+                last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
+                last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+            } else {
+                // Additional client: cut bitrate proportionally so total
+                // wire rate doesn't spike (N clients share the link).
+                size_t n = session.client_count();
+                bitrate_ctl.set_client_count(n);
+                uint32_t new_br = bitrate_ctl.current() * (n - 1) / n;
+                if (new_br < 1'000'000) new_br = 1'000'000;
+                bitrate_ctl.force_bitrate(new_br);
+                platform.set_bitrate(new_br);
+                last_applied_br = new_br;
+                log::info("HOST", "New client connected (%zu total), bitrate -> %u kbps",
+                          n, new_br / 1000);
+            }
+            had_clients = true;
         }
-        prev_state = session.state();
+
+        // Keep bitrate controller aware of client count so it can
+        // divide the ceiling (total wire = bitrate × clients).
+        bitrate_ctl.set_client_count(session.client_count());
 
         // Feed BW probe result to bitrate controller (once).
         if (session.probe_bw_bps() > 0 && !session.probe_pending()) {
@@ -171,15 +189,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 last_log_frames = total_frames;
                 uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
                 uint8_t fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
-                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, fec_k: %d, state: %s",
+                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, fec_k: %d, clients: %zu",
                     (unsigned long long)total_frames,
                     inst_fps,
                     session.rtt_ms(),
                     (unsigned long long)retx,
                     (int)fec_k,
-                    session.state() == host::SessionState::Connected ? "connected" :
-                    session.state() == host::SessionState::WaitingForClient ? "waiting" :
-                    "disconnected");
+                    session.client_count());
             }
         }
     }

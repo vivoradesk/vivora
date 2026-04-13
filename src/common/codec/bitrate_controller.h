@@ -104,6 +104,21 @@ public:
                   bps / 1000, probe_ceiling_bps_ / 1000);
     }
 
+    // Force a specific bitrate (e.g. when client count changes and the
+    // current bitrate is already too high for the new N).
+    void force_bitrate(uint32_t bps) {
+        current_bps_ = clamp(bps);
+        stable_cycles_ = 0;
+        loss_pending_ = 0.0;
+    }
+
+    // Tell the controller how many clients share the outbound link.
+    // The recovery ceiling is divided by this count so that total wire
+    // rate (bitrate × N) stays within the channel capacity.
+    void set_client_count(size_t n) {
+        client_count_ = n > 0 ? static_cast<uint32_t>(n) : 1;
+    }
+
     // Network-feedback inputs.
     void on_rtt(double ms)                  { last_rtt_ms_ = ms; }
     void on_estimated_bandwidth(uint32_t bps) { estimated_bw_bps_ = bps; }
@@ -167,19 +182,39 @@ public:
                 if (changed) *changed = diff;
                 return current_bps_;
             }
-            // Ramp finished: snap to the capped end, raise flag, fall
-            // through to normal adaptation (which can still recover to
-            // base over time if the channel is truly capable).
+            // Ramp finished: snap to the capped end, raise flag.
+            // Lock post-warmup recovery to the same ceiling — the full
+            // default_bps_ is usually unreachable on WiFi and recovering
+            // toward it just causes congestion oscillation.
             warmup_active_     = false;
             warmup_just_ended_ = true;
+            recovery_ceiling_bps_ = warmup_end;
+            log::info("BitrateCtl", "Warmup done, recovery ceiling = %u kbps",
+                      warmup_end / 1000);
             const bool diff = warmup_end != current_bps_;
             current_bps_ = warmup_end;
             if (changed) *changed = diff;
             return current_bps_;
         }
 
+        // Recovery target: if we came through warmup, cap at the ceiling
+        // we discovered (probe or static). Recovering toward the full
+        // default on constrained links (WiFi, hotspot) just causes
+        // repeated congestion → cut → recovery → congestion oscillation.
+        // With N clients, total wire rate = bitrate × N. Divide the
+        // ceiling so the aggregate stays within channel capacity.
+        const uint32_t raw_ceiling = recovery_ceiling_bps_ > 0
+                                    ? std::min(base, recovery_ceiling_bps_)
+                                    : base;
+        const uint32_t recover_cap = std::max(bounds_.min_bps,
+                                              raw_ceiling / client_count_);
+
         // Absolute floor: prefer blocky picture over full freezes on bad WiFi.
-        const uint32_t adapt_floor = std::max(bounds_.min_bps, 6'000'000u);
+        // Must not exceed recover_cap — otherwise a cut floors above the
+        // ceiling and recovery can never bring it back down.
+        const uint32_t adapt_floor = std::min(
+            std::max(bounds_.min_bps, 6'000'000u / client_count_),
+            recover_cap);
 
         // Helper lambda: a cut just happened. If we were previously
         // growing toward the ceiling, this is the "up-then-down" pattern
@@ -224,14 +259,14 @@ public:
             else stable_cycles_ = 0;
             loss_pending_ = 0.0;
 
-            if (stable_cycles_ >= recover_delay_ && current_bps_ < base) {
-                // +1/recovery_divisor of default per cycle.
+            if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap) {
+                // +1/recovery_divisor of cap per cycle.
                 // Base is 50 (+2%). After each up-then-down it doubles:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
                 // run (RECOVER_RESET_CYCLES) resets back to base.
-                uint32_t step = base / recovery_divisor_;
+                uint32_t step = recover_cap / recovery_divisor_;
                 if (step == 0) step = 1;
-                next = std::min(base, current_bps_ + step);
+                next = std::min(recover_cap, current_bps_ + step);
                 had_growth_ = true;
             } else {
                 next = current_bps_;
@@ -283,6 +318,8 @@ private:
     bool     warmup_active_              = false;
     bool     warmup_just_ended_          = false;
     uint32_t probe_ceiling_bps_          = 0;
+    uint32_t recovery_ceiling_bps_       = 0;  // post-warmup cap for additive recovery
+    uint32_t client_count_               = 1;
     // Network feedback.
     double   last_rtt_ms_      = 0.0;
     uint32_t estimated_bw_bps_ = 0;
