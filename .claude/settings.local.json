@@ -122,7 +122,9 @@
       "Bash(awk -F'FPS: ' '{split\\($2,a,\",\"\\); fps=a[1]+0; split\\($1,t,\"[\"\\); ts=t[2]+0; print ts, fps}')",
       "Bash(awk 'NR>1{gap=\\($1-prev_ts\\)/1000; if\\(gap>3\\) printf \">>> GAP %.1fs at frame window ts=%d \\(fps was %.1f\\)\\\\n\", gap, prev_ts, prev_fps} {prev_ts=$1; prev_fps=$2}')",
       "Bash(awk -F'[][]' '{print $2}')",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(build/bin/Release/deskbeam.exe:*)",
+      "Bash(wc -l src/app/*.h src/app/*.cpp src/app/*.mm)"
     ]
   }
 }

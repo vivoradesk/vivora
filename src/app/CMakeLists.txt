@@ -3,6 +3,8 @@ qt_standard_project_setup()
 
 add_executable(deskbeam
     main.cpp
+    host_loop.cpp
+    view_loop.cpp
 )
 
 target_link_libraries(deskbeam PRIVATE deskbeam_common Qt6::Core Qt6::Widgets)
@@ -22,6 +24,11 @@ target_include_directories(deskbeam PRIVATE
 )
 
 if(APPLE)
+    # macOS platform implementations (Objective-C++)
+    target_sources(deskbeam PRIVATE
+        mac_host_platform.mm
+        mac_view_platform.mm
+    )
     # macOS client: Cocoa window + AVSampleBufferDisplayLayer
     target_sources(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/src/client/render/mac_video_view.mm
@@ -46,6 +53,11 @@ if(APPLE)
 endif()
 
 if(WIN32)
+    # Windows platform implementations
+    target_sources(deskbeam PRIVATE
+        windows_host_platform.cpp
+        windows_view_platform.cpp
+    )
     # Host-side sources (Windows DXGI/AMF + SendInput)
     target_sources(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp
