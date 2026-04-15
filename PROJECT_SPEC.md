@@ -431,11 +431,13 @@ Overlay в клиенте (toggle по горячей клавише) долже
 
 ---
 
-## Naming (предварительно)
+## Naming
 
 - **DeskBeam** — финальное название проекта
 - Desk = remote desktop, Beam = луч/передача/стриминг
-- Зарезервировать: github.com/deskbeam, deskbeam.io, deskbeam.dev
+- GitHub: github.com/deskbeam ✅
+- Домен: deskbeam.dev ✅
+- Email: hello@deskbeam.dev (через Cloudflare Email Routing)
 
 ---
 
