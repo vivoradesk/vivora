@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/utils/types.h"
+#include "common/codec/video_codec.h"
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -13,11 +14,6 @@ struct ID3D11Texture2D;
 #endif
 
 namespace deskbeam {
-
-enum class VideoCodec : uint8_t {
-    H264 = 0,
-    HEVC = 1,
-};
 
 // Which hardware encoder backend to use. `Auto` probes available runtimes.
 enum class EncoderKind : uint8_t {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/codec/video_codec.h"
 #include "common/net/socket.h"
 #include "client/net/video_receiver.h"
 #include "client/audio/audio_receiver.h"
@@ -40,6 +41,10 @@ public:
 
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }
+
+    // Codec advertised by the host in HELLO_ACK.  Defaults to HEVC for
+    // legacy hosts that don't carry the codec byte.
+    VideoCodec host_codec() const { return host_codec_; }
     uint64_t frames_dropped() const;
     VideoReceiver* receiver() { return receiver_.get(); }
     AudioReceiver* audio_receiver() { return audio_receiver_.get(); }
@@ -65,6 +70,7 @@ private:
     std::unique_ptr<AudioReceiver> audio_receiver_;
     uint16_t audio_local_port_ = 0;
     SessionState state_ = SessionState::Disconnected;
+    VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};
     TimePoint connect_start_;
     TimePoint last_hello_time_;

@@ -251,11 +251,21 @@ void ClientSession::handle_control(const uint8_t* payload, size_t len) {
     if (len < sizeof(HELLO_ACK)) return;
     if (std::memcmp(payload, HELLO_ACK, sizeof(HELLO_ACK)) != 0) return;
 
+    // Newer hosts append a codec byte after the legacy ACK: 0 = H.264, 1 = HEVC.
+    // Legacy hosts omit the byte — fall back to HEVC.
+    if (len >= sizeof(HELLO_ACK) + 1) {
+        uint8_t codec_byte = payload[sizeof(HELLO_ACK)];
+        host_codec_ = (codec_byte == static_cast<uint8_t>(VideoCodec::H264))
+                          ? VideoCodec::H264
+                          : VideoCodec::HEVC;
+    }
+
     if (state_ == SessionState::Connecting) {
         state_ = SessionState::Connected;
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - connect_start_).count();
-        log::info("ClientSession", "Connected (handshake took %lldms)", elapsed);
+        log::info("ClientSession", "Connected (handshake took %lldms, host codec=%s)",
+                  elapsed, host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
     }
 }
 

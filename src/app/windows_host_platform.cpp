@@ -57,6 +57,9 @@ uint32_t WindowsHostPlatform::capture_height() const { return capture_->get_reso
 
 void WindowsHostPlatform::set_bitrate(uint32_t bps) { encoder_->set_bitrate(bps); }
 void WindowsHostPlatform::request_idr() { encoder_->request_idr(); }
+deskbeam::VideoCodec WindowsHostPlatform::actual_codec() const {
+    return encoder_ ? encoder_->get_config().codec : deskbeam::VideoCodec::HEVC;
+}
 
 bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                                               bool& content_changed,

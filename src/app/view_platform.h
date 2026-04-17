@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/codec/video_codec.h"
 #include "common/protocol/input_event.h"
 #include <cstdint>
 #include <cstddef>
@@ -21,6 +22,11 @@ struct ViewPlatform {
 
     // Process windowing events.  Returns false if the window was closed.
     virtual bool pump_events() = 0;
+
+    // Lazily initialize the decoder for the negotiated codec (known only
+    // after the handshake). Idempotent — subsequent calls with the same
+    // codec are no-ops.  Returns true if decoder is ready.
+    virtual bool init_decoder(VideoCodec codec) = 0;
 
     // Decode an assembled frame.  Called only after keyframe gating passes.
     virtual bool decode(const uint8_t* data, size_t len,

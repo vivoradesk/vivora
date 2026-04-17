@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/codec/video_codec.h"
 #include "common/utils/types.h"
 #include <cstdint>
 #include <memory>
@@ -27,10 +28,11 @@ class IVideoDecoder {
 public:
     virtual ~IVideoDecoder() = default;
 
-    // Initialize decoder. If device is null, decoder creates its own.
-    virtual bool init(ID3D11Device* device = nullptr) = 0;
+    // Initialize decoder for the given codec. If device is null, decoder
+    // creates its own.
+    virtual bool init(VideoCodec codec, ID3D11Device* device = nullptr) = 0;
 
-    // Feed encoded data (HEVC NAL units). May buffer internally.
+    // Feed encoded data (HEVC or H.264 NAL units). May buffer internally.
     virtual bool decode(const uint8_t* data, size_t len, uint64_t pts) = 0;
 
     // Retrieve decoded frames. Returns false when no more available.

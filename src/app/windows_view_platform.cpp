@@ -11,16 +11,23 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     // Initialize COM as MTA before Qt (which may set STA).
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-    decoder_ = deskbeam::IVideoDecoder::create();
-    if (!decoder_->init()) {
-        deskbeam::log::error("VIEW", "Failed to init decoder");
-        return false;
-    }
-
+    // Decoder creation deferred to init_decoder() — codec is only known
+    // after the HELLO_ACK handshake.
     app_ = std::make_unique<QApplication>(argc, argv);
     window_ = std::make_unique<deskbeam::StreamWindow>();
     window_->setWindowTitle(QString("DeskBeam — %1:%2").arg(host_ip).arg(port));
     window_->show();
+    return true;
+}
+
+bool WindowsViewPlatform::init_decoder(deskbeam::VideoCodec codec) {
+    if (decoder_) return true;
+    decoder_ = deskbeam::IVideoDecoder::create();
+    if (!decoder_->init(codec)) {
+        deskbeam::log::error("VIEW", "Failed to init decoder");
+        decoder_.reset();
+        return false;
+    }
     return true;
 }
 
@@ -36,12 +43,14 @@ bool WindowsViewPlatform::pump_events() {
 bool WindowsViewPlatform::decode(const uint8_t* data, size_t len,
                                   uint32_t /*timestamp*/, bool /*keyframe*/,
                                   uint16_t seq_no) {
+    if (!decoder_) return false;
     bool ok = decoder_->decode(data, len, seq_no);
     if (!ok) deskbeam::log::warn("VIEW", "Decoder rejected frame seq=%u", seq_no);
     return ok;
 }
 
 int WindowsViewPlatform::render() {
+    if (!decoder_) return 0;
     int count = 0;
     deskbeam::DecodedFrame decoded;
     while (decoder_->get_frame(decoded)) {
@@ -65,7 +74,7 @@ int WindowsViewPlatform::render() {
     return count;
 }
 
-void WindowsViewPlatform::flush_decoder() { decoder_->flush(); }
+void WindowsViewPlatform::flush_decoder() { if (decoder_) decoder_->flush(); }
 
 void WindowsViewPlatform::shutdown() {
     window_.reset();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/codec/video_codec.h"
 #include "common/net/socket.h"
 #include "host/session/video_sender.h"
 #include "host/audio/audio_sender.h"
@@ -42,6 +43,10 @@ public:
 
     bool start(uint16_t port = DEFAULT_PORT);
     void stop();
+
+    // Advertise which codec the host is encoding in.  Sent to the client
+    // in HELLO_ACK so it can initialise the matching decoder.
+    void set_codec(VideoCodec codec) { codec_ = codec; }
 
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
@@ -107,6 +112,7 @@ private:
     // Connected clients keyed by address.
     std::map<net::SocketAddr, ClientInfo> clients_;
     bool new_client_flag_ = false;
+    VideoCodec codec_ = VideoCodec::HEVC;
 
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;

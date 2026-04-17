@@ -301,13 +301,16 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
             | (static_cast<uint16_t>(payload[sizeof(HELLO_MAGIC) + 1]) << 8);
     }
 
-    // Send ACK.
+    // Send ACK.  Legacy ACK is 10 bytes (magic + 0x01 + 0x00).  We append a
+    // codec byte (0=H.264, 1=HEVC) so the client can initialise the correct
+    // decoder.  Older clients ignore trailing bytes, so this stays wire-compat.
     protocol::Packet ack;
     ack.header.type = protocol::PacketType::Control;
     ack.header.seq_no = 0;
     ack.header.timestamp = 0;
     ack.header.flags = 0;
     ack.payload.assign(HELLO_ACK, HELLO_ACK + sizeof(HELLO_ACK));
+    ack.payload.push_back(static_cast<uint8_t>(codec_));
     ack.header.payload_len = static_cast<uint16_t>(ack.payload.size());
 
     auto wire = ack.serialize();

@@ -34,7 +34,8 @@ MfDecoder::~MfDecoder() {
     MFShutdown();
 }
 
-bool MfDecoder::init(ID3D11Device* device) {
+bool MfDecoder::init(VideoCodec codec, ID3D11Device* device) {
+    codec_ = codec;
     // COM may already be initialized by Qt (STA). Accept either mode.
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr)) {
@@ -61,7 +62,8 @@ bool MfDecoder::init(ID3D11Device* device) {
 
     if (!create_decoder()) return false;
 
-    log::info("DECODE", "Media Foundation HEVC decoder initialized (D3D11VA)");
+    log::info("DECODE", "Media Foundation %s decoder initialized (D3D11VA)",
+              codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
     return true;
 }
 
@@ -100,9 +102,12 @@ bool MfDecoder::create_decoder() {
         return false;
     }
 
-    // Find HEVC decoder MFT via MFTEnum
+    const GUID subtype = (codec_ == VideoCodec::HEVC) ? MFVideoFormat_HEVC : MFVideoFormat_H264;
+    const char* codec_name = (codec_ == VideoCodec::HEVC) ? "HEVC" : "H.264";
+
+    // Find decoder MFT via MFTEnum
     {
-        MFT_REGISTER_TYPE_INFO input_info = { MFMediaType_Video, MFVideoFormat_HEVC };
+        MFT_REGISTER_TYPE_INFO input_info = { MFMediaType_Video, subtype };
         IMFActivate** activates = nullptr;
         UINT32 count = 0;
 
@@ -111,7 +116,8 @@ bool MfDecoder::create_decoder() {
                        MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
                        &input_info, nullptr, &activates, &count);
         if (FAILED(hr) || count == 0) {
-            log::error("DECODE", "No HEVC decoder found (install HEVC Video Extensions?)");
+            log::error("DECODE", "No %s decoder found (install %s Video Extensions?)",
+                       codec_name, codec_name);
             return false;
         }
 
@@ -132,10 +138,10 @@ bool MfDecoder::create_decoder() {
         for (UINT32 i = 0; i < count; ++i) activates[i]->Release();
         CoTaskMemFree(activates);
         if (FAILED(hr)) {
-            log::error("DECODE", "ActivateObject HEVC decoder failed: 0x%08X", hr);
+            log::error("DECODE", "ActivateObject %s decoder failed: 0x%08X", codec_name, hr);
             return false;
         }
-        log::info("DECODE", "Using HEVC decoder #0 of %u", count);
+        log::info("DECODE", "Using %s decoder #0 of %u", codec_name, count);
     }
 
     // Check if MFT is async and unlock it if needed
@@ -174,11 +180,11 @@ bool MfDecoder::create_decoder() {
         log::info("DECODE", "Low-latency mode enabled");
     }
 
-    // Set input type: HEVC
+    // Set input type
     IMFMediaType* input_type = nullptr;
     MFCreateMediaType(&input_type);
     input_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    input_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_HEVC);
+    input_type->SetGUID(MF_MT_SUBTYPE, subtype);
     // Provide nominal resolution (will be updated from bitstream)
     MFSetAttributeSize(input_type, MF_MT_FRAME_SIZE, 3840, 2160);
     MFSetAttributeRatio(input_type, MF_MT_FRAME_RATE, 60, 1);
@@ -187,10 +193,10 @@ bool MfDecoder::create_decoder() {
     input_type->Release();
 
     if (FAILED(hr)) {
-        log::error("DECODE", "SetInputType HEVC failed: 0x%08X", hr);
+        log::error("DECODE", "SetInputType %s failed: 0x%08X", codec_name, hr);
         return false;
     }
-    log::info("DECODE", "Input type set: HEVC");
+    log::info("DECODE", "Input type set: %s", codec_name);
 
     // Configure output type
     if (!configure_output()) {

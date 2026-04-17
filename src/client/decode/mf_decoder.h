@@ -19,7 +19,7 @@ public:
     MfDecoder() = default;
     ~MfDecoder() override;
 
-    bool init(ID3D11Device* device = nullptr) override;
+    bool init(VideoCodec codec, ID3D11Device* device = nullptr) override;
     bool decode(const uint8_t* data, size_t len, uint64_t pts) override;
     bool get_frame(DecodedFrame& frame) override;
     void flush() override;
@@ -38,6 +38,7 @@ private:
     UINT reset_token_ = 0;
     bool started_ = false;
     bool failed_ = false;  // set after any SEH crash; decoder becomes inert
+    VideoCodec codec_ = VideoCodec::HEVC;
 
     std::queue<DecodedFrame> output_frames_;
 };

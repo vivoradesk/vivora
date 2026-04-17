@@ -19,6 +19,20 @@
 #include "app/mac_view_platform.h"
 #endif
 
+// Match a long-form flag with an attached value: both "--flag VALUE" (next
+// argv) and "--flag=VALUE" (single argv with '=') are accepted.  Returns the
+// value pointer, or nullptr if the current argv doesn't match the flag.
+// Advances `i` past the value when the next argv is consumed.
+static const char* flag_value(const char* name, char** argv, int argc, int& i) {
+    const char* a = argv[i];
+    size_t nlen = std::strlen(name);
+    if (std::strncmp(a, name, nlen) == 0) {
+        if (a[nlen] == '=') return a + nlen + 1;
+        if (a[nlen] == '\0' && i + 1 < argc) return argv[++i];
+    }
+    return nullptr;
+}
+
 static void print_usage(const char* prog) {
     std::printf("DeskBeam v0.1.0 — low-latency remote desktop\n\n");
     std::printf("Usage:\n");
@@ -50,16 +64,16 @@ int main(int argc, char* argv[]) {
     deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
 
     for (int i = 1; i < argc; ++i) {
+        const char* v = nullptr;
         if (std::strcmp(argv[i], "--host") == 0) {
             mode_host = true;
-        } else if (std::strcmp(argv[i], "--display") == 0 && i + 1 < argc) {
-            display_index = static_cast<uint32_t>(std::atoi(argv[++i]));
+        } else if ((v = flag_value("--display", argv, argc, i)) != nullptr) {
+            display_index = static_cast<uint32_t>(std::atoi(v));
         } else if (std::strcmp(argv[i], "--hdr") == 0) {
             prefer_hdr = true;
-        } else if (std::strcmp(argv[i], "--bitrate") == 0 && i + 1 < argc) {
-            manual_bitrate_bps = static_cast<uint32_t>(std::atoi(argv[++i])) * 1'000'000u;
-        } else if (std::strcmp(argv[i], "--encoder") == 0 && i + 1 < argc) {
-            const char* v = argv[++i];
+        } else if ((v = flag_value("--bitrate", argv, argc, i)) != nullptr) {
+            manual_bitrate_bps = static_cast<uint32_t>(std::atoi(v)) * 1'000'000u;
+        } else if ((v = flag_value("--encoder", argv, argc, i)) != nullptr) {
             if      (std::strcmp(v, "auto")  == 0) encoder_kind = deskbeam::EncoderKind::Auto;
             else if (std::strcmp(v, "amf")   == 0) encoder_kind = deskbeam::EncoderKind::Amf;
             else if (std::strcmp(v, "nvenc") == 0) encoder_kind = deskbeam::EncoderKind::Nvenc;
@@ -68,8 +82,7 @@ int main(int argc, char* argv[]) {
                 std::fprintf(stderr, "Error: --encoder must be one of: auto, amf, nvenc, qsv\n");
                 return 1;
             }
-        } else if (std::strcmp(argv[i], "--codec") == 0 && i + 1 < argc) {
-            const char* v = argv[++i];
+        } else if ((v = flag_value("--codec", argv, argc, i)) != nullptr) {
             if      (std::strcmp(v, "h264") == 0 || std::strcmp(v, "avc")  == 0)
                 codec = deskbeam::VideoCodec::H264;
             else if (std::strcmp(v, "hevc") == 0 || std::strcmp(v, "h265") == 0)
@@ -83,8 +96,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 host_ip = argv[++i];
             }
-        } else if (std::strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
-            port = static_cast<uint16_t>(std::atoi(argv[++i]));
+        } else if ((v = flag_value("--port", argv, argc, i)) != nullptr) {
+            port = static_cast<uint16_t>(std::atoi(v));
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;

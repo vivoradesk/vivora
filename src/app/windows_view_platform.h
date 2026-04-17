@@ -15,6 +15,7 @@ public:
 
     void set_input_callback(InputCallback cb) override;
     bool pump_events() override;
+    bool init_decoder(deskbeam::VideoCodec codec) override;
     bool decode(const uint8_t* data, size_t len,
                 uint32_t timestamp, bool keyframe,
                 uint16_t seq_no) override;

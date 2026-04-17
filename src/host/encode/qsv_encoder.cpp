@@ -6,7 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <d3d11.h>
+#include <d3d11_4.h>
 #include <cstring>
 #include <cstdio>
 
@@ -189,6 +189,14 @@ bool QsvEncoder::create_session() {
         return false;
     }
     session_ = s;
+
+    // Intel oneVPL requires multithread-protected D3D11 device before SetHandle.
+    ID3D11Multithread* mt = nullptr;
+    if (SUCCEEDED(device_->QueryInterface(__uuidof(ID3D11Multithread),
+                                          reinterpret_cast<void**>(&mt))) && mt) {
+        mt->SetMultithreadProtected(TRUE);
+        mt->Release();
+    }
 
     // Hand our D3D11 device over to the session so internal surfaces are
     // allocated on the right adapter.

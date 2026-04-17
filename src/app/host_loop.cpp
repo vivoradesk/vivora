@@ -28,6 +28,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // Start session.
     host::HostSession session;
     session.set_screen_resolution(platform.input_width(), platform.input_height());
+    session.set_codec(platform.actual_codec());
     if (!session.start(cfg.port)) {
         log::error("HOST", "Failed to start session on port %u", cfg.port);
         return 1;

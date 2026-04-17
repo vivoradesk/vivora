@@ -37,9 +37,15 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
 
         session.poll();
 
-        // Once the handshake completes, open the audio output device and
-        // begin playing decoded Opus frames. Idempotent — start_audio() is
-        // a no-op after first success.
+        // Once the handshake completes we know the host codec — spin up
+        // the decoder now, and also open the audio output device.  Both
+        // idempotent after first success.
+        static bool decoder_ready = false;
+        if (!decoder_ready && session.state() == client::SessionState::Connected) {
+            if (platform.init_decoder(session.host_codec())) {
+                decoder_ready = true;
+            }
+        }
         static bool audio_started = false;
         if (!audio_started && session.state() == client::SessionState::Connected) {
             if (session.start_audio()) {

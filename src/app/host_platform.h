@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/codec/video_codec.h"
 #include <cstdint>
 #include <cstddef>
 
@@ -24,6 +25,11 @@ struct HostPlatform {
     // Encoder control.
     virtual void set_bitrate(uint32_t bps) = 0;
     virtual void request_idr() = 0;
+
+    // The codec the encoder actually produces.  May differ from what the
+    // caller requested if the backend had to fall back (e.g. NVENC refusing
+    // H.264 and using HEVC instead).  Defaults to HEVC.
+    virtual VideoCodec actual_codec() const { return VideoCodec::HEVC; }
 
     // Capture + encode one frame.  Returns true if a frame was captured
     // (even if encoding produced no output yet).  pts_us receives the

@@ -237,6 +237,14 @@ bool NvencEncoder::configure_encoder() {
     is_hdr_ = (config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
                config_.input_format == DXGI_FORMAT_R10G10B10A2_UNORM);
 
+    // NVENC path is HEVC-only. Our vendored nvEncodeAPI.h is a HEVC-only subset,
+    // so if the caller asked for H.264 we fall back and update the config so the
+    // client handshake advertises the actual codec.
+    if (config_.codec != VideoCodec::HEVC) {
+        log::warn(TAG, "NVENC backend currently supports only HEVC; ignoring --codec=h264 request");
+        config_.codec = VideoCodec::HEVC;
+    }
+
     // Get preset config as starting point.
     NV_ENC_PRESET_CONFIG preset_cfg = {};
     preset_cfg.version = ver(NV_ENC_PRESET_CONFIG_VER);
@@ -265,15 +273,17 @@ bool NvencEncoder::configure_encoder() {
     enc_cfg.gopLength    = config_.idr_period > 0 ? config_.idr_period : UINT32_MAX;
     enc_cfg.frameIntervalP = 1;
 
-    auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
-    hevc.repeatSPSPPS = 1;
-    hevc.idrPeriod    = enc_cfg.gopLength;
-    if (is_hdr_) {
-        hevc.pixelBitDepthMinus8 = 2;
-        enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
-    } else {
-        hevc.pixelBitDepthMinus8 = 0;
-        enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN_GUID;
+    {
+        auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
+        hevc.repeatSPSPPS = 1;
+        hevc.idrPeriod    = enc_cfg.gopLength;
+        if (is_hdr_) {
+            hevc.pixelBitDepthMinus8 = 2;
+            enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
+        } else {
+            hevc.pixelBitDepthMinus8 = 0;
+            enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN_GUID;
+        }
     }
 
     NV_ENC_INITIALIZE_PARAMS init_params = {};
@@ -589,15 +599,17 @@ void NvencEncoder::set_bitrate(uint32_t bitrate_bps) {
     enc_cfg.gopLength    = config_.idr_period > 0 ? config_.idr_period : UINT32_MAX;
     enc_cfg.frameIntervalP = 1;
 
-    auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
-    hevc.repeatSPSPPS = 1;
-    hevc.idrPeriod    = enc_cfg.gopLength;
-    if (is_hdr_) {
-        hevc.pixelBitDepthMinus8 = 2;
-        enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
-    } else {
-        hevc.pixelBitDepthMinus8 = 0;
-        enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN_GUID;
+    {
+        auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
+        hevc.repeatSPSPPS = 1;
+        hevc.idrPeriod    = enc_cfg.gopLength;
+        if (is_hdr_) {
+            hevc.pixelBitDepthMinus8 = 2;
+            enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
+        } else {
+            hevc.pixelBitDepthMinus8 = 0;
+            enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN_GUID;
+        }
     }
 
     NV_ENC_INITIALIZE_PARAMS init_params = {};

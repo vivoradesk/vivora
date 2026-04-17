@@ -21,6 +21,7 @@ public:
 
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
+    deskbeam::VideoCodec actual_codec() const override;
 
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
