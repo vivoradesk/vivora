@@ -25,6 +25,10 @@ public:
     virtual ~IUdpSocket() = default;
 
     virtual bool bind(uint16_t port) = 0;
+
+    // Returns the locally bound port after bind(). 0 if unbound or unsupported.
+    virtual uint16_t local_port() const = 0;
+
     virtual bool set_nonblocking(bool enabled) = 0;
     virtual bool set_sendbuf(int size_bytes) = 0;
     virtual bool set_recvbuf(int size_bytes) = 0;

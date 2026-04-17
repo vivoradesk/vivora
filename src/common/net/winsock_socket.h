@@ -24,6 +24,7 @@ public:
     ~WinsockUdpSocket() override;
 
     bool bind(uint16_t port) override;
+    uint16_t local_port() const override;
     bool set_nonblocking(bool enabled) override;
     bool set_sendbuf(int size_bytes) override;
     bool set_recvbuf(int size_bytes) override;

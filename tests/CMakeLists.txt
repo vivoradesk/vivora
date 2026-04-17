@@ -33,6 +33,11 @@ if(WIN32)
     target_include_directories(fragment_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME fragment_test COMMAND fragment_test)
 
+    add_executable(audio_test audio_test.cpp)
+    target_link_libraries(audio_test PRIVATE deskbeam_common)
+    target_include_directories(audio_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME audio_test COMMAND audio_test)
+
     add_executable(transport_test
         transport_test.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp

@@ -50,6 +50,15 @@ bool PosixUdpSocket::bind(uint16_t port) {
     return true;
 }
 
+uint16_t PosixUdpSocket::local_port() const {
+    sockaddr_in addr{};
+    socklen_t addr_len = sizeof(addr);
+    if (::getsockname(sock_, reinterpret_cast<sockaddr*>(&addr), &addr_len) < 0) {
+        return 0;
+    }
+    return ntohs(addr.sin_port);
+}
+
 bool PosixUdpSocket::set_nonblocking(bool enabled) {
     int flags = ::fcntl(sock_, F_GETFL, 0);
     if (flags < 0) return false;

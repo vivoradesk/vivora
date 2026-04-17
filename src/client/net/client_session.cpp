@@ -31,6 +31,20 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     }
 
     receiver_ = std::make_unique<VideoReceiver>(*socket_);
+
+    // Audio socket: ephemeral port. Used to receive PacketType::Audio.
+    audio_socket_ = net::IUdpSocket::create();
+    if (audio_socket_ && audio_socket_->bind(0)) {
+        audio_socket_->set_nonblocking(true);
+        audio_socket_->set_recvbuf(256 * 1024);
+        audio_local_port_ = audio_socket_->local_port();
+        log::info("ClientSession", "Audio socket bound to port %u", audio_local_port_);
+    } else {
+        log::warn("ClientSession", "Failed to bind audio socket — audio disabled");
+        audio_socket_.reset();
+        audio_local_port_ = 0;
+    }
+
     state_ = SessionState::Connecting;
     connect_start_ = Clock::now();
     last_hello_time_ = {};
@@ -42,12 +56,42 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 }
 
 void ClientSession::stop() {
+    stop_audio();
     if (socket_) {
         socket_->close();
         socket_.reset();
     }
+    if (audio_socket_) {
+        audio_socket_->close();
+        audio_socket_.reset();
+    }
     receiver_.reset();
     state_ = SessionState::Disconnected;
+}
+
+bool ClientSession::start_audio() {
+    if (!audio_socket_) return false;
+    if (audio_receiver_) return true;
+
+    auto output = audio::create_default_audio_output();
+    if (!output) {
+        log::warn("ClientSession", "No default audio output available");
+        return false;
+    }
+    audio_receiver_ = std::make_unique<AudioReceiver>();
+    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/20)) {
+        audio_receiver_.reset();
+        return false;
+    }
+    log::info("ClientSession", "Audio playback started");
+    return true;
+}
+
+void ClientSession::stop_audio() {
+    if (audio_receiver_) {
+        audio_receiver_->stop();
+        audio_receiver_.reset();
+    }
 }
 
 void ClientSession::poll() {
@@ -61,6 +105,37 @@ void ClientSession::poll() {
         if (n <= 0) break;
         last_recv_time_ = Clock::now();
         handle_packet(buf, static_cast<size_t>(n));
+    }
+
+    // Punch firewall hole: once connected, send a tiny packet FROM the audio
+    // socket TO the host's audio port (port+1). This ensures that Windows
+    // firewall / NAT allows the return UDP traffic.  Sent once.
+    if (state_ == SessionState::Connected && audio_socket_ && !audio_hole_punched_) {
+        net::SocketAddr audio_host = host_addr_;
+        audio_host.port = host_addr_.port + 1;
+        uint8_t punch[1] = {0};
+        audio_socket_->send_to(punch, 1, audio_host);
+        audio_hole_punched_ = true;
+        log::info("ClientSession", "Audio firewall punch sent to port %u",
+                  audio_host.port);
+    }
+
+    // Drain audio socket: each packet is a PacketType::Audio wrapper holding
+    // an Opus frame. Feed the Opus payload directly into the jitter buffer.
+    if (audio_socket_ && audio_receiver_) {
+        net::SocketAddr a_sender;
+        for (;;) {
+            int n = audio_socket_->recv_from(buf, sizeof(buf), a_sender);
+            if (n <= 0) break;
+            if (n < static_cast<int>(protocol::PacketHeader::WIRE_SIZE)) continue;
+            auto h = protocol::PacketHeader::deserialize(buf);
+            if (h.type != protocol::PacketType::Audio) continue;
+            size_t plen = static_cast<size_t>(n) - protocol::PacketHeader::WIRE_SIZE;
+            if (plen == 0 || plen != h.payload_len) continue;
+            audio_receiver_->feed(h.seq_no,
+                                  buf + protocol::PacketHeader::WIRE_SIZE,
+                                  plen);
+        }
     }
 
     auto now = Clock::now();
@@ -213,6 +288,10 @@ void ClientSession::send_hello() {
     hello.header.timestamp = 0;
     hello.header.flags = 0;
     hello.payload.assign(HELLO_MAGIC, HELLO_MAGIC + sizeof(HELLO_MAGIC));
+    // Extension: append our local audio port (u16 LE) so the host can target
+    // audio packets at it. Zero signals "no audio".
+    hello.payload.push_back(static_cast<uint8_t>(audio_local_port_ & 0xFF));
+    hello.payload.push_back(static_cast<uint8_t>((audio_local_port_ >> 8) & 0xFF));
     hello.header.payload_len = static_cast<uint16_t>(hello.payload.size());
 
     auto wire = hello.serialize();

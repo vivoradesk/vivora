@@ -37,6 +37,17 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
 
         session.poll();
 
+        // Once the handshake completes, open the audio output device and
+        // begin playing decoded Opus frames. Idempotent — start_audio() is
+        // a no-op after first success.
+        static bool audio_started = false;
+        if (!audio_started && session.state() == client::SessionState::Connected) {
+            if (session.start_audio()) {
+                log::info("VIEW", "Audio playback started");
+            }
+            audio_started = true;
+        }
+
         if (session.state() == client::SessionState::Disconnected &&
             frames_decoded > 0) {
             log::info("VIEW", "Disconnected from host");

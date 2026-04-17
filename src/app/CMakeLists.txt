@@ -18,6 +18,8 @@ target_sources(deskbeam PRIVATE
 target_sources(deskbeam PRIVATE
     ${CMAKE_SOURCE_DIR}/src/host/session/host_session.cpp
     ${CMAKE_SOURCE_DIR}/src/host/session/video_sender.cpp
+    ${CMAKE_SOURCE_DIR}/src/host/audio/audio_sender.cpp
+    ${CMAKE_SOURCE_DIR}/src/client/audio/audio_receiver.cpp
 )
 target_include_directories(deskbeam PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -58,10 +60,12 @@ if(WIN32)
         windows_host_platform.cpp
         windows_view_platform.cpp
     )
-    # Host-side sources (Windows DXGI/AMF + SendInput)
+    # Host-side sources (Windows DXGI/AMF/NVENC + SendInput)
     target_sources(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/nvenc_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/encoder_factory.cpp
         ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_windows.cpp
     )
     # Client decode/render (D3D11 — Windows-only)
@@ -72,6 +76,7 @@ if(WIN32)
     )
     target_include_directories(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/amf
+        ${CMAKE_SOURCE_DIR}/third_party/nvenc
     )
     target_link_libraries(deskbeam PRIVATE
         d3d11

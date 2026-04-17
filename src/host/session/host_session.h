@@ -2,6 +2,7 @@
 
 #include "common/net/socket.h"
 #include "host/session/video_sender.h"
+#include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
 #include "common/utils/types.h"
 #include <cstdint>
@@ -75,6 +76,7 @@ public:
     bool probe_pending() const;
 
     VideoSender* sender() { return sender_.get(); }
+    AudioSender* audio_sender() { return audio_sender_.get(); }
 
     // True when a new client just connected since last check.
     // Consumed (reset) on read — used by host loop for warmup arming.
@@ -96,7 +98,9 @@ private:
     ClientInfo* find_client(const net::SocketAddr& addr);
 
     std::unique_ptr<net::IUdpSocket> socket_;
+    std::unique_ptr<net::IUdpSocket> audio_socket_;
     std::unique_ptr<VideoSender> sender_;
+    std::unique_ptr<AudioSender> audio_sender_;
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
 

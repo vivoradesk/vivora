@@ -26,6 +26,26 @@ bool HostSession::start(uint16_t port) {
     socket_->set_recvbuf(1024 * 1024);
 
     sender_ = std::make_unique<VideoSender>(*socket_);
+
+    // Audio socket on port + 1.
+    audio_socket_ = net::IUdpSocket::create();
+    if (audio_socket_ && audio_socket_->bind(port + 1)) {
+        audio_socket_->set_nonblocking(true);
+        audio_socket_->set_sendbuf(256 * 1024);
+        audio_socket_->set_recvbuf(256 * 1024);
+        audio_sender_ = std::make_unique<AudioSender>(*audio_socket_);
+        if (!audio_sender_->init(128000)) {
+            log::warn("HostSession", "Audio encoder init failed — audio disabled");
+            audio_sender_.reset();
+            audio_socket_.reset();
+        } else {
+            log::info("HostSession", "Audio listening on port %u", port + 1);
+        }
+    } else {
+        log::warn("HostSession", "Failed to bind audio port %u", port + 1);
+        audio_socket_.reset();
+    }
+
     input_injector_ = InputInjector::create();
     if (input_injector_ && pending_screen_w_ && pending_screen_h_) {
         input_injector_->set_screen_resolution(pending_screen_w_, pending_screen_h_);
@@ -43,6 +63,11 @@ void HostSession::stop() {
         socket_->close();
         socket_.reset();
     }
+    if (audio_socket_) {
+        audio_socket_->close();
+        audio_socket_.reset();
+    }
+    audio_sender_.reset();
     sender_.reset();
     clients_.clear();
     state_ = SessionState::Disconnected;
@@ -61,6 +86,15 @@ void HostSession::poll() {
         int n = socket_->recv_from(buf, sizeof(buf), sender);
         if (n <= 0) break;
         handle_packet(buf, static_cast<size_t>(n), sender);
+    }
+
+    // Drain audio socket (reserved for future mic direction; ignored for now).
+    if (audio_socket_) {
+        net::SocketAddr a_sender;
+        for (;;) {
+            int n = audio_socket_->recv_from(buf, sizeof(buf), a_sender);
+            if (n <= 0) break;
+        }
     }
 
     auto now = Clock::now();
@@ -259,6 +293,14 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     if (len < sizeof(HELLO_MAGIC)) return;
     if (std::memcmp(payload, HELLO_MAGIC, sizeof(HELLO_MAGIC)) != 0) return;
 
+    // Optional extension: hello payload may carry client audio port (u16 LE)
+    // right after the magic. Older clients without audio omit these bytes.
+    uint16_t client_audio_port = 0;
+    if (len >= sizeof(HELLO_MAGIC) + 2) {
+        client_audio_port = static_cast<uint16_t>(payload[sizeof(HELLO_MAGIC)])
+            | (static_cast<uint16_t>(payload[sizeof(HELLO_MAGIC) + 1]) << 8);
+    }
+
     // Send ACK.
     protocol::Packet ack;
     ack.header.type = protocol::PacketType::Control;
@@ -284,6 +326,16 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
 
     state_ = SessionState::Connected;
     new_client_flag_ = true;
+
+    // Register audio destination if the client sent its audio port.
+    if (audio_sender_ && client_audio_port != 0) {
+        net::SocketAddr audio_dest{};
+        audio_dest.ip   = sender.ip;
+        audio_dest.port = client_audio_port;
+        audio_sender_->add_destination(audio_dest);
+        log::info("HostSession", "Audio destination registered: port %u",
+                  client_audio_port);
+    }
 
     // Send BW probe to the new client.
     send_bw_probe(client);

@@ -2,6 +2,8 @@
 
 #include "common/net/socket.h"
 #include "client/net/video_receiver.h"
+#include "client/audio/audio_receiver.h"
+#include "common/audio/audio_output.h"
 #include "common/protocol/input_event.h"
 #include "common/utils/types.h"
 #include <cstdint>
@@ -40,6 +42,12 @@ public:
     double rtt_ms() const { return rtt_ms_; }
     uint64_t frames_dropped() const;
     VideoReceiver* receiver() { return receiver_.get(); }
+    AudioReceiver* audio_receiver() { return audio_receiver_.get(); }
+
+    // Start audio playback. Opens default output device and begins consuming
+    // packets from the audio channel. Safe to call after start().
+    bool start_audio();
+    void stop_audio();
 
 private:
     void handle_packet(const uint8_t* data, size_t len);
@@ -52,7 +60,10 @@ private:
     void send_fec_report();
 
     std::unique_ptr<net::IUdpSocket> socket_;
+    std::unique_ptr<net::IUdpSocket> audio_socket_;
     std::unique_ptr<VideoReceiver> receiver_;
+    std::unique_ptr<AudioReceiver> audio_receiver_;
+    uint16_t audio_local_port_ = 0;
     SessionState state_ = SessionState::Disconnected;
     net::SocketAddr host_addr_{};
     TimePoint connect_start_;
@@ -60,6 +71,7 @@ private:
     TimePoint last_recv_time_;
     TimePoint last_fec_report_time_;
     double rtt_ms_ = 0.0;
+    bool audio_hole_punched_ = false;
 
     // Bandwidth probe measurement state.
     uint16_t  probe_id_ = 0;

@@ -250,10 +250,7 @@ void AmfEncoder::set_bitrate(uint32_t bitrate_bps) {
     }
 }
 
-// Factory
-std::unique_ptr<IVideoEncoder> IVideoEncoder::create() {
-    return std::make_unique<AmfEncoder>();
-}
+// Factory moved to encoder_factory.cpp
 
 } // namespace deskbeam
 

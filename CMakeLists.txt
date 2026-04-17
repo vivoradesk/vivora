@@ -31,6 +31,9 @@ elseif(APPLE)
     add_compile_definitions(DESKBEAM_MACOS)
 endif()
 
+# Third-party dependencies (audio: libopus + speex resampler)
+add_subdirectory(third_party)
+
 # Common library
 add_subdirectory(src/common)
 

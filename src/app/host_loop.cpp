@@ -1,7 +1,9 @@
 #include "app/host_loop.h"
+#include "common/audio/audio_capture.h"
 #include "common/codec/bitrate_controller.h"
 #include "common/utils/log.h"
 #include "common/utils/types.h"
+#include "host/audio/audio_sender.h"
 #include "host/session/host_session.h"
 
 namespace deskbeam {
@@ -31,6 +33,25 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         return 1;
     }
     log::info("HOST", "Waiting for client on port %u... (Ctrl+C to stop)", cfg.port);
+
+    // Start system audio loopback capture and pipe into the session's
+    // AudioSender. Packets go out only once the sender has a registered
+    // destination (client connects with audio port). Non-fatal on failure.
+    std::unique_ptr<audio::AudioCapture> audio_capture =
+        audio::create_default_loopback_capture();
+    if (audio_capture) {
+        host::AudioSender* asend = session.audio_sender();
+        if (asend) {
+            audio_capture->start([asend](const float* pcm, uint32_t frames,
+                                         uint32_t rate, uint16_t ch) {
+                asend->feed(pcm, frames, rate, ch);
+            });
+        } else {
+            audio_capture.reset();
+        }
+    } else {
+        log::warn("HOST", "No audio loopback capture available on this platform");
+    }
 
     uint16_t frame_seq = 0;
     uint64_t total_frames = 0;
@@ -200,6 +221,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         }
     }
 
+    if (audio_capture) audio_capture->stop();
     session.stop();
     platform.shutdown();
     return 0;

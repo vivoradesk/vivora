@@ -59,6 +59,15 @@ bool WinsockUdpSocket::bind(uint16_t port) {
     return true;
 }
 
+uint16_t WinsockUdpSocket::local_port() const {
+    sockaddr_in addr = {};
+    int addr_len = sizeof(addr);
+    if (getsockname(sock_, (sockaddr*)&addr, &addr_len) == SOCKET_ERROR) {
+        return 0;
+    }
+    return ntohs(addr.sin_port);
+}
+
 bool WinsockUdpSocket::set_nonblocking(bool enabled) {
     u_long mode = enabled ? 1 : 0;
     if (ioctlsocket(sock_, FIONBIO, &mode) == SOCKET_ERROR) {
