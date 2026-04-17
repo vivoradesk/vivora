@@ -65,6 +65,10 @@ private:
     // that was used at Init — otherwise Intel returns MFX_ERR_INCOMPATIBLE.
     void* enc_params_ = nullptr;
 
+    // VBV buffer size chosen at init (KB); output bitstream buffer must be
+    // at least this big or EncodeFrameAsync returns NOT_ENOUGH_BUFFER.
+    uint32_t vbv_kb_ = 0;
+
     std::queue<EncodedPacket> output_packets_;
 };
 

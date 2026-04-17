@@ -1,10 +1,12 @@
 #ifdef DESKBEAM_WINDOWS
 
-#include "host/encode/qsv_encoder.h"
-#include "common/utils/log.h"
-
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#include "host/encode/qsv_encoder.h"
+#include "common/codec/bitrate_controller.h"
+#include "common/utils/log.h"
+#include <algorithm>
+
 #include <windows.h>
 #include <d3d11_4.h>
 #include <cstring>
@@ -273,12 +275,15 @@ bool QsvEncoder::configure_encoder() {
     p.mfx.RateControlMethod = MFX_RATECONTROL_CBR;
     p.mfx.TargetKbps        = static_cast<mfxU16>(config_.bitrate_bps / 1000);
     p.mfx.MaxKbps           = p.mfx.TargetKbps;
-    // Size VBV for the adaptive-bitrate ceiling (20 Mbps × 1s = 2500 KB),
-    // not the current target — so set_bitrate() can change TargetKbps via
-    // Reset without forcing the driver to reallocate the buffer, which
-    // this Intel driver rejects with MFX_ERR_INCOMPATIBLE_VIDEO_PARAM.
-    p.mfx.BufferSizeInKB    = 2500;
-    p.mfx.InitialDelayInKB  = static_cast<mfxU16>(config_.bitrate_bps / 8000);
+    // VBV sized for 1 second at current bitrate. LowDelayBRC needs the
+    // buffer proportional to the actual rate — a much larger ceiling makes
+    // the BRC think it has seconds of budget and produces blocky output at
+    // low bitrates. set_bitrate() does Reset when the new rate fits the
+    // current VBV, and falls back to Close+Init when it doesn't.
+    p.mfx.BufferSizeInKB    = static_cast<mfxU16>(
+        std::max<uint32_t>(config_.bitrate_bps / 8000u, 128u));
+    p.mfx.InitialDelayInKB  = p.mfx.BufferSizeInKB / 2;
+    vbv_kb_                 = p.mfx.BufferSizeInKB;
     p.mfx.GopPicSize        = static_cast<mfxU16>(config_.idr_period ? config_.idr_period : config_.fps);
     p.mfx.GopRefDist        = 1;      // no B-frames
     p.mfx.NumRefFrame       = 1;
@@ -327,11 +332,10 @@ bool QsvEncoder::configure_encoder() {
     }
     have_encoder_ = true;
 
-    // Preallocate bitstream buffer — 1 MB is plenty for forced IDRs at
-    // 20 Mbps/60fps (avg 42 KB, peak IDRs well under 500 KB).
-    // Must be >= mfx.BufferSizeInKB * 1024 or EncodeFrameAsync returns
-    // MFX_ERR_NOT_ENOUGH_BUFFER.
-    bitstream_buf_.resize(4 * 1024 * 1024);
+    // Output bitstream buffer must be >= mfx.BufferSizeInKB * 1024 or
+    // EncodeFrameAsync returns MFX_ERR_NOT_ENOUGH_BUFFER. 2× VBV gives
+    // room for keyframe bursts on top of the VBV ceiling.
+    bitstream_buf_.resize(static_cast<size_t>(vbv_kb_) * 1024u * 2u);
     auto* bsw = new QsvBitstream();
     std::memset(&bsw->bs, 0, sizeof(bsw->bs));
     bsw->bs.Data      = bitstream_buf_.data();
