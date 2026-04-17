@@ -7,7 +7,9 @@
 #include <chrono>
 #include <utility>
 
-bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps) {
+bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
+                               deskbeam::EncoderKind kind,
+                               deskbeam::VideoCodec codec) {
     capture_ = deskbeam::IScreenCapture::create();
     dxgi_ = dynamic_cast<deskbeam::DxgiCapture*>(capture_.get());
     if (!capture_ || !capture_->init(0)) {
@@ -21,13 +23,18 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps) {
     if (bitrate == 0)
         bitrate = deskbeam::codec::default_bitrate_for(res.width, res.height, 60);
 
-    encoder_ = deskbeam::IVideoEncoder::create();
+    encoder_ = deskbeam::IVideoEncoder::create(kind);
+    if (!encoder_) {
+        deskbeam::log::error("HOST", "No matching video encoder available");
+        return false;
+    }
     deskbeam::EncoderConfig cfg;
     cfg.width = res.width;
     cfg.height = res.height;
     cfg.fps = 60;
     cfg.bitrate_bps = bitrate;
     cfg.idr_period = 60;
+    cfg.codec = codec;
     if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
 
     if (!encoder_->init(cfg, dxgi_ ? dxgi_->get_device() : nullptr)) {

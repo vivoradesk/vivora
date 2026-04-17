@@ -12,7 +12,9 @@
 
 class WindowsHostPlatform : public deskbeam::HostPlatform {
 public:
-    bool init(uint32_t manual_bitrate_bps);
+    bool init(uint32_t manual_bitrate_bps,
+              deskbeam::EncoderKind kind,
+              deskbeam::VideoCodec codec);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;

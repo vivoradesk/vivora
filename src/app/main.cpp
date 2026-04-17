@@ -1,6 +1,7 @@
 #include "app/host_loop.h"
 #include "app/view_loop.h"
 #include "common/utils/log.h"
+#include "host/encode/video_encoder.h"
 
 #include <cstdio>
 #include <cstring>
@@ -28,6 +29,8 @@ static void print_usage(const char* prog) {
     std::printf("  --display N       Display index to capture (host, default 0)\n");
     std::printf("  --hdr             Request HDR10 capture if the display supports it\n");
     std::printf("  --bitrate Mbps    Manual encoder bitrate; default is auto from resolution\n");
+    std::printf("  --encoder NAME    Force encoder backend: auto|amf|nvenc|qsv (default auto)\n");
+    std::printf("  --codec NAME      Video codec: h264|hevc (default hevc)\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -43,6 +46,8 @@ int main(int argc, char* argv[]) {
     uint32_t display_index = 0;
     bool prefer_hdr = false;
     uint32_t manual_bitrate_bps = 0;
+    deskbeam::EncoderKind encoder_kind = deskbeam::EncoderKind::Auto;
+    deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--host") == 0) {
@@ -53,6 +58,26 @@ int main(int argc, char* argv[]) {
             prefer_hdr = true;
         } else if (std::strcmp(argv[i], "--bitrate") == 0 && i + 1 < argc) {
             manual_bitrate_bps = static_cast<uint32_t>(std::atoi(argv[++i])) * 1'000'000u;
+        } else if (std::strcmp(argv[i], "--encoder") == 0 && i + 1 < argc) {
+            const char* v = argv[++i];
+            if      (std::strcmp(v, "auto")  == 0) encoder_kind = deskbeam::EncoderKind::Auto;
+            else if (std::strcmp(v, "amf")   == 0) encoder_kind = deskbeam::EncoderKind::Amf;
+            else if (std::strcmp(v, "nvenc") == 0) encoder_kind = deskbeam::EncoderKind::Nvenc;
+            else if (std::strcmp(v, "qsv")   == 0) encoder_kind = deskbeam::EncoderKind::Qsv;
+            else {
+                std::fprintf(stderr, "Error: --encoder must be one of: auto, amf, nvenc, qsv\n");
+                return 1;
+            }
+        } else if (std::strcmp(argv[i], "--codec") == 0 && i + 1 < argc) {
+            const char* v = argv[++i];
+            if      (std::strcmp(v, "h264") == 0 || std::strcmp(v, "avc")  == 0)
+                codec = deskbeam::VideoCodec::H264;
+            else if (std::strcmp(v, "hevc") == 0 || std::strcmp(v, "h265") == 0)
+                codec = deskbeam::VideoCodec::HEVC;
+            else {
+                std::fprintf(stderr, "Error: --codec must be h264 or hevc\n");
+                return 1;
+            }
         } else if (std::strcmp(argv[i], "--view") == 0) {
             mode_view = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -79,15 +104,17 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         WindowsHostPlatform platform;
-        if (!platform.init(manual_bitrate_bps)) return 1;
+        if (!platform.init(manual_bitrate_bps, encoder_kind, codec)) return 1;
 #endif
 #ifdef DESKBEAM_MACOS
         MacHostPlatform platform;
-        if (!platform.init(display_index, prefer_hdr, manual_bitrate_bps)) return 1;
+        if (!platform.init(display_index, prefer_hdr, manual_bitrate_bps, codec)) return 1;
 #endif
         deskbeam::HostLoopConfig lcfg;
         lcfg.port = port;
         lcfg.manual_bitrate_bps = manual_bitrate_bps;
+        lcfg.encoder_kind = encoder_kind;
+        lcfg.codec = codec;
         return deskbeam::run_host_loop(platform, lcfg);
     }
 

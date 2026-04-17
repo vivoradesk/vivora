@@ -60,11 +60,12 @@ if(WIN32)
         windows_host_platform.cpp
         windows_view_platform.cpp
     )
-    # Host-side sources (Windows DXGI/AMF/NVENC + SendInput)
+    # Host-side sources (Windows DXGI/AMF/NVENC/QSV + SendInput)
     target_sources(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/nvenc_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/qsv_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/encoder_factory.cpp
         ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_windows.cpp
     )
@@ -77,6 +78,7 @@ if(WIN32)
     target_include_directories(deskbeam PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/amf
         ${CMAKE_SOURCE_DIR}/third_party/nvenc
+        ${CMAKE_SOURCE_DIR}/third_party/onevpl/api
     )
     target_link_libraries(deskbeam PRIVATE
         d3d11

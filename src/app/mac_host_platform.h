@@ -4,11 +4,13 @@
 #include "app/host_platform.h"
 #include "host/capture/mac_screen_capture.h"
 #include "host/encode/mac_videotoolbox_encoder.h"
+#include "host/encode/video_encoder.h"
 #include <vector>
 
 class MacHostPlatform : public deskbeam::HostPlatform {
 public:
-    bool init(uint32_t display_index, bool prefer_hdr, uint32_t manual_bitrate_bps);
+    bool init(uint32_t display_index, bool prefer_hdr, uint32_t manual_bitrate_bps,
+              deskbeam::VideoCodec codec);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;

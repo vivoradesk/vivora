@@ -14,6 +14,19 @@ struct ID3D11Texture2D;
 
 namespace deskbeam {
 
+enum class VideoCodec : uint8_t {
+    H264 = 0,
+    HEVC = 1,
+};
+
+// Which hardware encoder backend to use. `Auto` probes available runtimes.
+enum class EncoderKind : uint8_t {
+    Auto = 0,
+    Amf,     // AMD
+    Nvenc,   // NVIDIA
+    Qsv,     // Intel Quick Sync (oneVPL)
+};
+
 struct EncoderConfig {
     uint32_t width = 1920;
     uint32_t height = 1080;
@@ -21,6 +34,7 @@ struct EncoderConfig {
     uint32_t bitrate_bps = 15'000'000;  // 15 Mbps default
     uint32_t idr_period = 120;          // IDR every N frames (0 = auto)
     bool low_latency = true;
+    VideoCodec codec = VideoCodec::HEVC;
 #ifdef DESKBEAM_WINDOWS
     DXGI_FORMAT input_format = DXGI_FORMAT_B8G8R8A8_UNORM;  // capture texture format
 #endif
@@ -58,8 +72,11 @@ public:
     // Get current config
     virtual const EncoderConfig& get_config() const = 0;
 
-    // Factory: create best available encoder for this system
-    static std::unique_ptr<IVideoEncoder> create();
+    // Factory: create best available encoder for this system.
+    // `kind=Auto` probes runtimes in order (AMF -> NVENC -> QSV). Any
+    // other value forces the specific backend; returns nullptr if the
+    // requested backend is not available on this machine.
+    static std::unique_ptr<IVideoEncoder> create(EncoderKind kind = EncoderKind::Auto);
 };
 
 } // namespace deskbeam

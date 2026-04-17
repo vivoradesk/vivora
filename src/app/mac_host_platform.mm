@@ -8,7 +8,11 @@
 #include <utility>
 
 bool MacHostPlatform::init(uint32_t display_index, bool prefer_hdr,
-                            uint32_t manual_bitrate_bps) {
+                            uint32_t manual_bitrate_bps,
+                            deskbeam::VideoCodec codec) {
+    if (codec != deskbeam::VideoCodec::HEVC) {
+        deskbeam::log::warn("HOST", "macOS VideoToolbox currently supports HEVC only; --codec=h264 ignored");
+    }
     auto displays = deskbeam::host::MacScreenCapture::enumerate_displays();
     if (displays.empty()) {
         deskbeam::log::error("HOST", "No displays found (check Screen Recording permission)");
