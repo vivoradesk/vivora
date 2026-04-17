@@ -126,6 +126,17 @@ struct QsvBitstream {
     mfxBitstream bs;
 };
 
+// Cached encoder parameters. Init and Reset must share the exact same
+// mfxVideoParam + ExtBuffers, so we own them here and hand the .cpp a
+// stable pointer via QsvEncoder::enc_params_.
+struct QsvEncParams {
+    mfxVideoParam       p{};
+    mfxExtCodingOption  co{};
+    mfxExtCodingOption2 co2{};
+    mfxExtCodingOption3 co3{};
+    mfxExtBuffer*       ext[3]{};
+};
+
 QsvEncoder::QsvEncoder() = default;
 
 QsvEncoder::~QsvEncoder() {
@@ -147,6 +158,8 @@ QsvEncoder::~QsvEncoder() {
     }
     delete static_cast<QsvBitstream*>(bitstream_);
     bitstream_ = nullptr;
+    delete static_cast<QsvEncParams*>(enc_params_);
+    enc_params_ = nullptr;
     d3d_context_.Reset();
 }
 
@@ -248,7 +261,11 @@ bool QsvEncoder::configure_vpp() {
 }
 
 bool QsvEncoder::configure_encoder() {
-    mfxVideoParam p{};
+    if (!enc_params_) enc_params_ = new QsvEncParams();
+    auto* ep = static_cast<QsvEncParams*>(enc_params_);
+    *ep = {};
+
+    mfxVideoParam& p = ep->p;
     p.AsyncDepth = 1;
     p.IOPattern  = MFX_IOPATTERN_IN_VIDEO_MEMORY;
     p.mfx.CodecId           = (config_.codec == VideoCodec::HEVC) ? MFX_CODEC_HEVC : MFX_CODEC_AVC;
@@ -256,8 +273,12 @@ bool QsvEncoder::configure_encoder() {
     p.mfx.RateControlMethod = MFX_RATECONTROL_CBR;
     p.mfx.TargetKbps        = static_cast<mfxU16>(config_.bitrate_bps / 1000);
     p.mfx.MaxKbps           = p.mfx.TargetKbps;
-    p.mfx.BufferSizeInKB    = static_cast<mfxU16>(config_.bitrate_bps / 8000);  // 1 sec
-    p.mfx.InitialDelayInKB  = p.mfx.BufferSizeInKB;
+    // Size VBV for the adaptive-bitrate ceiling (20 Mbps × 1s = 2500 KB),
+    // not the current target — so set_bitrate() can change TargetKbps via
+    // Reset without forcing the driver to reallocate the buffer, which
+    // this Intel driver rejects with MFX_ERR_INCOMPATIBLE_VIDEO_PARAM.
+    p.mfx.BufferSizeInKB    = 2500;
+    p.mfx.InitialDelayInKB  = static_cast<mfxU16>(config_.bitrate_bps / 8000);
     p.mfx.GopPicSize        = static_cast<mfxU16>(config_.idr_period ? config_.idr_period : config_.fps);
     p.mfx.GopRefDist        = 1;      // no B-frames
     p.mfx.NumRefFrame       = 1;
@@ -269,24 +290,22 @@ bool QsvEncoder::configure_encoder() {
                     config_.width, config_.height, config_.fps);
 
     // Low-latency BRC + no lookahead.
-    mfxExtCodingOption  co  {}; co.Header.BufferId  = MFX_EXTBUFF_CODING_OPTION;   co.Header.BufferSz  = sizeof(co);
-    co.NalHrdConformance  = MFX_CODINGOPTION_OFF;
-    co.PicTimingSEI       = MFX_CODINGOPTION_OFF;
-    co.VuiNalHrdParameters = MFX_CODINGOPTION_OFF;
+    ep->co.Header.BufferId  = MFX_EXTBUFF_CODING_OPTION;   ep->co.Header.BufferSz  = sizeof(ep->co);
+    ep->co.NalHrdConformance   = MFX_CODINGOPTION_OFF;
+    ep->co.PicTimingSEI        = MFX_CODINGOPTION_OFF;
+    ep->co.VuiNalHrdParameters = MFX_CODINGOPTION_OFF;
 
-    mfxExtCodingOption2 co2 {}; co2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2;  co2.Header.BufferSz = sizeof(co2);
-    co2.LookAheadDepth    = 0;
-    co2.RepeatPPS         = MFX_CODINGOPTION_ON;
+    ep->co2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2;  ep->co2.Header.BufferSz = sizeof(ep->co2);
+    ep->co2.LookAheadDepth    = 0;
+    ep->co2.RepeatPPS         = MFX_CODINGOPTION_ON;
 
-    mfxExtCodingOption3 co3 {}; co3.Header.BufferId = MFX_EXTBUFF_CODING_OPTION3;  co3.Header.BufferSz = sizeof(co3);
-    co3.LowDelayBRC       = MFX_CODINGOPTION_ON;
+    ep->co3.Header.BufferId = MFX_EXTBUFF_CODING_OPTION3;  ep->co3.Header.BufferSz = sizeof(ep->co3);
+    ep->co3.LowDelayBRC       = MFX_CODINGOPTION_ON;
 
-    mfxExtBuffer* ext[] = {
-        reinterpret_cast<mfxExtBuffer*>(&co),
-        reinterpret_cast<mfxExtBuffer*>(&co2),
-        reinterpret_cast<mfxExtBuffer*>(&co3),
-    };
-    p.ExtParam    = ext;
+    ep->ext[0] = reinterpret_cast<mfxExtBuffer*>(&ep->co);
+    ep->ext[1] = reinterpret_cast<mfxExtBuffer*>(&ep->co2);
+    ep->ext[2] = reinterpret_cast<mfxExtBuffer*>(&ep->co3);
+    p.ExtParam    = ep->ext;
     p.NumExtParam = 3;
 
     mfxStatus st = vpl::g_fn.EncQuery(reinterpret_cast<mfxSession>(session_), &p, &p);
@@ -310,7 +329,9 @@ bool QsvEncoder::configure_encoder() {
 
     // Preallocate bitstream buffer — 1 MB is plenty for forced IDRs at
     // 20 Mbps/60fps (avg 42 KB, peak IDRs well under 500 KB).
-    bitstream_buf_.resize(2 * 1024 * 1024);
+    // Must be >= mfx.BufferSizeInKB * 1024 or EncodeFrameAsync returns
+    // MFX_ERR_NOT_ENOUGH_BUFFER.
+    bitstream_buf_.resize(4 * 1024 * 1024);
     auto* bsw = new QsvBitstream();
     std::memset(&bsw->bs, 0, sizeof(bsw->bs));
     bsw->bs.Data      = bitstream_buf_.data();
@@ -463,30 +484,30 @@ bool QsvEncoder::get_packet(EncodedPacket& packet) {
 void QsvEncoder::request_idr() { idr_requested_ = true; }
 
 void QsvEncoder::set_bitrate(uint32_t bps) {
-    if (!have_encoder_) { config_.bitrate_bps = bps; return; }
+    if (!have_encoder_ || !enc_params_) { config_.bitrate_bps = bps; return; }
 
-    // Query current params, patch bitrate, Reset.
-    mfxVideoParam p{};
-    p.AsyncDepth = 1;
-    p.IOPattern  = MFX_IOPATTERN_IN_VIDEO_MEMORY;
-    p.mfx.CodecId           = (config_.codec == VideoCodec::HEVC) ? MFX_CODEC_HEVC : MFX_CODEC_AVC;
-    p.mfx.RateControlMethod = MFX_RATECONTROL_CBR;
-    p.mfx.TargetKbps        = static_cast<mfxU16>(bps / 1000);
-    p.mfx.MaxKbps           = p.mfx.TargetKbps;
-    p.mfx.BufferSizeInKB    = static_cast<mfxU16>(bps / 8000);
-    p.mfx.InitialDelayInKB  = p.mfx.BufferSizeInKB;
-    p.mfx.GopPicSize        = static_cast<mfxU16>(config_.idr_period ? config_.idr_period : config_.fps);
-    p.mfx.GopRefDist        = 1;
-    p.mfx.NumRefFrame       = 1;
-    p.mfx.NumSlice          = 1;
-    p.mfx.CodecProfile      = (config_.codec == VideoCodec::HEVC) ? (mfxU16)MFX_PROFILE_HEVC_MAIN
-                                                                  : (mfxU16)MFX_PROFILE_AVC_HIGH;
-    fill_frame_info(p.mfx.FrameInfo, MFX_FOURCC_NV12,
-                    config_.width, config_.height, config_.fps);
+    // Patch the cached params in place so Reset sees the same structure
+    // (and the same ExtBuffers) that Init used — otherwise Intel returns
+    // MFX_ERR_INCOMPATIBLE_VIDEO_PARAM.
+    // Patch TargetKbps/MaxKbps in the cached params. Keep BufferSizeInKB
+    // constant (sized for the configured ceiling at init time) so Intel
+    // doesn't have to reallocate the VBV buffer — that's what triggers
+    // MFX_ERR_INCOMPATIBLE_VIDEO_PARAM on Reset for this driver.
+    auto* ep = static_cast<QsvEncParams*>(enc_params_);
+    ep->p.mfx.TargetKbps = static_cast<mfxU16>(bps / 1000);
+    ep->p.mfx.MaxKbps    = ep->p.mfx.TargetKbps;
 
-    mfxStatus st = vpl::g_fn.EncReset(reinterpret_cast<mfxSession>(session_), &p);
+    mfxStatus st = vpl::g_fn.EncReset(reinterpret_cast<mfxSession>(session_), &ep->p);
     if (st < MFX_ERR_NONE) {
-        log::warn(TAG, "ENCODE Reset for bitrate change failed: %d", (int)st);
+        log::warn(TAG, "ENCODE Reset (keep-buf) failed: %d, falling back to re-init", (int)st);
+        vpl::g_fn.EncClose(reinterpret_cast<mfxSession>(session_));
+        have_encoder_ = false;
+        config_.bitrate_bps = bps;
+        if (!configure_encoder()) {
+            log::warn(TAG, "ENCODE re-init after bitrate change failed");
+            return;
+        }
+        idr_requested_ = true;
         return;
     }
     config_.bitrate_bps = bps;

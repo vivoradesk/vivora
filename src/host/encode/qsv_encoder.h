@@ -60,6 +60,11 @@ private:
     // Used for constructing mfxBitstream (pimpl-ish; real storage in cpp).
     void* bitstream_ = nullptr;
 
+    // Cached encoder params (mfxVideoParam + ExtBuffers) kept alive so
+    // set_bitrate() can call MFXVideoENCODE_Reset with the same structure
+    // that was used at Init — otherwise Intel returns MFX_ERR_INCOMPATIBLE.
+    void* enc_params_ = nullptr;
+
     std::queue<EncodedPacket> output_packets_;
 };
 
