@@ -165,7 +165,9 @@
       "Bash(awk '/^typedef struct _NV_ENC_MAP_INPUT_RESOURCE/,/^} NV_ENC_MAP_INPUT_RESOURCE;/' /tmp/nvEncodeAPI.h)",
       "Bash(awk '/^typedef struct _NV_ENC_LOCK_BITSTREAM/,/^} NV_ENC_LOCK_BITSTREAM;/' /tmp/nvEncodeAPI.h)",
       "Bash(rm -f build/bin/Release/deskbeam.exe)",
-      "Bash(touch src/host/encode/nvenc_encoder.cpp)"
+      "Bash(touch src/host/encode/nvenc_encoder.cpp)",
+      "Bash(mv third_party/speexdsp_src third_party/speexdsp_src_old)",
+      "Bash(mv third_party/opus third_party/opus_old)"
     ]
   }
 }
