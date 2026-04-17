@@ -8,22 +8,17 @@
 #include <queue>
 #include <vector>
 
-// Forward declarations — oneVPL loaded via dispatcher (libvpl.dll).
-struct mfxSession_;
-typedef struct mfxSession_* mfxSession;
-struct mfxLoader_;
-typedef struct mfxLoader_* mfxLoader;
-struct mfxFrameSurface1;
-struct mfxBitstream;
-struct mfxSyncPoint_;
-typedef struct mfxSyncPoint_* mfxSyncPoint;
+// Forward declarations — oneVPL types live in third_party/onevpl but we
+// don't want to drag them into the header. Pointer members are void* and
+// the .cpp reinterpret_casts them.
 
 namespace deskbeam {
 
 using Microsoft::WRL::ComPtr;
 
-// Intel Quick Sync encoder via oneVPL. Uses D3D11 surface allocator so
-// capture textures stay on the iGPU end-to-end (zero copy).
+// Intel Quick Sync encoder via oneVPL (libvpl.dll). Accepts BGRA input
+// textures, performs GPU-side BGRA -> NV12 conversion via VPP, then
+// encodes H.264 or HEVC. CBR with low-delay BRC for streaming.
 class QsvEncoder : public IVideoEncoder {
 public:
     QsvEncoder();
@@ -39,22 +34,32 @@ public:
 private:
     bool load_dispatcher();
     bool create_session();
+    bool configure_vpp();
     bool configure_encoder();
+    bool run_vpp(ID3D11Texture2D* bgra_input, void** nv12_surface_out);
+    void drain_bitstream();
 
     EncoderConfig config_;
     bool idr_requested_ = false;
+    bool have_encoder_ = false;
+    bool have_vpp_ = false;
 
-    // oneVPL dispatcher / session
-    void*     vpl_dll_ = nullptr;   // HMODULE as void*, to keep <windows.h> out of header
-    mfxLoader loader_  = nullptr;
-    mfxSession session_ = nullptr;
+    // Dispatcher module.
+    void* vpl_dll_ = nullptr;
 
-    // D3D11 (not owned)
+    // oneVPL handles (opaque pointers, real types in .cpp).
+    void* loader_ = nullptr;
+    void* session_ = nullptr;
+
+    // D3D11 (not owned).
     ID3D11Device* device_ = nullptr;
     ComPtr<ID3D11DeviceContext> d3d_context_;
 
-    // Output
+    // Output bitstream — pre-allocated so EncodeFrameAsync can fill it.
     std::vector<uint8_t> bitstream_buf_;
+    // Used for constructing mfxBitstream (pimpl-ish; real storage in cpp).
+    void* bitstream_ = nullptr;
+
     std::queue<EncodedPacket> output_packets_;
 };
 
