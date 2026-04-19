@@ -1,4 +1,6 @@
 #include "app/view_loop.h"
+#include "common/protocol/cursor_message.h"
+#include "common/protocol/stream_info.h"
 #include "common/utils/log.h"
 #include "common/utils/types.h"
 #include "client/net/client_session.h"
@@ -21,6 +23,11 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     platform.set_input_callback([&session](const protocol::InputEvent& ev) {
         session.send_input(ev);
     });
+
+    // Unified cooldown for both drop-triggered and no-keyframe-yet IDR requests.
+    // Same clock for both so one block's request suppresses the other's until
+    // the host has had time to produce and send the new IDR.
+    constexpr int IDR_RETRY_MS = 250;
 
     bool got_keyframe = false;
     uint64_t frames_decoded = 0;
@@ -66,15 +73,33 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             auto now = Clock::now();
             auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - last_idr_request).count();
-            if (since_idr_req > 500) {
+            if (since_idr_req > IDR_RETRY_MS) {
+                session.reset_video_stream();
                 session.request_idr();
                 last_idr_request = now;
                 got_keyframe = false;
                 platform.flush_decoder();
-                log::warn("VIEW", "Frame loss detected (%llu dropped), requested IDR + flush",
+                log::warn("VIEW", "Frame loss detected (%llu dropped), dropped buffered + requested IDR + flush",
                     (unsigned long long)(drops - last_drops));
             }
             last_drops = drops;
+        }
+
+        // No-keyframe-yet retry: a completely lost keyframe (all UDP
+        // fragments dropped in one WiFi burst) is invisible to the
+        // assembler's gap detection, so drops-triggered IDR above never
+        // fires.  Shares last_idr_request with the drop block so a fresh
+        // drop-triggered request suppresses this one until the new IDR
+        // has had time to land.
+        if (!got_keyframe && session.state() == client::SessionState::Connected) {
+            auto now = Clock::now();
+            auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_idr_request).count();
+            if (since_idr_req > IDR_RETRY_MS) {
+                session.request_idr();
+                last_idr_request = now;
+                log::warn("VIEW", "No keyframe yet, requesting IDR");
+            }
         }
 
         // Feed received frames to decoder (with keyframe gating).
@@ -87,6 +112,7 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                     log::info("VIEW", "Got keyframe seq=%u (%zu bytes), starting decode",
                               net_frame.seq_no, net_frame.data.size());
                 } else {
+                    log::info("VIEW", "Pre-keyframe: dropping P-frame seq=%u", net_frame.seq_no);
                     continue;
                 }
             }
@@ -94,6 +120,23 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                                net_frame.timestamp, net_frame.keyframe,
                                net_frame.seq_no))
                 frames_fed++;
+        }
+
+        // Cursor sync: pull any fresh shape, then push current position
+        // every tick so a moving cursor stays responsive even when the
+        // underlying video is static (no encoded frame this tick).
+        if (session.state() == client::SessionState::Connected) {
+            protocol::StreamInfoMessage info;
+            if (session.take_new_stream_info(info)) {
+                platform.set_stream_size(info.width, info.height);
+                log::info("VIEW", "Stream size: %ux%u (crop)",
+                          info.width, info.height);
+            }
+            protocol::CursorShapeMessage new_shape;
+            if (session.take_new_cursor_shape(new_shape)) {
+                platform.upload_cursor_shape(new_shape);
+            }
+            platform.update_cursor_position(session.cursor_position());
         }
 
         // Render decoded output.  On platforms where decode() already

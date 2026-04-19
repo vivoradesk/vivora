@@ -30,6 +30,14 @@ public:
             SendInput(1, &input, sizeof(INPUT));
             break;
         }
+        case protocol::InputEventType::MouseMoveRelative: {
+            input.type = INPUT_MOUSE;
+            input.mi.dwFlags = MOUSEEVENTF_MOVE;
+            input.mi.dx = static_cast<LONG>(event.dx);
+            input.mi.dy = static_cast<LONG>(event.dy);
+            SendInput(1, &input, sizeof(INPUT));
+            break;
+        }
         case protocol::InputEventType::MouseButton: {
             input.type = INPUT_MOUSE;
             switch (event.button) {

@@ -50,6 +50,10 @@ public:
     uint64_t frames_completed() const { return assembler_.frames_completed(); }
     uint64_t frames_dropped() const { return assembler_.frames_dropped(); }
 
+    // Discard every buffered frame — done after loss detection so no
+    // post-loss P-frames reach the decoder before the next IDR arrives.
+    void reset_stream() { assembler_.reset(); }
+
 private:
     net::IUdpSocket& socket_;
     net::FecDecoder fec_decoder_;

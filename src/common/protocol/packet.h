@@ -17,6 +17,9 @@ enum class PacketType : uint8_t {
     BwProbeAck  = 0x09,  // Client → host: measured bandwidth from probe
     Ping        = 0x10,
     Pong        = 0x11,
+    CursorShape    = 0x12,  // Host → client: cursor bitmap + hotspot (sent on shape change)
+    CursorPosition = 0x13,  // Host → client: cursor x/y/visible + shape_id (per-frame)
+    StreamInfo     = 0x14,  // Host → client: real (cropped) frame dimensions
 };
 
 enum PacketFlags : uint8_t {

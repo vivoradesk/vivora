@@ -2,6 +2,8 @@
 
 #include "common/codec/video_codec.h"
 #include "common/net/socket.h"
+#include "common/protocol/cursor_message.h"
+#include "common/protocol/stream_info.h"
 #include "host/session/video_sender.h"
 #include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
@@ -83,6 +85,16 @@ public:
     VideoSender* sender() { return sender_.get(); }
     AudioSender* audio_sender() { return audio_sender_.get(); }
 
+    // Broadcast a cursor position packet to all connected clients (unreliable).
+    void send_cursor_position(const protocol::CursorPositionMessage& msg);
+    // Broadcast a cursor shape packet to all connected clients. Caller is
+    // expected to send 2-3 times (spaced ~100ms apart) to survive UDP loss.
+    void send_cursor_shape(const protocol::CursorShapeMessage& msg);
+
+    // Broadcast the real (pre-padding) stream dimensions so the client can
+    // trim encoder-alignment padding and scale mouse input correctly.
+    void send_stream_info(uint16_t width, uint16_t height);
+
     // True when a new client just connected since last check.
     // Consumed (reset) on read — used by host loop for warmup arming.
     bool consume_new_client_flag() {
@@ -118,9 +130,9 @@ private:
     uint32_t pending_screen_h_ = 0;
 
     // Bandwidth probe constants.
-    static constexpr uint8_t  BW_PROBE_COUNT = 20;
+    static constexpr uint16_t BW_PROBE_COUNT = 1000;
     static constexpr uint16_t BW_PROBE_SIZE  = 1200;
-    static constexpr int64_t  BW_PROBE_TIMEOUT_MS = 500;
+    static constexpr int64_t  BW_PROBE_TIMEOUT_MS = 10000;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
 };

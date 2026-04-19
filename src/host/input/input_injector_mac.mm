@@ -5,6 +5,7 @@
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <algorithm>
 
 namespace deskbeam::host {
 
@@ -139,6 +140,9 @@ public:
         case protocol::InputEventType::MouseMove:
             handle_mouse_move(event.x_norm, event.y_norm);
             break;
+        case protocol::InputEventType::MouseMoveRelative:
+            handle_mouse_move_relative(event.dx, event.dy);
+            break;
         case protocol::InputEventType::MouseButton:
             handle_mouse_button(event.button, event.pressed);
             break;
@@ -168,6 +172,31 @@ private:
 
         CGEventRef ev = CGEventCreateMouseEvent(event_source_, type, p, button);
         if (ev) {
+            CGEventPost(kCGHIDEventTap, ev);
+            CFRelease(ev);
+        }
+    }
+
+    void handle_mouse_move_relative(int32_t dx, int32_t dy) {
+        // Games on macOS read raw HID deltas via the kCGMouseEventDeltaX/Y
+        // fields.  We still post an absolute mouseMoved with the cursor
+        // clamped to the screen so ordinary apps also see the movement.
+        last_mouse_x_ = std::max(0.0f, std::min(static_cast<float>(screen_w_ - 1),
+                                                last_mouse_x_ + static_cast<float>(dx)));
+        last_mouse_y_ = std::max(0.0f, std::min(static_cast<float>(screen_h_ - 1),
+                                                last_mouse_y_ + static_cast<float>(dy)));
+        CGPoint p = CGPointMake(last_mouse_x_, last_mouse_y_);
+
+        CGEventType type = kCGEventMouseMoved;
+        CGMouseButton button = kCGMouseButtonLeft;
+        if (buttons_down_ & (1 << 0)) { type = kCGEventLeftMouseDragged;  button = kCGMouseButtonLeft; }
+        else if (buttons_down_ & (1 << 1)) { type = kCGEventRightMouseDragged; button = kCGMouseButtonRight; }
+        else if (buttons_down_ & (1 << 2)) { type = kCGEventOtherMouseDragged; button = kCGMouseButtonCenter; }
+
+        CGEventRef ev = CGEventCreateMouseEvent(event_source_, type, p, button);
+        if (ev) {
+            CGEventSetIntegerValueField(ev, kCGMouseEventDeltaX, dx);
+            CGEventSetIntegerValueField(ev, kCGMouseEventDeltaY, dy);
             CGEventPost(kCGHIDEventTap, ev);
             CFRelease(ev);
         }

@@ -19,13 +19,20 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
 {
     prepared_wires_.clear();
 
-    // Flush any in-progress FEC group before a keyframe so that the
-    // keyframe starts a fresh group (with potentially lower K).
+    // A keyframe spans ~40 UDP fragments; losing a single FEC group worth
+    // of packets stalls the stream until the next IDR retry.  Flush the
+    // in-progress P-frame group at current M, then temporarily boost M
+    // for the keyframe's own groups.  20-40% extra parity on the rare
+    // keyframe costs almost nothing on average bitrate but buys real
+    // burst-loss resilience when it matters most.
+    uint8_t saved_m = 0;
     if (keyframe) {
-        std::vector<uint8_t> fec_wire;
-        if (fec_encoder_.flush(frame_seq, timestamp, fec_wire)) {
-            prepared_wires_.push_back(std::move(fec_wire));
-        }
+        auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
+        for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+        saved_m = fec_encoder_.parity_count();
+        uint8_t kf_m = saved_m + KEYFRAME_M_BOOST;
+        if (kf_m > KEYFRAME_M_MAX) kf_m = KEYFRAME_M_MAX;
+        fec_encoder_.set_parity_count(kf_m);
     }
 
     auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp, keyframe);
@@ -40,23 +47,21 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
 
         prepared_wires_.push_back(wire);
 
-        // Feed to FEC encoder — may produce a parity packet.
-        std::vector<uint8_t> fec_wire;
+        // Feed to FEC encoder — may produce M parity packets.
         const auto& retx_wire = retx_index_[key];
-        if (fec_encoder_.feed(retx_wire.data(), retx_wire.size(),
-                              frame_seq, timestamp, fec_wire)) {
-            prepared_wires_.push_back(std::move(fec_wire));
-        }
+        auto fec_wires = fec_encoder_.feed(retx_wire.data(), retx_wire.size(),
+                                           frame_seq, timestamp);
+        for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
 
         frag_idx++;
     }
 
-    // Flush FEC group at end of keyframe for tighter protection.
+    // Flush FEC group at end of keyframe for tighter protection, then
+    // restore the steady-state M so P-frames don't pay boosted overhead.
     if (keyframe) {
-        std::vector<uint8_t> fec_wire;
-        if (fec_encoder_.flush(frame_seq, timestamp, fec_wire)) {
-            prepared_wires_.push_back(std::move(fec_wire));
-        }
+        auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
+        for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+        fec_encoder_.set_parity_count(saved_m);
     }
 
     packets_sent_ += static_cast<uint64_t>(frag_idx);
@@ -120,53 +125,59 @@ void VideoSender::update_fec_from_loss(float loss_rate) {
         return;
     }
 
-    uint8_t target_k;
-    if (loss_rate < 0.02f)       target_k = 10;
-    else if (loss_rate < 0.04f)  target_k = 5;
-    else                         target_k = 3;
+    // K stays at default 10 (good batching).  M scales with observed loss:
+    // each extra parity shard covers one additional burst-loss per K-group.
+    // M floor = 2 on WiFi — even at 0% EWMA, burst-loss micro-events
+    // cost more than the 20% parity overhead.
+    uint8_t target_m;
+    if      (loss_rate < 0.03f) target_m = 2;
+    else if (loss_rate < 0.05f) target_m = 3;
+    else                        target_m = 4;
 
-    uint8_t current_k = fec_encoder_.group_size();
+    uint8_t current_m = fec_encoder_.parity_count();
 
-    if (target_k < current_k) {
-        log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%, tighten)",
-                  current_k, target_k, loss_rate * 100.0f);
-        fec_encoder_.set_group_size(target_k);
+    if (target_m > current_m) {
+        log::info("FEC", "Adaptive M: %d -> %d (loss=%.1f%%, tighten)",
+                  current_m, target_m, loss_rate * 100.0f);
+        fec_encoder_.set_parity_count(target_m);
         cooldown_ = TIGHTEN_COOLDOWN;
-        pending_k_ = target_k;
-        pending_k_count_ = 0;
+        pending_relax_count_ = 0;
         return;
     }
 
-    if (rtt_locked_k3_ && target_k > current_k) return;
+    if (rtt_locked_ && target_m < current_m) return;
 
-    if (target_k > current_k) {
-        ++pending_k_count_;
-
-        if (pending_k_count_ >= HYSTERESIS_UP) {
-            uint8_t next_k = next_relax_step(current_k);
-            log::info("FEC", "Adaptive K: %d -> %d (loss=%.1f%%, relax step)",
-                      current_k, next_k, loss_rate * 100.0f);
-            fec_encoder_.set_group_size(next_k);
+    if (target_m < current_m) {
+        if (++pending_relax_count_ >= HYSTERESIS_UP) {
+            uint8_t next_m = current_m - 1;
+            log::info("FEC", "Adaptive M: %d -> %d (loss=%.1f%%, relax step)",
+                      current_m, next_m, loss_rate * 100.0f);
+            fec_encoder_.set_parity_count(next_m);
             cooldown_ = RELAX_COOLDOWN;
-            pending_k_count_ = 0;
+            pending_relax_count_ = 0;
         }
+    } else {
+        pending_relax_count_ = 0;
     }
 }
 
 void VideoSender::on_rtt(double rtt_ms) {
-    if (rtt_ms > RTT_SPIKE_MS && !rtt_locked_k3_) {
-        pre_lock_k_ = fec_encoder_.group_size();
-        fec_encoder_.set_group_size(3);
-        rtt_locked_k3_ = true;
+    if (rtt_ms > RTT_SPIKE_MS && !rtt_locked_) {
+        pre_lock_m_ = fec_encoder_.parity_count();
+        if (pre_lock_m_ < RTT_SPIKE_M) {
+            fec_encoder_.set_parity_count(RTT_SPIKE_M);
+        }
+        rtt_locked_ = true;
         rtt_normal_count_ = 0;
         cooldown_ = TIGHTEN_COOLDOWN;
-        log::info("FEC", "RTT spike %.0fms -> force K=3 (was %d)", rtt_ms, pre_lock_k_);
-    } else if (rtt_locked_k3_) {
+        log::info("FEC", "RTT spike %.0fms -> raise M to %d (was %d)",
+                  rtt_ms, static_cast<int>(RTT_SPIKE_M), pre_lock_m_);
+    } else if (rtt_locked_) {
         if (rtt_ms < RTT_NORMAL_MS) {
             if (++rtt_normal_count_ >= RTT_NORMAL_CYCLES) {
-                rtt_locked_k3_ = false;
+                rtt_locked_ = false;
                 rtt_normal_count_ = 0;
-                log::info("FEC", "RTT stable %.0fms -> unlock K (was locked at 3)", rtt_ms);
+                log::info("FEC", "RTT stable %.0fms -> unlock M", rtt_ms);
             }
         } else {
             rtt_normal_count_ = 0;

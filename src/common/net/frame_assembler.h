@@ -41,6 +41,12 @@ public:
     uint64_t frames_completed() const { return frames_completed_; }
     uint64_t frames_dropped() const { return frames_dropped_; }
 
+    // Drop every buffered frame and reset the delivery cursor. Called
+    // after loss when we're about to request an IDR — anything still
+    // pending references the missing frame and would feed corrupted
+    // data to the decoder.
+    void reset();
+
 private:
     struct PendingFrame {
         uint16_t frag_count = 0;

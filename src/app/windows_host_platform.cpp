@@ -68,6 +68,12 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
     if (!capture_->capture_frame(frame, 16))
         return false;
 
+    // Stash cursor state before any early-return so get_cursor_state()
+    // can report it even on content-unchanged ticks.
+    last_cursor_x_ = frame.cursor.x;
+    last_cursor_y_ = frame.cursor.y;
+    last_cursor_visible_ = frame.cursor.visible;
+
     pts_us = std::chrono::duration_cast<std::chrono::microseconds>(
         frame.capture_time.time_since_epoch()).count();
     content_changed = frame.content_changed;
@@ -82,6 +88,35 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
         return false;
     }
     capture_->release_frame(frame);
+    return true;
+}
+
+bool WindowsHostPlatform::get_cursor_state(CursorState& out) {
+    if (!dxgi_) return false;
+    const uint32_t w = capture_width();
+    const uint32_t h = capture_height();
+    if (w == 0 || h == 0) return false;
+    float xn = static_cast<float>(last_cursor_x_) / static_cast<float>(w);
+    float yn = static_cast<float>(last_cursor_y_) / static_cast<float>(h);
+    if (xn < 0.f) xn = 0.f; else if (xn > 1.f) xn = 1.f;
+    if (yn < 0.f) yn = 0.f; else if (yn > 1.f) yn = 1.f;
+    out.x_norm   = xn;
+    out.y_norm   = yn;
+    out.visible  = last_cursor_visible_;
+    out.shape_id = dxgi_->current_shape_id();
+    return true;
+}
+
+bool WindowsHostPlatform::take_cursor_shape(CursorShapeView& out) {
+    if (!dxgi_) return false;
+    deskbeam::CursorShape s;
+    if (!dxgi_->take_new_cursor_shape(s)) return false;
+    out.id        = s.id;
+    out.width     = s.width;
+    out.height    = s.height;
+    out.hotspot_x = s.hotspot_x;
+    out.hotspot_y = s.hotspot_y;
+    out.bgra      = std::move(s.bgra);
     return true;
 }
 

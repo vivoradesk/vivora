@@ -60,7 +60,15 @@ int WindowsViewPlatform::render() {
             renderer_ready_ = window_->init_renderer(
                 decoder_->get_device(), decoded.width, decoded.height, tex_desc.Format);
             if (renderer_ready_) {
-                window_->set_host_resolution(decoded.width, decoded.height);
+                // If StreamInfo arrived before the first frame, apply the
+                // real crop dims now that the renderer exists.  Otherwise
+                // fall back to the decoded (possibly padded) dims so mouse
+                // mapping still works until StreamInfo lands.
+                if (pending_stream_w_ != 0 && pending_stream_h_ != 0) {
+                    window_->set_stream_size(pending_stream_w_, pending_stream_h_);
+                } else {
+                    window_->set_stream_size(decoded.width, decoded.height);
+                }
                 deskbeam::log::info("VIEW", "Renderer started: %ux%u, format=%u",
                                     decoded.width, decoded.height, tex_desc.Format);
             }
@@ -75,6 +83,20 @@ int WindowsViewPlatform::render() {
 }
 
 void WindowsViewPlatform::flush_decoder() { if (decoder_) decoder_->flush(); }
+
+void WindowsViewPlatform::upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) {
+    if (window_) window_->upload_cursor_shape(shape);
+}
+
+void WindowsViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) {
+    if (window_) window_->update_cursor_position(pos);
+}
+
+void WindowsViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
+    pending_stream_w_ = width;
+    pending_stream_h_ = height;
+    if (window_) window_->set_stream_size(width, height);
+}
 
 void WindowsViewPlatform::shutdown() {
     window_.reset();

@@ -277,6 +277,13 @@ bool NvencEncoder::configure_encoder() {
         auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
         hevc.repeatSPSPPS = 1;
         hevc.idrPeriod    = enc_cfg.gopLength;
+        // Continuous intra refresh: every frame carries ~1/fps of the
+        // intra macroblocks, so a full picture refresh happens each second
+        // without the burst of a traditional IDR. Kills burst-loss on the
+        // network and BRC thrash on the encoder.
+        hevc.enableIntraRefresh = 1;
+        hevc.intraRefreshPeriod = config_.fps;
+        hevc.intraRefreshCnt    = config_.fps;
         if (is_hdr_) {
             hevc.pixelBitDepthMinus8 = 2;
             enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
@@ -603,6 +610,9 @@ void NvencEncoder::set_bitrate(uint32_t bitrate_bps) {
         auto& hevc = enc_cfg.encodeCodecConfig.hevcConfig;
         hevc.repeatSPSPPS = 1;
         hevc.idrPeriod    = enc_cfg.gopLength;
+        hevc.enableIntraRefresh = 1;
+        hevc.intraRefreshPeriod = config_.fps;
+        hevc.intraRefreshCnt    = config_.fps;
         if (is_hdr_) {
             hevc.pixelBitDepthMinus8 = 2;
             enc_cfg.profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;

@@ -284,7 +284,16 @@ bool QsvEncoder::configure_encoder() {
         std::max<uint32_t>(config_.bitrate_bps / 8000u, 128u));
     p.mfx.InitialDelayInKB  = p.mfx.BufferSizeInKB / 2;
     vbv_kb_                 = p.mfx.BufferSizeInKB;
-    p.mfx.GopPicSize        = static_cast<mfxU16>(config_.idr_period ? config_.idr_period : config_.fps);
+    // Default: try intra refresh with a long natural GOP. If the driver
+    // rejects intra refresh (HEVC support is patchy on Intel), we fall
+    // back to a long plain GOP below and rely on loss-triggered IDR from
+    // the client for recovery. Either way we avoid the 1s-IDR burst
+    // pattern that kills FEC on WiFi.
+    const mfxU16 wanted_cycle = static_cast<mfxU16>(config_.fps);
+    const mfxU16 wanted_gop   = static_cast<mfxU16>(
+        config_.idr_period ? config_.idr_period
+                           : std::min<uint32_t>(config_.fps * 30, 0xFFFE));
+    p.mfx.GopPicSize        = wanted_gop;
     p.mfx.GopRefDist        = 1;      // no B-frames
     p.mfx.NumRefFrame       = 1;
     p.mfx.IdrInterval       = 0;      // every I is IDR (HEVC: interval in number of I-frames)
@@ -303,6 +312,8 @@ bool QsvEncoder::configure_encoder() {
     ep->co2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2;  ep->co2.Header.BufferSz = sizeof(ep->co2);
     ep->co2.LookAheadDepth    = 0;
     ep->co2.RepeatPPS         = MFX_CODINGOPTION_ON;
+    ep->co2.IntRefType        = MFX_REFRESH_SLICE;
+    ep->co2.IntRefCycleSize   = wanted_cycle;
 
     ep->co3.Header.BufferId = MFX_EXTBUFF_CODING_OPTION3;  ep->co3.Header.BufferSz = sizeof(ep->co3);
     ep->co3.LowDelayBRC       = MFX_CODINGOPTION_ON;
@@ -315,9 +326,28 @@ bool QsvEncoder::configure_encoder() {
 
     mfxStatus st = vpl::g_fn.EncQuery(reinterpret_cast<mfxSession>(session_), &p, &p);
     if (st < MFX_ERR_NONE) {
+        // Intra refresh rejected — try again without it.
+        log::warn(TAG, "Intra refresh rejected (err %d), falling back to long GOP", (int)st);
+        ep->co2.IntRefType      = MFX_REFRESH_NO;
+        ep->co2.IntRefCycleSize = 0;
+        p.mfx.GopPicSize        = wanted_gop;
+        st = vpl::g_fn.EncQuery(reinterpret_cast<mfxSession>(session_), &p, &p);
+    }
+    if (st < MFX_ERR_NONE) {
         log::error(TAG, "ENCODE Query failed: %d", (int)st);
         return false;
     }
+    const char* ir_name = "off";
+    switch (ep->co2.IntRefType) {
+        case MFX_REFRESH_VERTICAL:   ir_name = "vertical";   break;
+        case MFX_REFRESH_HORIZONTAL: ir_name = "horizontal"; break;
+        case MFX_REFRESH_SLICE:      ir_name = "slice";      break;
+        default: break;
+    }
+    log::info(TAG, "Intra refresh: %s (cycle=%u), GOP=%u",
+              ir_name,
+              (unsigned)ep->co2.IntRefCycleSize,
+              (unsigned)p.mfx.GopPicSize);
     if (st > MFX_ERR_NONE) {
         log::warn(TAG, "ENCODE Query adjusted params (warning %d)", (int)st);
     }

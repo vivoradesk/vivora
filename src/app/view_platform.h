@@ -1,7 +1,9 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
+#include "common/protocol/stream_info.h"
 #include <cstdint>
 #include <cstddef>
 #include <functional>
@@ -38,6 +40,17 @@ struct ViewPlatform {
 
     // Called when decoder should discard stale reference frames (after drop).
     virtual void flush_decoder() {}
+
+    // Upload a new cursor shape. Called once per shape_id; the platform caches
+    // it keyed by shape_id so subsequent position updates can reference it.
+    virtual void upload_cursor_shape(const protocol::CursorShapeMessage& /*shape*/) {}
+    // Update the current cursor position / visibility. Called every frame.
+    virtual void update_cursor_position(const protocol::CursorPositionMessage& /*pos*/) {}
+
+    // Notify the platform of the real (pre-encoder-padding) stream size.
+    // The decoded texture may be larger due to codec alignment (QSV rounds
+    // to 16 pixels); these are the authoritative content dims.
+    virtual void set_stream_size(uint32_t /*width*/, uint32_t /*height*/) {}
 
     // Cleanup.
     virtual void shutdown() {}

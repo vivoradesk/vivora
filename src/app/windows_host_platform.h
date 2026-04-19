@@ -28,11 +28,19 @@ public:
                             bool force) override;
     bool get_encoded_packet(EncodedPacketView& out) override;
 
+    bool get_cursor_state(CursorState& out) override;
+    bool take_cursor_shape(CursorShapeView& out) override;
+
 private:
     std::unique_ptr<deskbeam::IScreenCapture> capture_;
     deskbeam::DxgiCapture* dxgi_ = nullptr;
     std::unique_ptr<deskbeam::IVideoEncoder> encoder_;
     std::vector<uint8_t> pkt_buf_;
+
+    // Latest cursor position observed from DXGI (raw host pixels).
+    int32_t last_cursor_x_ = 0;
+    int32_t last_cursor_y_ = 0;
+    bool    last_cursor_visible_ = false;
 };
 
 #endif // DESKBEAM_WINDOWS

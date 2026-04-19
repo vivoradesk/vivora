@@ -3,6 +3,7 @@
 #include "common/codec/video_codec.h"
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 
 namespace deskbeam {
 
@@ -57,6 +58,30 @@ struct HostPlatform {
 
     // Cleanup.
     virtual void shutdown() {}
+
+    // Cursor sync (Windows DXGI for now; default no-op elsewhere).
+    struct CursorState {
+        float    x_norm   = 0.0f;   // 0..1 relative to host screen
+        float    y_norm   = 0.0f;
+        bool     visible  = false;
+        uint32_t shape_id = 0;      // which shape the client should render
+    };
+    struct CursorShapeView {
+        uint32_t id = 0;
+        uint16_t width = 0;
+        uint16_t height = 0;
+        uint16_t hotspot_x = 0;
+        uint16_t hotspot_y = 0;
+        std::vector<uint8_t> bgra;  // width*height*4 bytes
+    };
+
+    // Poll the current cursor position (cheap, once per frame).
+    // Returns false if the platform doesn't expose a cursor.
+    virtual bool get_cursor_state(CursorState& /*out*/) { return false; }
+
+    // Take the latest cursor shape if it changed since the last call.
+    // Returns true when the platform has a new shape to transmit.
+    virtual bool take_cursor_shape(CursorShapeView& /*out*/) { return false; }
 };
 
 } // namespace deskbeam

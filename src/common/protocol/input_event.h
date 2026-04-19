@@ -8,11 +8,12 @@ namespace deskbeam::protocol {
 
 // Input event types
 enum class InputEventType : uint8_t {
-    MouseMove    = 0x01,
-    MouseButton  = 0x02,
-    MouseScroll  = 0x03,
-    KeyDown      = 0x04,
-    KeyUp        = 0x05,
+    MouseMove         = 0x01,
+    MouseButton       = 0x02,
+    MouseScroll       = 0x03,
+    KeyDown           = 0x04,
+    KeyUp             = 0x05,
+    MouseMoveRelative = 0x06,
 };
 
 enum class MouseButton : uint8_t {
@@ -25,8 +26,11 @@ enum class MouseButton : uint8_t {
 
 // Wire format for input events:
 //
-// MouseMove:   type(1) | x_norm(4 float) | y_norm(4 float)              = 9 bytes
-//              x_norm, y_norm: 0.0..1.0 relative to host screen
+// MouseMove:         type(1) | x_norm(4 float) | y_norm(4 float)        = 9 bytes
+//                    x_norm, y_norm: 0.0..1.0 relative to host screen
+//
+// MouseMoveRelative: type(1) | dx(4 int32 LE) | dy(4 int32 LE)          = 9 bytes
+//                    raw pixel deltas, used when host cursor is hidden
 //
 // MouseButton: type(1) | button(1) | pressed(1)                         = 3 bytes
 //
@@ -41,6 +45,10 @@ struct InputEvent {
     // MouseMove
     float x_norm = 0.0f;  // 0.0 .. 1.0
     float y_norm = 0.0f;
+
+    // MouseMoveRelative
+    int32_t dx = 0;
+    int32_t dy = 0;
 
     // MouseButton
     MouseButton button = MouseButton::Left;
@@ -64,6 +72,11 @@ struct InputEvent {
             buf.resize(1 + 8);
             std::memcpy(buf.data() + 1, &x_norm, 4);
             std::memcpy(buf.data() + 5, &y_norm, 4);
+            break;
+        case InputEventType::MouseMoveRelative:
+            buf.resize(1 + 8);
+            std::memcpy(buf.data() + 1, &dx, 4);
+            std::memcpy(buf.data() + 5, &dy, 4);
             break;
         case InputEventType::MouseButton:
             buf.push_back(static_cast<uint8_t>(button));
@@ -98,6 +111,11 @@ struct InputEvent {
             if (len < 9) return false;
             std::memcpy(&out.x_norm, data + 1, 4);
             std::memcpy(&out.y_norm, data + 5, 4);
+            return true;
+        case InputEventType::MouseMoveRelative:
+            if (len < 9) return false;
+            std::memcpy(&out.dx, data + 1, 4);
+            std::memcpy(&out.dy, data + 5, 4);
             return true;
         case InputEventType::MouseButton:
             if (len < 3) return false;

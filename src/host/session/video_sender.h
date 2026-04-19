@@ -49,9 +49,10 @@ public:
     int handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count,
                     const net::SocketAddr& dest);
 
-    // Adaptive FEC: update K based on client-reported loss rate.
+    // Adaptive FEC: update M (parity count) based on client-reported loss rate.
     void update_fec_from_loss(float loss_rate);
-    uint8_t fec_group_size() const { return fec_encoder_.group_size(); }
+    uint8_t fec_group_size()   const { return fec_encoder_.group_size(); }
+    uint8_t fec_parity_count() const { return fec_encoder_.parity_count(); }
     float last_loss_rate() const { return last_loss_rate_; }
 
     // Feed RTT for proactive K lowering on WiFi stalls.
@@ -67,12 +68,6 @@ private:
         return (static_cast<uint32_t>(seq) << 16) | frag;
     }
 
-    // Graduated relaxation: 3 -> 5 -> 10, one step at a time.
-    static uint8_t next_relax_step(uint8_t current_k) {
-        if (current_k < 5)  return 5;
-        return 10;
-    }
-
     void store_retx(uint32_t key, std::vector<uint8_t> wire);
 
     net::IUdpSocket& socket_;
@@ -86,23 +81,30 @@ private:
     // Prepared wire packets (data + FEC) ready for send_prepared().
     std::vector<std::vector<uint8_t>> prepared_wires_;
 
-    // Adaptive K: hysteresis + cooldown to prevent oscillation.
-    uint8_t pending_k_ = 10;
-    uint8_t pending_k_count_ = 0;
+    // Adaptive M: hysteresis + cooldown.  Raise fast, lower slow.
+    uint8_t  pending_relax_count_ = 0;
     uint16_t cooldown_ = 0;
-    static constexpr uint8_t HYSTERESIS_DOWN = 2;
-    static constexpr uint8_t HYSTERESIS_UP   = 8;
-    static constexpr uint16_t TIGHTEN_COOLDOWN = 4;
-    static constexpr uint16_t RELAX_COOLDOWN   = 20;
+    static constexpr uint8_t  HYSTERESIS_UP     = 8;
+    static constexpr uint16_t TIGHTEN_COOLDOWN  = 4;
+    static constexpr uint16_t RELAX_COOLDOWN    = 20;
 
-    // RTT-based proactive K lowering: spike detection.
-    // 80ms threshold avoids false positives from normal WiFi jitter (20-40ms).
-    static constexpr double RTT_SPIKE_MS  = 80.0;
-    static constexpr double RTT_NORMAL_MS = 25.0;
+    // Keyframe parity boost: steady-state M is tuned for P-frame size;
+    // a keyframe is ~40 fragments and losing one group kills the whole
+    // frame.  Add extra parity just for the keyframe's groups, capped
+    // at KEYFRAME_M_MAX to keep recovery math bounded.
+    static constexpr uint8_t KEYFRAME_M_BOOST = 2;
+    static constexpr uint8_t KEYFRAME_M_MAX   = 8;
+
+    // RTT-based proactive M raise: spike detection.
+    // 50ms threshold — tight enough to catch early WiFi congestion, while
+    // RTT_NORMAL_MS=25 keeps normal jitter out of the trigger band.
+    static constexpr double  RTT_SPIKE_MS     = 50.0;
+    static constexpr double  RTT_NORMAL_MS    = 25.0;
     static constexpr uint8_t RTT_NORMAL_CYCLES = 20;
-    bool     rtt_locked_k3_ = false;
+    static constexpr uint8_t RTT_SPIKE_M      = 3;
+    bool     rtt_locked_  = false;
     uint8_t  rtt_normal_count_ = 0;
-    uint8_t  pre_lock_k_ = 10;
+    uint8_t  pre_lock_m_ = 2;
 
     // Wire bytes stored by key for O(1) lookup; FIFO of keys for eviction order.
     std::deque<uint32_t> retx_fifo_;

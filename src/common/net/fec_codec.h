@@ -24,31 +24,46 @@ inline uint32_t wire_pkt_key(const uint8_t* wire, size_t len) {
 }
 
 // ---- Encoder (host side) --------------------------------------------------
+//
+// Reed-Solomon systematic FEC over GF(256).  Each closed group of K data
+// packets produces M parity packets (K + M ≤ 255).  Recovery tolerates any M
+// missing shards out of the K + M.  M is adaptive — host raises it under loss.
 
 class FecEncoder {
 public:
+    // Set K (group size).  Clamped to [2, 128].
     void set_group_size(uint8_t k);
-    uint8_t group_size() const { return k_; }
+    // Set M (parity count).  Clamped to [1, 64].
+    void set_parity_count(uint8_t m);
 
-    bool feed(const uint8_t* wire, size_t len,
-              uint16_t frame_seq, uint32_t timestamp,
-              std::vector<uint8_t>& fec_out);
+    uint8_t group_size()   const { return k_; }
+    uint8_t parity_count() const { return m_; }
 
-    bool flush(uint16_t frame_seq, uint32_t timestamp,
-               std::vector<uint8_t>& fec_out);
+    // Accept one data packet.  Returns M parity wire packets when the group
+    // just closed (count reached K), otherwise an empty vector.
+    std::vector<std::vector<uint8_t>> feed(
+        const uint8_t* wire, size_t len,
+        uint16_t frame_seq, uint32_t timestamp);
+
+    // Close a partial group early.  Returns M parity wire packets covering
+    // whatever was accumulated (with effective K = count so far), or empty
+    // if no data packets pending.
+    std::vector<std::vector<uint8_t>> flush(uint16_t frame_seq,
+                                            uint32_t timestamp);
 
 private:
-    void xor_accumulate(const uint8_t* data, size_t len);
-    std::vector<uint8_t> build_fec_wire(uint16_t frame_seq, uint32_t timestamp);
+    std::vector<std::vector<uint8_t>> emit_parities(uint16_t frame_seq,
+                                                    uint32_t timestamp);
     void reset_group();
 
-    uint8_t k_ = 10;
+    uint8_t  k_ = 10;
+    uint8_t  m_ = 2;
     uint16_t group_id_ = 0;
 
-    std::vector<uint32_t> pkt_keys_;
-    std::vector<uint16_t> pkt_lens_;
-    std::vector<uint8_t>  parity_;
-    uint8_t               count_ = 0;
+    std::vector<std::vector<uint8_t>> data_shards_;  // raw wire bytes of data pkts
+    std::vector<uint32_t>             pkt_keys_;
+    std::vector<uint16_t>             pkt_lens_;
+    uint8_t                           count_ = 0;
 };
 
 // ---- Decoder (client side) ------------------------------------------------
@@ -69,23 +84,22 @@ public:
 private:
     struct FecGroup {
         uint8_t  k = 0;
-        std::vector<uint32_t>             pkt_keys;
-        std::vector<uint16_t>             pkt_lens;
-        std::vector<std::vector<uint8_t>> packets;   // [k] slots
-        std::vector<uint8_t>              parity;
-        uint8_t  received_data = 0;
-        // Count of slots filled by ORIGINAL-transmission packets (not retx).
-        // Used to measure channel loss BEFORE retransmissions mask it.
-        // received_data - fresh_received = retx packets that filled gaps.
-        uint8_t  fresh_received = 0;
-        bool     fec_received = false;
+        uint8_t  m = 0;
+        std::vector<uint32_t>             pkt_keys;    // [k]
+        std::vector<uint16_t>             pkt_lens;    // [k]
+        std::vector<std::vector<uint8_t>> data_shards;   // [k]  (empty = missing)
+        std::vector<std::vector<uint8_t>> parity_shards; // [m]  (empty = missing)
+        uint8_t  received_data   = 0;
+        uint8_t  fresh_received  = 0;  // original-transmission count (not retx)
+        uint8_t  received_parity = 0;
+        bool     header_received = false;  // true once any parity arrived
         bool     resolved = false;
     };
 
     void populate_group_from_ring(FecGroup& group);
     void try_recover(FecGroup& group,
                      std::vector<std::vector<uint8_t>>& recovered,
-                     bool attempt_xor);
+                     bool attempt_decode);
     void expire_old_groups();
     void update_loss(int missing, int k);
 

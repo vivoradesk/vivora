@@ -115,6 +115,11 @@ void FrameAssembler::try_deliver() {
             // Skip only if we know newer frames exist — otherwise wait.
             int16_t ahead = static_cast<int16_t>(newest_seq_ - next_deliver_seq_);
             if (ahead <= 0) return;
+            // Missing frame — count it as a drop so the view layer can
+            // trigger an IDR request. Without this, totally-lost frames
+            // stay invisible to drop detection and the decoder keeps
+            // consuming P-frames whose reference chain is broken.
+            frames_dropped_++;
             next_deliver_seq_++;
             continue;
         }
@@ -186,6 +191,16 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
         }
     }
     return out;
+}
+
+void FrameAssembler::reset() {
+    pending_.clear();
+    std::queue<AssembledFrame> empty;
+    std::swap(completed_, empty);
+    has_seq_ = false;
+    has_deliver_seq_ = false;
+    newest_seq_ = 0;
+    next_deliver_seq_ = 0;
 }
 
 void FrameAssembler::expire_stale() {

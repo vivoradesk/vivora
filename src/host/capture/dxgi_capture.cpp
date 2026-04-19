@@ -3,6 +3,7 @@
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
 #include "common/utils/metrics.h"
+#include <cstring>
 #include <string>
 
 #pragma comment(lib, "d3d11.lib")
@@ -219,13 +220,132 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
         }
     }
 
-    // Cursor info
+    // Cursor info: DXGI fills PointerPosition only on frames where the
+    // cursor changed. Carry the last known state forward so every frame
+    // has valid cursor data, otherwise downstream sees "invisible" flicker
+    // on idle ticks and the client cursor flickers between the host shape
+    // and BlankCursor.
     if (frame_info.LastMouseUpdateTime.QuadPart != 0) {
-        frame.cursor.x = frame_info.PointerPosition.Position.x;
-        frame.cursor.y = frame_info.PointerPosition.Position.y;
-        frame.cursor.visible = frame_info.PointerPosition.Visible;
+        sticky_cursor_x_       = frame_info.PointerPosition.Position.x;
+        sticky_cursor_y_       = frame_info.PointerPosition.Position.y;
+        sticky_cursor_visible_ = frame_info.PointerPosition.Visible != 0;
+    }
+    frame.cursor.x       = sticky_cursor_x_;
+    frame.cursor.y       = sticky_cursor_y_;
+    frame.cursor.visible = sticky_cursor_visible_;
+
+    // Cursor shape: DXGI only fills the pointer-shape buffer when the
+    // shape actually changed. Fetching it is cheap when it's empty.
+    if (frame_info.PointerShapeBufferSize > 0) {
+        update_cursor_shape(frame_info.PointerShapeBufferSize);
     }
 
+    return true;
+}
+
+void DxgiCapture::update_cursor_shape(UINT buffer_size) {
+    if (shape_scratch_.size() < buffer_size) shape_scratch_.resize(buffer_size);
+
+    DXGI_OUTDUPL_POINTER_SHAPE_INFO info = {};
+    UINT required = 0;
+    HRESULT hr = duplication_->GetFramePointerShape(
+        buffer_size, shape_scratch_.data(), &required, &info);
+    if (FAILED(hr)) {
+        log::warn(TAG, "GetFramePointerShape failed: 0x%08X", hr);
+        return;
+    }
+
+    // DXGI reports Height doubled for monochrome (AND mask + XOR mask stacked).
+    const bool is_mono = (info.Type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME);
+    const uint32_t out_w = info.Width;
+    const uint32_t out_h = is_mono ? (info.Height / 2) : info.Height;
+    if (out_w == 0 || out_h == 0 || out_w > 256 || out_h > 256) {
+        log::warn(TAG, "Implausible cursor shape %ux%u type=%u — ignored",
+                  out_w, out_h, info.Type);
+        return;
+    }
+
+    CursorShape s;
+    s.width     = static_cast<uint16_t>(out_w);
+    s.height    = static_cast<uint16_t>(out_h);
+    s.hotspot_x = static_cast<uint16_t>(info.HotSpot.x);
+    s.hotspot_y = static_cast<uint16_t>(info.HotSpot.y);
+    s.bgra.assign(static_cast<size_t>(out_w) * out_h * 4u, 0);
+
+    const uint8_t* src = shape_scratch_.data();
+    uint8_t* dst = s.bgra.data();
+    const UINT pitch = info.Pitch;
+
+    switch (info.Type) {
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR: {
+        // BGRA already. Copy row by row since source pitch may differ from
+        // our tight `width*4` layout.
+        const uint32_t row_bytes = out_w * 4u;
+        for (uint32_t y = 0; y < out_h; ++y) {
+            std::memcpy(dst + y * row_bytes, src + y * pitch, row_bytes);
+        }
+        break;
+    }
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR: {
+        // Per DXGI spec the alpha byte is *inverted* vs. a normal BGRA:
+        //   a == 0x00 → the pixel replaces the desktop (opaque draw).
+        //   a == 0xFF → the pixel XORs the desktop (inversion cursor).
+        // We can't do XOR on a flat cursor bitmap, so we approximate the
+        // XOR region as transparent — for the Windows hand cursor this
+        // corresponds to the area *outside* the visible hand, giving a
+        // clean cutout instead of a black box.
+        for (uint32_t y = 0; y < out_h; ++y) {
+            const uint8_t* s_row = src + y * pitch;
+            uint8_t* d_row = dst + y * out_w * 4u;
+            for (uint32_t x = 0; x < out_w; ++x) {
+                uint8_t b = s_row[x*4+0], g = s_row[x*4+1];
+                uint8_t r = s_row[x*4+2], a = s_row[x*4+3];
+                d_row[x*4+0] = b;
+                d_row[x*4+1] = g;
+                d_row[x*4+2] = r;
+                d_row[x*4+3] = (a == 0) ? 255 : 0;
+            }
+        }
+        break;
+    }
+    case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME:
+    default: {
+        // 1bpp AND/XOR masks. For each pixel:
+        //   AND=0, XOR=0 -> opaque black
+        //   AND=0, XOR=1 -> opaque white
+        //   AND=1, XOR=0 -> transparent
+        //   AND=1, XOR=1 -> inversion (not supported) -> opaque white
+        const uint8_t* and_mask = src;
+        const uint8_t* xor_mask = src + pitch * out_h;
+        for (uint32_t y = 0; y < out_h; ++y) {
+            const uint8_t* and_row = and_mask + y * pitch;
+            const uint8_t* xor_row = xor_mask + y * pitch;
+            uint8_t* d_row = dst + y * out_w * 4u;
+            for (uint32_t x = 0; x < out_w; ++x) {
+                uint8_t bit    = 0x80u >> (x & 7);
+                bool and_bit = (and_row[x >> 3] & bit) != 0;
+                bool xor_bit = (xor_row[x >> 3] & bit) != 0;
+                uint8_t color = xor_bit ? 255 : 0;
+                uint8_t alpha = and_bit ? (xor_bit ? 255 : 0) : 255;
+                d_row[x*4+0] = color;
+                d_row[x*4+1] = color;
+                d_row[x*4+2] = color;
+                d_row[x*4+3] = alpha;
+            }
+        }
+        break;
+    }
+    }
+
+    s.id = ++current_shape_id_;
+    pending_shape_ = std::move(s);
+    new_shape_pending_ = true;
+}
+
+bool DxgiCapture::take_new_cursor_shape(CursorShape& out) {
+    if (!new_shape_pending_) return false;
+    out = std::move(pending_shape_);
+    new_shape_pending_ = false;
     return true;
 }
 

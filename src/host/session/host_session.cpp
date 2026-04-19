@@ -2,6 +2,7 @@
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
 #include "common/utils/log.h"
+#include <algorithm>
 #include <cstring>
 #include <chrono>
 #include <vector>
@@ -388,24 +389,109 @@ void HostSession::send_ping(ClientInfo& client) {
     socket_->send_to(wire.data(), wire.size(), client.addr);
 }
 
+void HostSession::send_cursor_position(const protocol::CursorPositionMessage& msg) {
+    if (!socket_ || clients_.empty()) return;
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::CursorPosition;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload            = msg.serialize();
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+    auto wire = pkt.serialize();
+    for (auto& [addr, client] : clients_) {
+        socket_->send_to(wire.data(), wire.size(), client.addr);
+    }
+}
+
+void HostSession::send_stream_info(uint16_t width, uint16_t height) {
+    if (!socket_ || clients_.empty()) return;
+    protocol::StreamInfoMessage msg;
+    msg.width  = width;
+    msg.height = height;
+
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::StreamInfo;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload            = msg.serialize();
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+    auto wire = pkt.serialize();
+    for (auto& [addr, client] : clients_) {
+        socket_->send_to(wire.data(), wire.size(), client.addr);
+    }
+    log::info("HostSession", "Sent StreamInfo %ux%u to %zu client(s)",
+              width, height, clients_.size());
+}
+
+void HostSession::send_cursor_shape(const protocol::CursorShapeMessage& msg) {
+    if (!socket_ || clients_.empty()) return;
+
+    // A typical 32x32 BGRA cursor is 4KB; large high-DPI shapes can hit
+    // tens of KB. A single UDP packet gets IP-fragmented by the kernel,
+    // and home WiFi gear commonly drops fragmented UDP — so we fragment
+    // at the application layer and let the client reassemble.
+    //
+    // Per-fragment payload layout:
+    //   [shape_id:4B LE][frag_idx:1B][frag_count:1B][chunk bytes...]
+    // Each chunk carries a slice of the serialized CursorShapeMessage.
+    const std::vector<uint8_t> body = msg.serialize();
+    constexpr size_t CHUNK_SIZE = 1200;       // safely under typical MTU
+    constexpr size_t FRAG_HEADER = 6;         // shape_id(4) + idx(1) + count(1)
+
+    size_t total_chunks = (body.size() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    if (total_chunks == 0) total_chunks = 1;
+    if (total_chunks > 255) {
+        // Shouldn't happen for sane cursors (<=256x256 caps at ~256KB).
+        log::warn("HOST", "Cursor shape too large to fragment: %zu bytes", body.size());
+        return;
+    }
+
+    for (size_t i = 0; i < total_chunks; ++i) {
+        const size_t off = i * CHUNK_SIZE;
+        const size_t len = std::min(CHUNK_SIZE, body.size() - off);
+
+        protocol::Packet pkt;
+        pkt.header.type      = protocol::PacketType::CursorShape;
+        pkt.header.seq_no    = 0;
+        pkt.header.timestamp = 0;
+        pkt.header.flags     = 0;
+        pkt.payload.resize(FRAG_HEADER + len);
+        uint8_t* p = pkt.payload.data();
+        std::memcpy(p, &msg.shape_id, 4);
+        p[4] = static_cast<uint8_t>(i);
+        p[5] = static_cast<uint8_t>(total_chunks);
+        if (len > 0) std::memcpy(p + FRAG_HEADER, body.data() + off, len);
+        pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+
+        auto wire = pkt.serialize();
+        for (auto& [addr, client] : clients_) {
+            socket_->send_to(wire.data(), wire.size(), client.addr);
+        }
+    }
+}
+
 void HostSession::send_bw_probe(ClientInfo& client) {
     client.probe_id++;
     client.probe_pending = true;
     client.probe_bw_bps = 0;
     client.probe_sent_time = Clock::now();
 
-    for (uint8_t i = 0; i < BW_PROBE_COUNT; ++i) {
+    for (uint16_t i = 0; i < BW_PROBE_COUNT; ++i) {
         protocol::Packet pkt;
         pkt.header.type = protocol::PacketType::BwProbe;
         pkt.header.seq_no = 0;
         pkt.header.timestamp = 0;
         pkt.header.flags = 0;
-        // Payload: probe_id(2B LE) + index(1B) + count(1B) + padding
+        // Payload: probe_id(2B LE) + index(2B LE) + count(2B LE) + padding
         pkt.payload.resize(BW_PROBE_SIZE, 0);
         pkt.payload[0] = static_cast<uint8_t>(client.probe_id & 0xFF);
         pkt.payload[1] = static_cast<uint8_t>((client.probe_id >> 8) & 0xFF);
-        pkt.payload[2] = i;
-        pkt.payload[3] = BW_PROBE_COUNT;
+        pkt.payload[2] = static_cast<uint8_t>(i & 0xFF);
+        pkt.payload[3] = static_cast<uint8_t>((i >> 8) & 0xFF);
+        pkt.payload[4] = static_cast<uint8_t>(BW_PROBE_COUNT & 0xFF);
+        pkt.payload[5] = static_cast<uint8_t>((BW_PROBE_COUNT >> 8) & 0xFF);
         pkt.header.payload_len = BW_PROBE_SIZE;
 
         auto wire = pkt.serialize();
@@ -430,7 +516,7 @@ void HostSession::handle_bw_probe_ack(const uint8_t* payload, size_t len,
                     | (static_cast<uint32_t>(payload[7]) << 24);
     client->probe_bw_bps = bw_bps;
     client->probe_pending = false;
-    uint8_t received = payload[2];
+    uint16_t received = payload[2] | (static_cast<uint16_t>(payload[3]) << 8);
     log::info("HostSession", "BW probe result: %u kbps (%u/%u received)",
               bw_bps / 1000, received, BW_PROBE_COUNT);
 }

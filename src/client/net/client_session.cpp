@@ -1,4 +1,5 @@
 #include "client/net/client_session.h"
+#include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
 #include <cstring>
@@ -196,6 +197,19 @@ void ClientSession::poll() {
                 last_fec_report_time_ = now;
             }
         }
+
+        // BW probe flush: host sends N packets in a burst. If the tail is
+        // lost we'd never hit the last-index trigger in handle_bw_probe and
+        // the probe would time out. After 500ms of silence with partial
+        // receipts, ACK with what we got.
+        if (probe_received_ > 0 && !probe_ack_sent_) {
+            auto since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - probe_last_time_).count();
+            if (since_last > 500) {
+                send_bw_probe_ack();
+                probe_ack_sent_ = true;
+            }
+        }
     }
 }
 
@@ -220,6 +234,15 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             break;
         case protocol::PacketType::BwProbe:
             handle_bw_probe(payload, payload_len);
+            break;
+        case protocol::PacketType::CursorShape:
+            handle_cursor_shape(payload, payload_len);
+            break;
+        case protocol::PacketType::CursorPosition:
+            handle_cursor_position(payload, payload_len);
+            break;
+        case protocol::PacketType::StreamInfo:
+            handle_stream_info(payload, payload_len);
             break;
         case protocol::PacketType::Video: {
             // Feed raw wire bytes through FEC decoder → assembler.
@@ -267,6 +290,88 @@ void ClientSession::handle_control(const uint8_t* payload, size_t len) {
         log::info("ClientSession", "Connected (handshake took %lldms, host codec=%s)",
                   elapsed, host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
     }
+}
+
+void ClientSession::handle_cursor_shape(const uint8_t* payload, size_t len) {
+    // Fragmented payload:
+    //   [shape_id:4B LE][frag_idx:1B][frag_count:1B][chunk bytes...]
+    // Host fragments because cursor bitmaps exceed MTU and fragmented
+    // UDP is frequently dropped by WiFi gear.
+    constexpr size_t FRAG_HEADER = 6;
+    if (len < FRAG_HEADER) return;
+    uint32_t shape_id = 0;
+    std::memcpy(&shape_id, payload, 4);
+    uint8_t frag_idx   = payload[4];
+    uint8_t frag_count = payload[5];
+    if (frag_count == 0 || frag_idx >= frag_count) return;
+
+    // Skip fragments for shapes we already delivered — host retries for
+    // loss protection and we don't want to repeatedly re-reassemble.
+    if (shape_id == last_delivered_shape_id_ && !pending_shape_valid_) return;
+
+    auto& r = shape_reassembly_[shape_id];
+    if (r.fragments.size() != frag_count) {
+        r.fragments.assign(frag_count, std::vector<uint8_t>{});
+        r.received_count = 0;
+    }
+    if (!r.fragments[frag_idx].empty()) return;  // duplicate fragment
+    r.fragments[frag_idx].assign(payload + FRAG_HEADER, payload + len);
+    r.received_count++;
+
+    if (r.received_count < frag_count) return;
+
+    // All chunks arrived — concatenate and deserialize.
+    std::vector<uint8_t> body;
+    size_t total = 0;
+    for (auto& f : r.fragments) total += f.size();
+    body.reserve(total);
+    for (auto& f : r.fragments) body.insert(body.end(), f.begin(), f.end());
+
+    protocol::CursorShapeMessage msg;
+    if (protocol::CursorShapeMessage::deserialize(body.data(), body.size(), msg)) {
+        pending_shape_ = std::move(msg);
+        pending_shape_valid_ = true;
+    }
+    // Drop the buffer whether or not deserialization succeeded — we
+    // can't do anything more with these fragments.
+    shape_reassembly_.erase(shape_id);
+}
+
+void ClientSession::handle_cursor_position(const uint8_t* payload, size_t len) {
+    protocol::CursorPositionMessage msg;
+    if (!protocol::CursorPositionMessage::deserialize(payload, len, msg)) return;
+    cursor_pos_ = msg;
+}
+
+void ClientSession::handle_stream_info(const uint8_t* payload, size_t len) {
+    protocol::StreamInfoMessage msg;
+    if (!protocol::StreamInfoMessage::deserialize(payload, len, msg)) {
+        log::warn("ClientSession", "StreamInfo deserialize failed (len=%zu)", len);
+        return;
+    }
+    if (msg.width == 0 || msg.height == 0) return;
+    if (msg.width  != stream_info_.width ||
+        msg.height != stream_info_.height) {
+        stream_info_ = msg;
+        new_stream_info_ = true;
+        log::info("ClientSession", "Got StreamInfo %ux%u", msg.width, msg.height);
+    }
+}
+
+bool ClientSession::take_new_stream_info(protocol::StreamInfoMessage& out) {
+    if (!new_stream_info_) return false;
+    out = stream_info_;
+    new_stream_info_ = false;
+    return true;
+}
+
+bool ClientSession::take_new_cursor_shape(protocol::CursorShapeMessage& out) {
+    if (!pending_shape_valid_) return false;
+    out = std::move(pending_shape_);
+    pending_shape_ = protocol::CursorShapeMessage{};
+    pending_shape_valid_ = false;
+    last_delivered_shape_id_ = out.shape_id;
+    return true;
 }
 
 void ClientSession::handle_ping(const uint8_t* payload, size_t len) {
@@ -362,24 +467,30 @@ void ClientSession::request_idr() {
     socket_->send_to(wire.data(), wire.size(), host_addr_);
 }
 
+void ClientSession::reset_video_stream() {
+    if (receiver_) receiver_->reset_stream();
+}
+
 void ClientSession::handle_bw_probe(const uint8_t* payload, size_t len) {
-    if (len < 4) return;
-    uint16_t id = payload[0] | (static_cast<uint16_t>(payload[1]) << 8);
-    uint8_t index = payload[2];
-    uint8_t count = payload[3];
+    if (len < 6) return;
+    uint16_t id    = payload[0] | (static_cast<uint16_t>(payload[1]) << 8);
+    uint16_t index = payload[2] | (static_cast<uint16_t>(payload[3]) << 8);
+    uint16_t count = payload[4] | (static_cast<uint16_t>(payload[5]) << 8);
 
     if (id != probe_id_) {
         probe_id_ = id;
         probe_received_ = 0;
         probe_count_ = count;
+        probe_ack_sent_ = false;
         probe_first_time_ = Clock::now();
     }
 
     probe_received_++;
     probe_last_time_ = Clock::now();
 
-    if (index == count - 1 || probe_received_ == count) {
+    if (!probe_ack_sent_ && (index == count - 1 || probe_received_ == count)) {
         send_bw_probe_ack();
+        probe_ack_sent_ = true;
     }
 }
 
@@ -401,12 +512,12 @@ void ClientSession::send_bw_probe_ack() {
     pkt.header.seq_no = 0;
     pkt.header.timestamp = 0;
     pkt.header.flags = 0;
-    // Payload: probe_id(2B) + received(1B) + reserved(1B) + bw_bps(4B LE)
+    // Payload: probe_id(2B) + received(2B LE) + bw_bps(4B LE)
     pkt.payload.resize(8);
     pkt.payload[0] = static_cast<uint8_t>(probe_id_ & 0xFF);
     pkt.payload[1] = static_cast<uint8_t>((probe_id_ >> 8) & 0xFF);
-    pkt.payload[2] = probe_received_;
-    pkt.payload[3] = 0;
+    pkt.payload[2] = static_cast<uint8_t>(probe_received_ & 0xFF);
+    pkt.payload[3] = static_cast<uint8_t>((probe_received_ >> 8) & 0xFF);
     pkt.payload[4] = static_cast<uint8_t>(bw_bps & 0xFF);
     pkt.payload[5] = static_cast<uint8_t>((bw_bps >> 8) & 0xFF);
     pkt.payload[6] = static_cast<uint8_t>((bw_bps >> 16) & 0xFF);

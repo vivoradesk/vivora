@@ -1,6 +1,7 @@
 #include "app/host_loop.h"
 #include "common/audio/audio_capture.h"
 #include "common/codec/bitrate_controller.h"
+#include "common/protocol/cursor_message.h"
 #include "common/utils/log.h"
 #include "common/utils/types.h"
 #include "host/audio/audio_sender.h"
@@ -58,8 +59,19 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     uint64_t total_frames = 0;
     auto last_log_time = Clock::now();
     uint64_t last_log_frames = 0;
-    auto last_idr_time = Clock::now();
-    static constexpr int64_t IDR_INTERVAL_MS = 2000;
+    // No periodic IDR. Encoders run with continuous intra refresh
+    // (NVENC intraRefresh* / QSV IntRefType=HORIZONTAL), so the picture
+    // self-heals every ~1s worth of frames without the packet burst of a
+    // traditional IDR. New-client IDR and loss-triggered IDR from view
+    // layer cover cold-start and edge-case recovery.
+
+    // Cursor shape retry queue: DXGI reports shape changes once, we send
+    // the packet a few times over the next ~250ms so UDP loss doesn't
+    // leave the client with a stale shape for long.
+    protocol::CursorShapeMessage pending_shape;
+    int shape_sends_remaining = 0;
+    auto last_shape_send = Clock::now() - std::chrono::seconds(1);
+    static constexpr int64_t SHAPE_RETRY_MS = 100;
 
     // Retx-rate tracking: fed into bitrate controller as a congestion
     // signal in addition to client-reported FEC loss.
@@ -83,6 +95,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
 
         // Handle new client connections.
         if (session.consume_new_client_flag()) {
+            // Tell the new client the real (pre-padding) frame size so
+            // its renderer crops encoder-alignment padding and its mouse
+            // mapping matches the host screen.  Repeated on every
+            // keyframe below for loss resilience.
+            session.send_stream_info(static_cast<uint16_t>(cap_w),
+                                     static_cast<uint16_t>(cap_h));
             if (!had_clients) {
                 // First client: arm warm-up ramp (cold start).
                 bitrate_ctl.notify_client_connected();
@@ -157,31 +175,59 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             }
         }
 
-        // IDR on client (re)connect.
+        // IDR on client (re)connect or client-requested recovery.
         bool force_encode = false;
         if (session.idr_needed()) {
             platform.request_idr();
             session.clear_idr_needed();
-            last_idr_time = Clock::now();
             force_encode = true;
             log::info("HOST", "IDR requested for new client");
-        }
-
-        // Periodic IDR for loss recovery.
-        if (session.state() == host::SessionState::Connected) {
-            auto since_idr = std::chrono::duration_cast<std::chrono::milliseconds>(
-                Clock::now() - last_idr_time).count();
-            if (since_idr >= IDR_INTERVAL_MS) {
-                platform.request_idr();
-                last_idr_time = Clock::now();
-                force_encode = true;
-            }
         }
 
         // Capture + encode.
         uint64_t pts_us = 0;
         bool content_changed = false;
         bool got_frame = platform.capture_and_encode(pts_us, content_changed, force_encode);
+
+        // Cursor sync runs regardless of whether we produced an encoded
+        // frame — the cursor can move over static content.
+        if (session.state() == host::SessionState::Connected) {
+            HostPlatform::CursorShapeView shape_view;
+            if (platform.take_cursor_shape(shape_view)) {
+                pending_shape.shape_id = shape_view.id;
+                pending_shape.width    = shape_view.width;
+                pending_shape.height   = shape_view.height;
+                pending_shape.hotspot_x= shape_view.hotspot_x;
+                pending_shape.hotspot_y= shape_view.hotspot_y;
+                pending_shape.bgra     = std::move(shape_view.bgra);
+                shape_sends_remaining  = 3;
+                last_shape_send        = Clock::now() - std::chrono::seconds(1);
+                log::info("HOST", "Cursor shape change: id=%u %ux%u",
+                          pending_shape.shape_id,
+                          (unsigned)pending_shape.width,
+                          (unsigned)pending_shape.height);
+            }
+
+            if (shape_sends_remaining > 0) {
+                auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    Clock::now() - last_shape_send).count();
+                if (since >= SHAPE_RETRY_MS) {
+                    session.send_cursor_shape(pending_shape);
+                    last_shape_send = Clock::now();
+                    shape_sends_remaining--;
+                }
+            }
+
+            HostPlatform::CursorState cstate;
+            if (platform.get_cursor_state(cstate)) {
+                protocol::CursorPositionMessage pos;
+                pos.x_norm   = cstate.x_norm;
+                pos.y_norm   = cstate.y_norm;
+                pos.visible  = cstate.visible;
+                pos.shape_id = cstate.shape_id;
+                session.send_cursor_position(pos);
+            }
+        }
 
         if (!got_frame) {
             platform.on_idle();
@@ -194,6 +240,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             uint32_t timestamp = static_cast<uint32_t>(pkt.pts & 0xFFFFFFFF);
 
             if (session.state() == host::SessionState::Connected) {
+                if (pkt.keyframe) {
+                    // Re-send StreamInfo on every keyframe so the client
+                    // catches up quickly after a lost initial packet or
+                    // a mid-session reconnect.
+                    session.send_stream_info(static_cast<uint16_t>(cap_w),
+                                             static_cast<uint16_t>(cap_h));
+                }
                 session.send_frame(pkt.data, pkt.len,
                                    frame_seq, timestamp, pkt.keyframe);
             }

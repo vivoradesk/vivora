@@ -36,6 +36,13 @@ public:
     // Resize swapchain (call when window resizes).
     bool resize(uint32_t width, uint32_t height);
 
+    // Set the real (pre-encoder-padding) content dimensions.  The decoded
+    // texture may be larger — QSV rounds NV12 to 16-pixel alignment — so
+    // we crop by sourcing only the top-left rectangle during VP blt and
+    // using these dims for the bicubic aspect-fit pass.  No-op if the
+    // crop matches the full decoded size.
+    bool set_crop(uint32_t width, uint32_t height);
+
 private:
     bool create_video_processor();
     bool create_intermediate();
@@ -63,8 +70,10 @@ private:
     ComPtr<ID3D11SamplerState> sampler_;
     ComPtr<ID3D11Buffer> cbuffer_;
 
-    uint32_t frame_width_ = 0;
+    uint32_t frame_width_ = 0;   // decoded texture dims (may include codec padding)
     uint32_t frame_height_ = 0;
+    uint32_t crop_width_ = 0;    // real content dims (<= frame_*); fed to intermediate
+    uint32_t crop_height_ = 0;
     uint32_t window_width_ = 0;
     uint32_t window_height_ = 0;
     DXGI_FORMAT frame_format_ = DXGI_FORMAT_NV12;

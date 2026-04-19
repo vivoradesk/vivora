@@ -24,6 +24,8 @@ bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
     device_->GetImmediateContext(context_.GetAddressOf());
     frame_width_ = frame_width;
     frame_height_ = frame_height;
+    crop_width_  = frame_width;   // default: no crop until host sends StreamInfo
+    crop_height_ = frame_height;
     window_width_ = window_width;
     window_height_ = window_height;
     frame_format_ = frame_format;
@@ -231,7 +233,9 @@ VSOut main(uint id : SV_VertexID) {
 static const char* kPsSource = R"(
 Texture2D tex      : register(t0);
 SamplerState samp  : register(s0);
-cbuffer CB         : register(b0) { float4 src_size; };
+// cb.xy = crop pixel size (what we sample over)
+// cb.zw = 1 / intermediate texture size (texel size for sampling)
+cbuffer CB         : register(b0) { float4 cb; };
 
 static const float B = 1.0 / 3.0;
 static const float C = 1.0 / 3.0;
@@ -255,8 +259,13 @@ float mitchell(float x) {
 }
 
 float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
-    float2 src = src_size.xy;
-    float2 inv_src = 1.0 / src;
+    float2 src = cb.xy;          // crop size in pixels
+    float2 texel = cb.zw;        // 1 / intermediate size (handles padding)
+    // Clamp sampling into the crop region — outside (padding rows/cols)
+    // may contain stale pixels from earlier blits or decoder garbage.
+    float2 min_uv = texel * 0.5;
+    float2 max_uv = (src - 0.5) * texel;
+
     float2 px = uv * src - 0.5;
     float2 fp = floor(px);
     float2 f  = px - fp;
@@ -264,7 +273,8 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float4 col = float4(0, 0, 0, 0);
     [unroll] for (int yy = -1; yy <= 2; ++yy) {
         [unroll] for (int xx = -1; xx <= 2; ++xx) {
-            float2 tap_uv = (fp + float2(xx, yy) + 0.5) * inv_src;
+            float2 tap_uv = (fp + float2(xx, yy) + 0.5) * texel;
+            tap_uv = clamp(tap_uv, min_uv, max_uv);
             float w = mitchell(float(xx) - f.x) * mitchell(float(yy) - f.y);
             col += tex.SampleLevel(samp, tap_uv, 0) * w;
         }
@@ -339,9 +349,12 @@ bool D3dRenderer::render(ID3D11Texture2D* texture, uint32_t subresource) {
         return false;
     }
 
-    RECT full = { 0, 0, (LONG)frame_width_, (LONG)frame_height_ };
-    video_context_->VideoProcessorSetStreamSourceRect(vp_.Get(), 0, TRUE, &full);
-    video_context_->VideoProcessorSetStreamDestRect  (vp_.Get(), 0, TRUE, &full);
+    // Source + dest rects: crop region of the decoded texture.  VP writes
+    // to the top-left of the padded intermediate; the shader pass trims
+    // the right/bottom padding via UV scaling below.
+    RECT rect = { 0, 0, (LONG)crop_width_, (LONG)crop_height_ };
+    video_context_->VideoProcessorSetStreamSourceRect(vp_.Get(), 0, TRUE, &rect);
+    video_context_->VideoProcessorSetStreamDestRect  (vp_.Get(), 0, TRUE, &rect);
 
     D3D11_VIDEO_PROCESSOR_STREAM stream = {};
     stream.Enable = TRUE;
@@ -375,8 +388,9 @@ bool D3dRenderer::present_intermediate() {
         return false;
     }
 
-    // Aspect-fit (letterbox) the video rect inside the window.
-    const double frame_aspect  = (double)frame_width_  / frame_height_;
+    // Aspect-fit (letterbox) the video rect inside the window.  Use crop
+    // dims (the real content), not the padded decoded size.
+    const double frame_aspect  = (double)crop_width_  / crop_height_;
     const double window_aspect = (double)window_width_ / window_height_;
     LONG dst_w, dst_h, dst_x, dst_y;
     if (frame_aspect > window_aspect) {
@@ -407,10 +421,19 @@ bool D3dRenderer::present_intermediate() {
     ID3D11RenderTargetView* rtvs[] = { rtv.Get() };
     context_->OMSetRenderTargets(1, rtvs, nullptr);
 
-    // Update cbuffer (frame size — used by bicubic to compute texel positions).
+    // cbuffer: xy = crop pixel size (real content region we sample over);
+    //           zw = 1 / intermediate texture size (texel stride — the
+    //                intermediate may be larger than crop due to codec
+    //                alignment padding; UV tap positions stay in the
+    //                valid content region).
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     if (SUCCEEDED(context_->Map(cbuffer_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-        float cb[4] = { (float)frame_width_, (float)frame_height_, 0.0f, 0.0f };
+        float cb[4] = {
+            (float)crop_width_,
+            (float)crop_height_,
+            1.0f / (float)frame_width_,
+            1.0f / (float)frame_height_,
+        };
         std::memcpy(mapped.pData, cb, sizeof(cb));
         context_->Unmap(cbuffer_.Get(), 0);
     }
@@ -442,6 +465,19 @@ bool D3dRenderer::present_intermediate() {
         return false;
     }
 
+    return true;
+}
+
+bool D3dRenderer::set_crop(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) return false;
+    if (width > frame_width_)  width  = frame_width_;
+    if (height > frame_height_) height = frame_height_;
+    if (width == crop_width_ && height == crop_height_) return true;
+
+    crop_width_  = width;
+    crop_height_ = height;
+    log::info("RENDER", "Crop set to %ux%u (decoded texture %ux%u)",
+              crop_width_, crop_height_, frame_width_, frame_height_);
     return true;
 }
 
