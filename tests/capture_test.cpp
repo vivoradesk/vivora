@@ -223,7 +223,7 @@ int main() {
         SendInput(1, &input, sizeof(INPUT));
     }
     assert(got_content);
-    assert(frame.texture != nullptr);
+    assert(frame.texture);
     deskbeam::log::info("TEST", "PASS: Captured frame with content, dirty_rects=%zu",
                         frame.dirty_rects.size());
 
@@ -240,7 +240,7 @@ int main() {
         ID3D11Texture2D* copy = nullptr;
         HRESULT hr = dxgi->get_device()->CreateTexture2D(&desc, nullptr, &copy);
         assert(SUCCEEDED(hr));
-        dxgi->get_context()->CopyResource(copy, frame.texture);
+        dxgi->get_context()->CopyResource(copy, frame.texture.Get());
 
         capture->release_frame(frame);
 

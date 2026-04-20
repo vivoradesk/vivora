@@ -23,6 +23,9 @@ namespace deskbeam {
 // Will find HEVC decoder via MFTEnum
 
 MfDecoder::~MfDecoder() {
+    // Draining the queue releases the DecodedFrame ComPtrs, which in turn
+    // Release() the GPU textures — no manual Release loop needed.
+    while (!output_frames_.empty()) output_frames_.pop();
     if (transform_) {
         transform_->Release();
         transform_ = nullptr;
@@ -31,7 +34,7 @@ MfDecoder::~MfDecoder() {
         device_manager_->Release();
         device_manager_ = nullptr;
     }
-    MFShutdown();
+    if (mf_started_) MFShutdown();
 }
 
 bool MfDecoder::init(VideoCodec codec, ID3D11Device* device) {
@@ -51,10 +54,13 @@ bool MfDecoder::init(VideoCodec codec, ID3D11Device* device) {
         log::error("DECODE", "MFStartup failed: 0x%08X", hr);
         return false;
     }
+    mf_started_ = true;
 
     if (device) {
-        device_.Attach(device);
-        device_->AddRef(); // we took a raw ptr, need our own ref
+        // ComPtr operator= performs AddRef on the raw pointer — use it
+        // instead of Attach+AddRef (Attach takes ownership without AddRef,
+        // so the prior pair double-counted and leaked one ref).
+        device_ = device;
         device_->GetImmediateContext(context_.GetAddressOf());
     } else {
         if (!create_device()) return false;
@@ -267,13 +273,10 @@ static bool seh_process_message(IMFTransform* mft, MFT_MESSAGE_TYPE msg, ULONG_P
 void MfDecoder::flush() {
     if (!transform_ || failed_) return;
 
-    // Drain any pending output frames and release their textures.
+    // Drain any pending output frames; the DecodedFrame ComPtrs release
+    // their textures automatically on pop().
     drain_output();
-    while (!output_frames_.empty()) {
-        auto& f = output_frames_.front();
-        if (f.texture) f.texture->Release();
-        output_frames_.pop();
-    }
+    while (!output_frames_.empty()) output_frames_.pop();
 
     // Tell the MFT to drop all buffered data and reset reference pictures.
     if (!seh_process_message(transform_, MFT_MESSAGE_COMMAND_FLUSH, 0)) {
@@ -383,6 +386,10 @@ void MfDecoder::drain_output() {
             IMFDXGIBuffer* dxgi_buf = nullptr;
             hr = media_buf->QueryInterface(IID_PPV_ARGS(&dxgi_buf));
             if (SUCCEEDED(hr)) {
+                // GetResource returns an AddRef'd pointer — Attach consumes
+                // that ref directly into the ComPtr without a second AddRef,
+                // so the DecodedFrame owns exactly one reference that its
+                // destructor will release.
                 ID3D11Texture2D* tex = nullptr;
                 UINT subresource = 0;
                 dxgi_buf->GetResource(IID_PPV_ARGS(&tex));
@@ -396,15 +403,13 @@ void MfDecoder::drain_output() {
                     output.pSample->GetSampleTime(&sample_time);
 
                     DecodedFrame frame;
-                    frame.texture = tex;
+                    frame.texture.Attach(tex);
                     frame.subresource = subresource;
                     frame.width = desc.Width;
                     frame.height = desc.Height;
                     frame.pts = static_cast<uint64_t>(sample_time / 10);
 
-                    output_frames_.push(frame);
-                    // Note: tex reference is held by the queue consumer
-                    // who must Release() after use
+                    output_frames_.push(std::move(frame));
                 }
                 dxgi_buf->Release();
             }
@@ -418,7 +423,9 @@ void MfDecoder::drain_output() {
 
 bool MfDecoder::get_frame(DecodedFrame& frame) {
     if (output_frames_.empty()) return false;
-    frame = output_frames_.front();
+    // Move out of the queue so the ref count isn't needlessly cycled
+    // through an AddRef/Release pair on handoff.
+    frame = std::move(output_frames_.front());
     output_frames_.pop();
     return true;
 }

@@ -31,6 +31,7 @@ public:
     uint64_t packets_received() const { return packets_received_; }
     uint64_t packets_decoded()  const { return packets_decoded_;  }
     uint64_t plc_frames()       const { return plc_frames_;       }
+    uint64_t fec_recovered()    const { return fec_recovered_;    }
 
 private:
     void thread_proc();
@@ -50,6 +51,7 @@ private:
     std::atomic<uint64_t> packets_received_{0};
     std::atomic<uint64_t> packets_decoded_{0};
     std::atomic<uint64_t> plc_frames_{0};
+    std::atomic<uint64_t> fec_recovered_{0};
     std::atomic<uint64_t> empty_ticks_{0};
 };
 

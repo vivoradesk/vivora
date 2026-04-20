@@ -2,6 +2,7 @@
 #include "common/utils/log.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 
 namespace deskbeam::net {
@@ -438,13 +439,35 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
 
         uint32_t key = wire_pkt_key(clean_wire.data(), clean_wire.size());
 
-        if (ring_.find(key) == ring_.end()) {
-            ring_fifo_.push_back(key);
-        }
-        ring_[key] = clean_wire;
+        const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
-        while (ring_.size() > MAX_RING) {
-            uint32_t oldest = ring_fifo_.front();
+        auto existing = ring_.find(key);
+        if (existing == ring_.end()) {
+            ring_fifo_.push_back({key, now_ms});
+            RingEntry entry;
+            entry.wire = clean_wire;
+            entry.is_retx = is_retx;
+            ring_[key] = std::move(entry);
+        } else {
+            // An original arriving after a retx "promotes" the entry —
+            // but in practice FEC groups freeze their is_retx snapshot
+            // at populate time, so we only update if still useful.
+            existing->second.wire = clean_wire;
+            if (!is_retx) existing->second.is_retx = false;
+        }
+
+        // Evict by age first (parity can lag behind data by a burst's
+        // worth — TTL must outlive that window), then enforce the hard
+        // count cap as a safety net.
+        while (!ring_fifo_.empty() &&
+               now_ms - ring_fifo_.front().second > RING_TTL_MS) {
+            uint32_t oldest = ring_fifo_.front().first;
+            ring_fifo_.pop_front();
+            ring_.erase(oldest);
+        }
+        while (ring_.size() > MAX_RING && !ring_fifo_.empty()) {
+            uint32_t oldest = ring_fifo_.front().first;
             ring_fifo_.pop_front();
             ring_.erase(oldest);
         }
@@ -478,9 +501,12 @@ void FecDecoder::populate_group_from_ring(FecGroup& group) {
         uint32_t key = group.pkt_keys[j];
         auto it = ring_.find(key);
         if (it != ring_.end() && group.data_shards[j].empty()) {
-            group.data_shards[j] = it->second;
+            group.data_shards[j] = it->second.wire;
             ++group.received_data;
-            ++group.fresh_received;
+            // Only original transmissions count toward fresh_received —
+            // a retx filling the shard means the fragment was lost on
+            // first send and loss_rate must reflect that.
+            if (!it->second.is_retx) ++group.fresh_received;
         }
     }
 }
@@ -498,14 +524,20 @@ void FecDecoder::try_recover(FecGroup& group,
 
     if (missing_data == 0) {
         group.resolved = true;
-        update_loss(fresh_missing, k);
+        if (!group.loss_counted) {
+            update_loss(fresh_missing, k);
+            group.loss_counted = true;
+        }
         return;
     }
 
     // During recv loop: wait for tick() to drain the rest of the burst.
     if (!attempt_decode) return;
 
-    update_loss(fresh_missing, k);
+    if (!group.loss_counted) {
+        update_loss(fresh_missing, k);
+        group.loss_counted = true;
+    }
 
     // Need at least K total shards (data or parity) to decode.
     const int total_present = group.received_data + group.received_parity;
@@ -565,6 +597,13 @@ void FecDecoder::try_recover(FecGroup& group,
 void FecDecoder::update_loss(int missing, int k) {
     float group_loss = static_cast<float>(missing) / k;
     ewma_loss_ = EWMA_ALPHA * group_loss + (1.0f - EWMA_ALPHA) * ewma_loss_;
+}
+
+void FecDecoder::reset() {
+    groups_.clear();
+    ring_.clear();
+    ring_fifo_.clear();
+    ewma_loss_ = 0.0f;
 }
 
 void FecDecoder::expire_old_groups() {

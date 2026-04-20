@@ -180,7 +180,10 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
         return false;
     }
 
-    frame.texture = texture.Get();
+    // ComPtr operator= AddRef's texture — safe to outlive the local
+    // ComPtr here, but the DXGI frame itself is released on next
+    // release_frame() call so consumers must copy or process synchronously.
+    frame.texture = texture;
     frame.resolution = resolution_;
     frame.frame_index = ++frame_count_;
     frame.capture_time = Clock::now();
@@ -354,7 +357,7 @@ void DxgiCapture::release_frame(CapturedFrame& frame) {
         duplication_->ReleaseFrame();
         frame_acquired_ = false;
     }
-    frame.texture = nullptr;
+    frame.texture.Reset();
 }
 
 std::vector<MonitorInfo> DxgiCapture::enumerate_monitors() {

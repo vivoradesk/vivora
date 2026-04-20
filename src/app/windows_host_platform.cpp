@@ -83,7 +83,7 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
         return false;
     }
 
-    if (!encoder_->encode(frame.texture, pts_us)) {
+    if (!encoder_->encode(frame.texture.Get(), pts_us)) {
         capture_->release_frame(frame);
         return false;
     }

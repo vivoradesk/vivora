@@ -22,11 +22,7 @@ bool MacViewPlatform::pump_events() {
 }
 
 bool MacViewPlatform::init_decoder(deskbeam::VideoCodec codec) {
-    // macOS VideoToolbox path supports HEVC only for now.  If the host
-    // negotiated H.264 the decode path will reject frames — warn loudly.
-    if (codec != deskbeam::VideoCodec::HEVC) {
-        deskbeam::log::warn("VIEW", "Mac view platform: H.264 not yet wired; expect decode failures");
-    }
+    view_.set_codec(codec);
     return true;
 }
 
@@ -41,6 +37,22 @@ int MacViewPlatform::render() {
     // successful decode() call is also a render.  Return 0 here
     // to avoid double-counting — the common loop counts decode().
     return 0;
+}
+
+void MacViewPlatform::flush_decoder() {
+    view_.flush_decoder();
+}
+
+void MacViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
+    view_.set_stream_size(width, height);
+}
+
+void MacViewPlatform::upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) {
+    view_.upload_cursor_shape(shape);
+}
+
+void MacViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) {
+    view_.update_cursor_position(pos);
 }
 
 void MacViewPlatform::shutdown() {}

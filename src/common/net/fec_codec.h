@@ -58,6 +58,12 @@ private:
 
     uint8_t  k_ = 10;
     uint8_t  m_ = 2;
+    // 16-bit group id wraps every ~65k groups.  At K=10 / 60fps that's
+    // ~18 minutes of continuous streaming; in practice IDRs fire far
+    // more often than that and each IDR triggers FecDecoder::reset()
+    // on the client, so collisions across a wrap are effectively
+    // impossible.  Upgrade to 32-bit + epoch if ever running multi-hour
+    // sessions without an IDR.
     uint16_t group_id_ = 0;
 
     std::vector<std::vector<uint8_t>> data_shards_;  // raw wire bytes of data pkts
@@ -81,6 +87,13 @@ public:
 
     float loss_rate() const { return ewma_loss_; }
 
+    // Drop all state — call after an IDR / stream reset so stale groups
+    // and old ring entries don't match against the fresh packet stream.
+    // Also guards against 16-bit group_id_ wraparound on very long
+    // sessions (see note in encoder), since in practice an IDR fires far
+    // more often than every ~18 minutes.
+    void reset();
+
 private:
     struct FecGroup {
         uint8_t  k = 0;
@@ -94,6 +107,12 @@ private:
         uint8_t  received_parity = 0;
         bool     header_received = false;  // true once any parity arrived
         bool     resolved = false;
+        // EWMA must see each group exactly once — set the first time
+        // update_loss() fires for this group, then every later try_recover()
+        // branch skips the loss update.  Guards against both the
+        // missing_data==0 shortcut and the later decode path double-counting
+        // if they ever overlap for the same group.
+        bool     loss_counted = false;
     };
 
     void populate_group_from_ring(FecGroup& group);
@@ -105,10 +124,27 @@ private:
 
     std::unordered_map<uint16_t, FecGroup> groups_;
 
-    // Ring buffer: pkt_key -> wire bytes.  FIFO eviction via deque.
-    std::unordered_map<uint32_t, std::vector<uint8_t>> ring_;
-    std::deque<uint32_t> ring_fifo_;
-    static constexpr size_t MAX_RING = 512;
+    // Ring buffer: pkt_key -> (wire bytes, is_retx).  The is_retx flag lets
+    // populate_group_from_ring() distinguish originals from retransmits so
+    // fresh_received reflects only the first-transmission count — critical
+    // for loss_rate accuracy.
+    //
+    // Eviction is time-based: a parity packet may arrive long after its
+    // data burst, and evicting by raw count (e.g. 512 entries at 60fps ×
+    // tens of fragments) drops data shards before their parity arrives,
+    // blocking recovery on tail-heavy bursts.  We keep entries for up to
+    // RING_TTL_MS; MAX_RING remains as a safety cap in case a storm pushes
+    // past the budget before TTL cleanup runs.
+    struct RingEntry {
+        std::vector<uint8_t> wire;
+        bool is_retx = false;
+    };
+    std::unordered_map<uint32_t, RingEntry> ring_;
+    // {key, added_at_ms from steady_clock}.  Kept sorted by insertion time
+    // so the front is always the oldest candidate for TTL eviction.
+    std::deque<std::pair<uint32_t, int64_t>> ring_fifo_;
+    static constexpr size_t  MAX_RING    = 2048;
+    static constexpr int64_t RING_TTL_MS = 300;
 
     float ewma_loss_ = 0.0f;
     static constexpr float  EWMA_ALPHA = 0.15f;

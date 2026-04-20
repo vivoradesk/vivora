@@ -1,7 +1,7 @@
-// Non-Windows stubs for the audio platform factories. Replace with
-// CoreAudio (macOS) and PulseAudio (Linux) implementations later.
+// Linux audio platform stubs. macOS and Windows have real implementations;
+// Linux (PulseAudio/PipeWire) TBD.
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__APPLE__)
 
 #include "common/audio/audio_capture.h"
 #include "common/audio/audio_output.h"

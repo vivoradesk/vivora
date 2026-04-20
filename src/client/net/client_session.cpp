@@ -80,7 +80,10 @@ bool ClientSession::start_audio() {
         return false;
     }
     audio_receiver_ = std::make_unique<AudioReceiver>();
-    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/20)) {
+    // 60ms = 6 frames of prebuffer. Wide enough to absorb typical WiFi
+    // bursts of 3–5 dropped packets without dropping to PLC, while still
+    // cheap in end-to-end audio latency terms.
+    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/60)) {
         audio_receiver_.reset();
         return false;
     }
@@ -108,17 +111,25 @@ void ClientSession::poll() {
         handle_packet(buf, static_cast<size_t>(n));
     }
 
-    // Punch firewall hole: once connected, send a tiny packet FROM the audio
-    // socket TO the host's audio port (port+1). This ensures that Windows
-    // firewall / NAT allows the return UDP traffic.  Sent once.
-    if (state_ == SessionState::Connected && audio_socket_ && !audio_hole_punched_) {
-        net::SocketAddr audio_host = host_addr_;
-        audio_host.port = host_addr_.port + 1;
-        uint8_t punch[1] = {0};
-        audio_socket_->send_to(punch, 1, audio_host);
-        audio_hole_punched_ = true;
-        log::info("ClientSession", "Audio firewall punch sent to port %u",
-                  audio_host.port);
+    // Periodic audio firewall keepalive. Sent every ~1s FROM the audio socket
+    // TO the host's audio port (port+1) so Windows Defender's stateful UDP
+    // filter keeps the return path open and isn't dependent on one punch
+    // packet surviving. Also kicks in before state becomes Connected so the
+    // host's first audio burst after handshake isn't dropped.
+    if (audio_socket_) {
+        auto since_punch = std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - last_audio_punch_).count();
+        if (last_audio_punch_.time_since_epoch().count() == 0 || since_punch >= 1000) {
+            net::SocketAddr audio_host = host_addr_;
+            audio_host.port = host_addr_.port + 1;
+            uint8_t punch[1] = {0};
+            audio_socket_->send_to(punch, 1, audio_host);
+            if (last_audio_punch_.time_since_epoch().count() == 0) {
+                log::info("ClientSession", "Audio firewall punch started to port %u (1s keepalive)",
+                          audio_host.port);
+            }
+            last_audio_punch_ = Clock::now();
+        }
     }
 
     // Drain audio socket: each packet is a PacketType::Audio wrapper holding
@@ -128,6 +139,11 @@ void ClientSession::poll() {
         for (;;) {
             int n = audio_socket_->recv_from(buf, sizeof(buf), a_sender);
             if (n <= 0) break;
+            // Raw-socket counter: increments BEFORE parsing so we can tell
+            // "nothing reaches the socket" (firewall/NAT drop) from "socket
+            // receives but parser rejects" (bad header, wrong type, etc.).
+            audio_raw_packets_++;
+            audio_raw_bytes_ += static_cast<uint64_t>(n);
             if (n < static_cast<int>(protocol::PacketHeader::WIRE_SIZE)) continue;
             auto h = protocol::PacketHeader::deserialize(buf);
             if (h.type != protocol::PacketType::Audio) continue;
@@ -136,6 +152,18 @@ void ClientSession::poll() {
             audio_receiver_->feed(h.seq_no,
                                   buf + protocol::PacketHeader::WIRE_SIZE,
                                   plen);
+        }
+        // Periodic diagnostic log — separates "socket silent" from parser issues.
+        auto since_log = std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - last_audio_stat_log_).count();
+        if (last_audio_stat_log_.time_since_epoch().count() == 0 || since_log >= 5000) {
+            uint64_t recv = audio_receiver_ ? audio_receiver_->packets_received() : 0;
+            log::info("ClientSession",
+                      "Audio socket stats: raw_pkts=%llu raw_bytes=%llu parsed=%llu",
+                      (unsigned long long)audio_raw_packets_,
+                      (unsigned long long)audio_raw_bytes_,
+                      (unsigned long long)recv);
+            last_audio_stat_log_ = Clock::now();
         }
     }
 
@@ -169,9 +197,9 @@ void ClientSession::poll() {
             // FEC recovery FIRST: recover lost packets before NACK fires.
             // The recv loop above already drained all buffered packets, so
             // any FEC group still missing exactly 1 packet = true loss.
-            std::vector<std::vector<uint8_t>> fec_recovered;
-            receiver_->fec_tick(fec_recovered);
-            for (const auto& rec : fec_recovered) {
+            fec_recovered_scratch_.clear();
+            receiver_->fec_tick(fec_recovered_scratch_);
+            for (const auto& rec : fec_recovered_scratch_) {
                 if (rec.size() >= protocol::PacketHeader::WIRE_SIZE) {
                     auto pkt = protocol::Packet::deserialize(rec.data(), rec.size());
                     receiver_->feed(pkt);
@@ -248,10 +276,10 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             // Feed raw wire bytes through FEC decoder → assembler.
             // FEC packets (FLAG_FEC) are consumed by the decoder and
             // don't reach the assembler; recovered packets are injected.
-            std::vector<std::vector<uint8_t>> recovered;
             if (receiver_) {
-                receiver_->fec_feed(data, len, recovered);
-                for (const auto& rec : recovered) {
+                fec_recovered_scratch_.clear();
+                receiver_->fec_feed(data, len, fec_recovered_scratch_);
+                for (const auto& rec : fec_recovered_scratch_) {
                     if (rec.size() >= protocol::PacketHeader::WIRE_SIZE) {
                         auto pkt = protocol::Packet::deserialize(rec.data(), rec.size());
                         receiver_->feed(pkt);

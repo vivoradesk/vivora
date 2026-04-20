@@ -78,6 +78,7 @@ public:
         stable_cycles_       = 0;
         loss_pending_        = 0.0;
         probe_ceiling_bps_   = 0;
+        last_cut_time_       = Clock::time_point{};
     }
 
     // One-shot flag: true on the tick where the warm-up ramp ends.
@@ -98,10 +99,19 @@ public:
     void set_probe_bandwidth(uint32_t bps) {
         if (bps == 0 || probe_ceiling_bps_ > 0) return;
         uint32_t ceiling = static_cast<uint32_t>(bps * 0.75);
-        ceiling = std::min(ceiling, WARMUP_CEILING_BPS);
+        const uint32_t hard_cap = ceiling_override_bps_ > 0
+                                ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
+        ceiling = std::min(ceiling, hard_cap);
         probe_ceiling_bps_ = std::max(ceiling, bounds_.min_bps);
         log::info("BitrateCtl", "Probe BW %u kbps -> ceiling %u kbps",
                   bps / 1000, probe_ceiling_bps_ / 1000);
+    }
+
+    // Diagnostic: raise the hard ceiling above WARMUP_CEILING_BPS so a
+    // probe with high measured BW can drive the ramp further. Pass 0 to
+    // clear and restore the default 10 Mbps cap.
+    void set_ceiling_override(uint32_t bps) {
+        ceiling_override_bps_ = bps;
     }
 
     // Force a specific bitrate (e.g. when client count changes and the
@@ -165,8 +175,10 @@ public:
             // is usually unreachable, and ramping all the way to it just
             // produces a post-warmup cascade of cuts. Cap at measured BW
             // from probe (if available), else use static ceiling.
+            const uint32_t fallback = ceiling_override_bps_ > 0
+                                    ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
             const uint32_t ceiling = probe_ceiling_bps_ > 0
-                                   ? probe_ceiling_bps_ : WARMUP_CEILING_BPS;
+                                   ? probe_ceiling_bps_ : fallback;
             const uint32_t warmup_end = std::min(base, ceiling);
             if (warmup_elapsed < WARMUP_MS) {
                 const double t = static_cast<double>(warmup_elapsed)
@@ -231,6 +243,7 @@ public:
             had_growth_    = false;
             loss_pending_  = 0.0;
             stable_cycles_ = 0;
+            last_cut_time_ = now;
         };
 
         uint32_t next;
@@ -272,7 +285,15 @@ public:
                 next = current_bps_;
             }
 
-            if (stable_cycles_ >= RECOVER_RESET_CYCLES) {
+            // Reset recovery step aggressiveness back to base only after a
+            // long stable run AND enough wall-clock distance from the last
+            // cut. Without the wall-clock guard a repeating 60s cycle (cut
+            // → 30s stable → reset → fast climb → cut) keeps thrashing the
+            // channel. 60s of no-cut history proves the channel really is
+            // the capacity we think it is.
+            const auto since_cut_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_cut_time_).count();
+            if (stable_cycles_ >= RECOVER_RESET_CYCLES && since_cut_ms >= CUT_COOLDOWN_MS) {
                 recovery_divisor_ = RECOVERY_DIVISOR_BASE;
                 recover_delay_    = RECOVER_DELAY_BASE;
             }
@@ -301,8 +322,9 @@ private:
     static constexpr int64_t  WARMUP_MS            = 5000;       // linear ramp duration on connect
     static constexpr uint32_t WARMUP_START_BPS     = 7'000'000;  // cold-start bitrate
     static constexpr uint32_t WARMUP_CEILING_BPS   = 10'000'000; // safe upper bound for the ramp
-    static constexpr uint32_t RECOVERY_DIVISOR_BASE = 50;  // +2% of default per cycle
+    static constexpr uint32_t RECOVERY_DIVISOR_BASE = 100; // +1% of default per cycle
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
+    static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;
@@ -312,6 +334,7 @@ private:
     double   loss_pending_  = 0.0;     // max loss since last adaptation; consumed after cut
     Clock::time_point last_adapt_time_   = Clock::now();
     Clock::time_point warmup_start_time_ = Clock::now();
+    Clock::time_point last_cut_time_     = Clock::time_point{};  // epoch = never cut yet
     uint32_t recovery_divisor_           = RECOVERY_DIVISOR_BASE;
     uint32_t recover_delay_              = RECOVER_DELAY_BASE;
     bool     had_growth_                 = false;
@@ -319,6 +342,7 @@ private:
     bool     warmup_just_ended_          = false;
     uint32_t probe_ceiling_bps_          = 0;
     uint32_t recovery_ceiling_bps_       = 0;  // post-warmup cap for additive recovery
+    uint32_t ceiling_override_bps_       = 0;  // diagnostic: raise hard cap above WARMUP_CEILING_BPS
     uint32_t client_count_               = 1;
     // Network feedback.
     double   last_rtt_ms_      = 0.0;

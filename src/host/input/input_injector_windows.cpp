@@ -22,12 +22,43 @@ public:
 
         switch (event.type) {
         case protocol::InputEventType::MouseMove: {
-            input.type = INPUT_MOUSE;
-            input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-            // SendInput absolute coords: 0..65535
-            input.mi.dx = static_cast<LONG>(event.x_norm * 65535.0f);
-            input.mi.dy = static_cast<LONG>(event.y_norm * 65535.0f);
-            SendInput(1, &input, sizeof(INPUT));
+            // Detect locked-cursor mode (games with ClipCursor + raw input).
+            // When clipped, SendInput ABSOLUTE would give WM_INPUT events
+            // carrying absolute screen coords (xn*65535) that FPS games
+            // misread as huge relative deltas → camera spin. In that mode
+            // we convert the absolute position update into a relative delta
+            // and inject as MOUSEEVENTF_MOVE so raw input reports correct
+            // per-event deltas.
+            const float xn = event.x_norm;
+            const float yn = event.y_norm;
+            const bool clipped = cursor_clipped_tight();
+
+            if (clipped && last_xn_valid_) {
+                const double dx_f = (double)(xn - last_xn_) * (double)screen_w_;
+                const double dy_f = (double)(yn - last_yn_) * (double)screen_h_;
+                const LONG dx = static_cast<LONG>(dx_f);
+                const LONG dy = static_cast<LONG>(dy_f);
+                if (dx != 0 || dy != 0) {
+                    input.type = INPUT_MOUSE;
+                    input.mi.dwFlags = MOUSEEVENTF_MOVE;  // relative
+                    input.mi.dx = dx;
+                    input.mi.dy = dy;
+                    SendInput(1, &input, sizeof(INPUT));
+                }
+            } else {
+                input.type = INPUT_MOUSE;
+                input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+                // SendInput absolute coords: 0..65535
+                // TODO(multi-monitor): MOUSEEVENTF_VIRTUALDESK required for
+                // multi-monitor capture; today host pins monitor 0.
+                input.mi.dx = static_cast<LONG>(xn * 65535.0f);
+                input.mi.dy = static_cast<LONG>(yn * 65535.0f);
+                SendInput(1, &input, sizeof(INPUT));
+            }
+
+            last_xn_ = xn;
+            last_yn_ = yn;
+            last_xn_valid_ = true;
             break;
         }
         case protocol::InputEventType::MouseMoveRelative: {
@@ -103,8 +134,26 @@ public:
     }
 
 private:
+    // True if the foreground app has restricted the cursor clip rect below
+    // primary monitor size (ClipCursor with a tight rect — standard pattern
+    // for FPS games that lock the cursor center-screen).
+    bool cursor_clipped_tight() const {
+        RECT clip{};
+        if (!GetClipCursor(&clip)) return false;
+        const int cw = clip.right  - clip.left;
+        const int ch = clip.bottom - clip.top;
+        const int mw = GetSystemMetrics(SM_CXSCREEN);
+        const int mh = GetSystemMetrics(SM_CYSCREEN);
+        // Any meaningful shrinkage → treat as game mode. Use a small slack
+        // (a few px) to absorb DWM / task bar quirks.
+        return (cw + 4 < mw) || (ch + 4 < mh);
+    }
+
     uint32_t screen_w_ = 1920;
     uint32_t screen_h_ = 1080;
+    float    last_xn_       = 0.0f;
+    float    last_yn_       = 0.0f;
+    bool     last_xn_valid_ = false;
 };
 
 } // namespace

@@ -167,7 +167,21 @@
       "Bash(rm -f build/bin/Release/deskbeam.exe)",
       "Bash(touch src/host/encode/nvenc_encoder.cpp)",
       "Bash(mv third_party/speexdsp_src third_party/speexdsp_src_old)",
-      "Bash(mv third_party/opus third_party/opus_old)"
+      "Bash(mv third_party/opus third_party/opus_old)",
+      "Bash(git ls-remote *)",
+      "Bash(find build* -name \"libvpl.dll\" -o -name \"VPL*\")",
+      "Bash(objdump -p build_vpl/Release/libvpl.dll)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 /tmp/host_latest.txt)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 /tmp/host_ir.txt)",
+      "Bash(awk -F'retx: ' '{print $2}')",
+      "Bash(awk -F',' '{print $1}')",
+      "Bash(iconv -f UTF-16LE -t UTF-8 /tmp/host_qsv.txt)",
+      "Bash(awk 'BEGIN{min=999;max=0;sum=0;n=0}{if\\($1<min\\)min=$1;if\\($1>max\\)max=$1;sum+=$1;n++}END{printf \"FPS min=%.1f max=%.1f avg=%.1f samples=%d\\\\n\",min,max,sum/n,n}')",
+      "Bash(iconv -f UTF-16LE -t UTF-8 /tmp/host_slice.txt)",
+      "Bash(out/fec_test.exe *)",
+      "Bash(powershell.exe *)",
+      "Bash(./deskbeam.exe --help)",
+      "Bash(grep -i \"\\\\\\\\.cpp\\\\|\\\\\\\\.h\")"
     ]
   }
 }

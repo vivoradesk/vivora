@@ -2,14 +2,15 @@
 
 #include "app/windows_view_platform.h"
 #include <windows.h>
-#include <objbase.h>
 #include "common/utils/log.h"
 #include <utility>
 
 bool WindowsViewPlatform::init(int argc, char* argv[],
                                 const char* host_ip, uint16_t port) {
-    // Initialize COM as MTA before Qt (which may set STA).
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // Do NOT call CoInitializeEx here — QApplication sets the GUI thread
+    // to STA (required for OLE drag-and-drop and native dialogs).  Forcing
+    // MTA first breaks those subsystems.  The Media Foundation decoder
+    // calls CoInitializeEx itself on its own thread if needed.
 
     // Decoder creation deferred to init_decoder() — codec is only known
     // after the HELLO_ACK handshake.
@@ -74,9 +75,9 @@ int WindowsViewPlatform::render() {
             }
         }
         if (renderer_ready_) {
-            window_->render_frame(decoded.texture, decoded.subresource);
+            window_->render_frame(decoded.texture.Get(), decoded.subresource);
         }
-        if (decoded.texture) decoded.texture->Release();
+        // decoded.texture ComPtr releases on scope exit / next loop iter.
         count++;
     }
     return count;

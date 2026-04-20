@@ -154,6 +154,17 @@ void AudioSender::emit_packet() {
         if (n > 0) {
             packets_sent_++;
             bytes_sent_ += static_cast<uint64_t>(n);
+        } else {
+            send_fail_count_++;
+            if (send_fail_count_ <= 5 || (send_fail_count_ % 100) == 0) {
+                log::warn("AudioSend",
+                          "send_to failed (rc=%d) to %u.%u.%u.%u:%u (fail_total=%llu)",
+                          n,
+                          (dest.ip >> 0) & 0xFF, (dest.ip >> 8) & 0xFF,
+                          (dest.ip >> 16) & 0xFF, (dest.ip >> 24) & 0xFF,
+                          dest.port,
+                          (unsigned long long)send_fail_count_);
+            }
         }
     }
 }

@@ -27,10 +27,24 @@ public:
     void on_idle() override;
     void shutdown() override;
 
+    bool get_cursor_state(CursorState& out) override;
+    bool take_cursor_shape(CursorShapeView& out) override;
+
 private:
     deskbeam::host::MacScreenCapture capture_;
     deskbeam::host::MacVideoToolboxEncoder encoder_;
     std::vector<uint8_t> pkt_buf_;
+
+    // Cursor tracking state.
+    uint64_t last_shape_hash_ = 0;
+    uint32_t shape_id_counter_ = 0;
+    uint32_t current_shape_id_ = 0;
+    bool     pending_shape_    = false;
+    uint16_t pending_shape_w_  = 0;
+    uint16_t pending_shape_h_  = 0;
+    uint16_t pending_hotspot_x_ = 0;
+    uint16_t pending_hotspot_y_ = 0;
+    std::vector<uint8_t> pending_shape_bgra_;
 };
 
 #endif // DESKBEAM_MACOS

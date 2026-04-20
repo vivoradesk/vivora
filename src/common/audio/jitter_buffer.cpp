@@ -78,7 +78,8 @@ void JitterBuffer::push(uint16_t seq, const uint8_t* data, size_t len) {
 }
 
 JitterBuffer::Status JitterBuffer::pop(std::vector<uint8_t>& out,
-                                       uint16_t& out_seq) {
+                                       uint16_t& out_seq,
+                                       std::vector<uint8_t>* fec_source) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!started_) return Status::Empty;
 
@@ -95,7 +96,19 @@ JitterBuffer::Status JitterBuffer::pop(std::vector<uint8_t>& out,
         return Status::Data;
     }
 
-    // Known gap: advance play head, signal PLC.
+    // Known gap. If the caller asked for FEC lookahead, expose the
+    // next_seq+1 payload (without removing it) so it can try FEC-decode.
+    if (fec_source) {
+        fec_source->clear();
+        const uint16_t peek_seq = static_cast<uint16_t>(next_seq_ + 1);
+        const size_t peek_idx = peek_seq % capacity_;
+        Slot& ns = ring_[peek_idx];
+        if (ns.filled && ns.seq == peek_seq) {
+            *fec_source = ns.data;  // copy, keep slot filled
+        }
+    }
+
+    // Advance play head, signal PLC (or FEC recovery upstream).
     next_seq_++;
     return Status::Missing;
 }

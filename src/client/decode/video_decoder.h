@@ -7,16 +7,20 @@
 #include <vector>
 
 #ifdef DESKBEAM_WINDOWS
-struct ID3D11Device;
-struct ID3D11Texture2D;
+#include <d3d11.h>
+#include <wrl/client.h>
 #endif
 
 namespace deskbeam {
 
 struct DecodedFrame {
 #ifdef DESKBEAM_WINDOWS
-    ID3D11Texture2D* texture = nullptr;  // GPU texture (NV12 or P010)
-    uint32_t subresource = 0;            // texture array index
+    // GPU texture (NV12 or P010).  ComPtr holds the reference so the
+    // frame self-releases on destruction — fixes prior MfDecoder leak
+    // where frames left in the output queue at shutdown left dangling
+    // ID3D11Texture2D refs.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    uint32_t subresource = 0;  // texture array index
 #endif
     uint32_t width = 0;
     uint32_t height = 0;

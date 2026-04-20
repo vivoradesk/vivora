@@ -4,6 +4,7 @@
 
 #ifdef DESKBEAM_WINDOWS
 #include <d3d11.h>
+#include <wrl/client.h>
 #endif
 
 #include <cstdint>
@@ -18,8 +19,12 @@ struct CapturedFrame {
     TimePoint capture_time;
 
 #ifdef DESKBEAM_WINDOWS
-    // The texture stays in GPU memory — no CPU copy
-    ID3D11Texture2D* texture = nullptr;
+    // The texture stays in GPU memory — no CPU copy.  ComPtr takes an
+    // explicit ref when the capturer hands it out, so the caller can't
+    // accidentally outlive the DXGI frame by one call to ReleaseFrame().
+    // Consumers needing a raw ID3D11Texture2D* for D3D11 APIs use
+    // `texture.Get()` — the ref is held for the lifetime of CapturedFrame.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
 #endif
 
     // True if desktop image content changed (not just cursor movement)

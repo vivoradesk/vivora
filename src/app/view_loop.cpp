@@ -2,6 +2,7 @@
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/log.h"
+#include "common/utils/thread_priority.h"
 #include "common/utils/types.h"
 #include "client/net/client_session.h"
 
@@ -11,6 +12,9 @@
 namespace deskbeam {
 
 int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
+    // Poll → FEC recover → NACK → decode → render all runs on this loop;
+    // preemption here shows up directly as render jitter.
+    utils::boost_current_thread_priority();
     // Connect session.
     client::ClientSession session;
     if (!session.start(cfg.host_ip, cfg.port)) {
@@ -24,10 +28,15 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         session.send_input(ev);
     });
 
-    // Unified cooldown for both drop-triggered and no-keyframe-yet IDR requests.
-    // Same clock for both so one block's request suppresses the other's until
-    // the host has had time to produce and send the new IDR.
-    constexpr int IDR_RETRY_MS = 250;
+    // Global IDR rate-limit. Both the drop-triggered block and the
+    // no-keyframe-yet block share `last_idr_request`, so one trigger
+    // fully suppresses the other until this interval elapses.
+    //
+    // At ~100KB per keyframe on WiFi, an IDR storm with 8+ requests
+    // over 4s dumps ~1MB of keyframe traffic into an already-congested
+    // channel and finishes the job loss started. 1500ms caps that at
+    // ~3 requests per 4s worst case.
+    constexpr int MIN_IDR_INTERVAL_MS = 1500;
 
     bool got_keyframe = false;
     uint64_t frames_decoded = 0;
@@ -68,12 +77,22 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         }
 
         // Detect frame drops and request IDR for recovery.
+        //
+        // Critical: only act on drops while a keyframe is currently in
+        // play (got_keyframe=true). While we're waiting for the IDR we
+        // already asked for (got_keyframe=false), drops keep climbing
+        // because the host is still sending P-frames that can't be
+        // decoded — retriggering IDR here would cascade: each request
+        // dumps another ~200KB keyframe onto an already-congested link,
+        // which causes more loss, which drops_increase, which requests
+        // another IDR... The "No keyframe yet" block below owns recovery
+        // while we're in that waiting state.
         uint64_t drops = session.frames_dropped();
         if (drops > last_drops) {
             auto now = Clock::now();
             auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - last_idr_request).count();
-            if (since_idr_req > IDR_RETRY_MS) {
+            if (got_keyframe && since_idr_req > MIN_IDR_INTERVAL_MS) {
                 session.reset_video_stream();
                 session.request_idr();
                 last_idr_request = now;
@@ -88,14 +107,14 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         // No-keyframe-yet retry: a completely lost keyframe (all UDP
         // fragments dropped in one WiFi burst) is invisible to the
         // assembler's gap detection, so drops-triggered IDR above never
-        // fires.  Shares last_idr_request with the drop block so a fresh
-        // drop-triggered request suppresses this one until the new IDR
-        // has had time to land.
+        // fires. Shares last_idr_request with the drop block via
+        // MIN_IDR_INTERVAL_MS so a fresh drop-triggered request
+        // suppresses this one until the new IDR has had time to land.
         if (!got_keyframe && session.state() == client::SessionState::Connected) {
             auto now = Clock::now();
             auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - last_idr_request).count();
-            if (since_idr_req > IDR_RETRY_MS) {
+            if (since_idr_req > MIN_IDR_INTERVAL_MS) {
                 session.request_idr();
                 last_idr_request = now;
                 log::warn("VIEW", "No keyframe yet, requesting IDR");
@@ -158,7 +177,14 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                 (unsigned long long)frames_decoded, inst_fps, session.rtt_ms());
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // Adaptive sleep: if we did real work this tick (fed a frame or
+        // rendered one), skip the 1ms nap and loop immediately — that
+        // shaves up to 1ms of jitter off the render cadence at 60fps.
+        // Only sleep when the loop is genuinely idle.
+        const bool did_work = frames_fed > 0 || rendered > 0;
+        if (!did_work) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 
     session.stop();

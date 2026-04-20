@@ -15,6 +15,10 @@ public:
                 uint32_t timestamp, bool keyframe,
                 uint16_t seq_no) override;
     int  render() override;
+    void flush_decoder() override;
+    void set_stream_size(uint32_t width, uint32_t height) override;
+    void upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) override;
+    void update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) override;
     void shutdown() override;
 
 private:

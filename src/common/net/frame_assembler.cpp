@@ -6,15 +6,19 @@
 namespace deskbeam::net {
 
 void FrameAssembler::finalize_frame(uint16_t /*seq*/, PendingFrame& pf) {
-    size_t total = 0;
-    for (auto& f : pf.fragments) total += f.size();
-    pf.assembled.reserve(total);
-    for (auto& f : pf.fragments) {
-        pf.assembled.insert(pf.assembled.end(), f.begin(), f.end());
+    // All fragments except the last carry exactly DATA_PER_FRAGMENT bytes;
+    // the last fragment's real length was recorded on arrival.  The buffer
+    // was overallocated to frag_count * DATA_PER_FRAGMENT — just resize
+    // down to the true total.  shrink_to_fit() is intentionally skipped:
+    // it would reallocate and copy, defeating the whole zero-copy point.
+    if (pf.frag_count > 0) {
+        size_t total = static_cast<size_t>(pf.frag_count - 1)
+                       * FrameFragmenter::DATA_PER_FRAGMENT
+                       + pf.last_frag_len;
+        pf.assembled.resize(total);
     }
-    // Fragments no longer needed; free memory.
-    pf.fragments.clear();
-    pf.fragments.shrink_to_fit();
+    pf.arrived.clear();
+    pf.arrived.shrink_to_fit();
     pf.complete = true;
 }
 
@@ -76,10 +80,16 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
 
     auto& pf = pending_[seq];
     if (pf.frag_count == 0) {
-        // New frame
+        // New frame — reserve the maximum possible buffer up front so
+        // subsequent fragments can be written directly into their final
+        // resting place.  Over-allocation is one `DATA_PER_FRAGMENT - tail`
+        // bytes at most (~1.3KB), trimmed at finalize.
         pf.frag_count = frag_count;
         pf.timestamp = packet.header.timestamp;
-        pf.fragments.resize(frag_count);
+        pf.assembled.assign(
+            static_cast<size_t>(frag_count) * FrameFragmenter::DATA_PER_FRAGMENT,
+            0);
+        pf.arrived.assign(frag_count, false);
         pf.nack_sent_at.assign(frag_count, TimePoint{});
         pf.first_arrival = Clock::now();
     }
@@ -87,12 +97,28 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
     if (packet.header.flags & protocol::FLAG_KEYFRAME)
         pf.keyframe = true;
 
-    // Store fragment data (skip 4-byte frag header)
-    if (pf.fragments[frag_index].empty()) {
+    // Store fragment data (skip 4-byte frag header).  Write once, directly
+    // at the fragment's slot in the pre-allocated buffer — no intermediate
+    // per-fragment vector.
+    if (!pf.arrived[frag_index]) {
+        pf.arrived[frag_index] = true;
         pf.received++;
-        pf.fragments[frag_index].assign(
-            packet.payload.begin() + FrameFragmenter::FRAG_HEADER_SIZE,
-            packet.payload.end());
+
+        const uint8_t* src = packet.payload.data() + FrameFragmenter::FRAG_HEADER_SIZE;
+        size_t frag_len = packet.payload.size() - FrameFragmenter::FRAG_HEADER_SIZE;
+        size_t offset = static_cast<size_t>(frag_index)
+                        * FrameFragmenter::DATA_PER_FRAGMENT;
+        // Defensive clamp: a malformed sender couldn't overrun the buffer
+        // past what we reserved for this slot.
+        if (frag_len > FrameFragmenter::DATA_PER_FRAGMENT)
+            frag_len = FrameFragmenter::DATA_PER_FRAGMENT;
+        std::memcpy(pf.assembled.data() + offset, src, frag_len);
+
+        // Only the last fragment's length matters for finalize() — earlier
+        // fragments are always DATA_PER_FRAGMENT bytes.
+        if (frag_index == pf.frag_count - 1) {
+            pf.last_frag_len = frag_len;
+        }
     }
 
     // Check if complete
@@ -170,7 +196,7 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
         batch.seq_no = seq;
         for (uint16_t i = 0; i < pf.frag_count; ++i) {
             if (total_nacked >= MAX_NACK_PER_CYCLE) break;
-            if (!pf.fragments[i].empty()) continue; // already have it
+            if (pf.arrived[i]) continue; // already have it
 
             // Rate-limit: skip if we requested recently
             auto last_nack = pf.nack_sent_at[i];
@@ -204,6 +230,9 @@ void FrameAssembler::reset() {
 }
 
 void FrameAssembler::expire_stale() {
+    // NOTE: counting happens exclusively in try_deliver()'s skip-forward path.
+    // Erasing here just removes the stale pending entry; try_deliver will
+    // then see the gap, bump frames_dropped_ once, and advance the cursor.
     auto now = Clock::now();
     bool any_dropped = false;
     auto it = pending_.begin();
@@ -211,7 +240,6 @@ void FrameAssembler::expire_stale() {
         auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - it->second.first_arrival).count();
         if (!it->second.complete && age_ms > FRAME_TIMEOUT_MS) {
-            frames_dropped_++;
             any_dropped = true;
             it = pending_.erase(it);
         } else {

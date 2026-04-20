@@ -59,6 +59,7 @@ private:
     uint64_t packets_sent_ = 0;
     uint64_t bytes_sent_   = 0;
     uint64_t feeds_called_ = 0;          // total feed() invocations
+    uint64_t send_fail_count_ = 0;       // send_to rc<=0 occurrences
     uint64_t last_log_pkts_ = 0;
     std::chrono::steady_clock::time_point last_log_time_{};
 };

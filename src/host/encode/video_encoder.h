@@ -9,9 +9,11 @@
 
 #ifdef DESKBEAM_WINDOWS
 #include <dxgiformat.h>
+#endif
+// Forward declarations (incomplete types are fine on all platforms; only
+// Windows implementations actually deref these).
 struct ID3D11Device;
 struct ID3D11Texture2D;
-#endif
 
 namespace deskbeam {
 

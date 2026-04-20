@@ -32,7 +32,14 @@ public:
     void push(uint16_t seq, const uint8_t* data, size_t len);
 
     // Writes packet payload into `out`. Thread-safe.
-    Status pop(std::vector<uint8_t>& out, uint16_t& out_seq);
+    //
+    // If `fec_source` is non-null and the head slot is Missing, and the
+    // slot immediately after (next_seq+1) is filled, copies that next
+    // packet's payload into *fec_source. The caller can feed it to
+    // opus_decode with decode_fec=1 to reconstruct the missed frame from
+    // the in-band FEC redundancy Opus embeds in each packet.
+    Status pop(std::vector<uint8_t>& out, uint16_t& out_seq,
+               std::vector<uint8_t>* fec_source = nullptr);
 
     size_t buffered_frames() const;
 

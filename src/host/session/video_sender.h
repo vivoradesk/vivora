@@ -4,9 +4,8 @@
 #include "common/net/frame_fragmenter.h"
 #include "common/net/fec_codec.h"
 #include "common/protocol/packet.h"
+#include <array>
 #include <cstdint>
-#include <deque>
-#include <unordered_map>
 #include <vector>
 
 namespace deskbeam::host {
@@ -58,6 +57,12 @@ public:
     // Feed RTT for proactive K lowering on WiFi stalls.
     void on_rtt(double rtt_ms);
 
+    // Diagnostic: force M to a fixed value and disable adaptive updates.
+    // Set m=0 to clear and restore adaptive behavior. Keyframe boost still
+    // applies on top of force_m (but bounded by KEYFRAME_M_MAX).
+    void set_force_m(uint8_t m);
+    uint8_t force_m() const { return force_m_; }
+
     uint64_t packets_sent() const { return packets_sent_; }
     uint64_t bytes_sent() const { return bytes_sent_; }
     uint64_t retransmits() const { return retransmits_; }
@@ -68,7 +73,11 @@ private:
         return (static_cast<uint32_t>(seq) << 16) | frag;
     }
 
-    void store_retx(uint32_t key, std::vector<uint8_t> wire);
+    void store_retx(uint32_t key, const std::vector<uint8_t>& wire);
+    // Linear-scan lookup over the ring.  RETX_BUFFER_CAPACITY (2048) element
+    // comparisons are faster than an unordered_map miss chain once you
+    // account for cache behavior, and NACK lookup is a cold path (~30/poll).
+    const std::vector<uint8_t>* find_retx(uint32_t key) const;
 
     net::IUdpSocket& socket_;
     net::FrameFragmenter fragmenter_;
@@ -106,10 +115,31 @@ private:
     uint8_t  rtt_normal_count_ = 0;
     uint8_t  pre_lock_m_ = 2;
 
-    // Wire bytes stored by key for O(1) lookup; FIFO of keys for eviction order.
-    std::deque<uint32_t> retx_fifo_;
-    std::unordered_map<uint32_t, std::vector<uint8_t>> retx_index_;
+    // Steady-state M as decided by the loss-adaptive loop.  Separate from
+    // whatever the FEC encoder currently has set, because the keyframe
+    // path temporarily bumps the encoder's M for its own groups — reading
+    // the encoder during that window would give a boosted value.
+    // Updated only from update_fec_from_loss().
+    uint8_t  steady_m_ = 2;
+
+    // Diagnostic override: when non-zero, freezes M at this value.
+    // update_fec_from_loss() and on_rtt() both become no-ops.
+    uint8_t  force_m_ = 0;
+
+    // Flat ring of retx slots.  Write cursor walks mod capacity — newest
+    // overwrite oldest automatically, so FIFO eviction is free.  Vacant
+    // slots (pre-wrap) are identified by an empty wire vector.
+    struct RetxSlot {
+        uint32_t key = 0;
+        std::vector<uint8_t> wire;  // empty == vacant
+    };
+    std::array<RetxSlot, RETX_BUFFER_CAPACITY> retx_ring_{};
+    size_t retx_write_cursor_ = 0;
     int retx_budget_ = MAX_RETX_PER_POLL;
+
+    // Scratch buffer for NACK retransmissions — holds a copy of the stored
+    // wire with FLAG_RETX set, so the stored wire stays pristine.
+    std::vector<uint8_t> nack_send_buf_;
 };
 
 } // namespace deskbeam::host

@@ -38,6 +38,7 @@ private:
     UINT reset_token_ = 0;
     bool started_ = false;
     bool failed_ = false;  // set after any SEH crash; decoder becomes inert
+    bool mf_started_ = false;  // true once MFStartup succeeded; gates MFShutdown
     VideoCodec codec_ = VideoCodec::HEVC;
 
     std::queue<DecodedFrame> output_frames_;

@@ -91,17 +91,32 @@ void AudioReceiver::thread_proc() {
 
     std::vector<float> pcm(FRAME_SAMPLES_STEREO);
     std::vector<uint8_t> opus_payload;
+    std::vector<uint8_t> fec_source;
     std::vector<float> out_buf;
 
     auto last_stats = clock::now();
-    uint64_t prev_recv = 0, prev_dec = 0, prev_plc = 0, prev_empty = 0;
+    uint64_t prev_recv = 0, prev_dec = 0, prev_plc = 0, prev_fec = 0, prev_empty = 0;
+
+    auto emit_stats = [&](clock::time_point now_s) {
+        uint64_t r = packets_received_.load(), d = packets_decoded_.load();
+        uint64_t p = plc_frames_.load(), f = fec_recovered_.load(), e = empty_ticks_.load();
+        log::info("AudioRecv",
+                  "stats: recv=%llu(+%llu) dec=%llu(+%llu) fec=%llu(+%llu) plc=%llu(+%llu) empty=%llu(+%llu)",
+                  (unsigned long long)r, (unsigned long long)(r - prev_recv),
+                  (unsigned long long)d, (unsigned long long)(d - prev_dec),
+                  (unsigned long long)f, (unsigned long long)(f - prev_fec),
+                  (unsigned long long)p, (unsigned long long)(p - prev_plc),
+                  (unsigned long long)e, (unsigned long long)(e - prev_empty));
+        prev_recv = r; prev_dec = d; prev_fec = f; prev_plc = p; prev_empty = e;
+        last_stats = now_s;
+    };
 
     while (running_.load()) {
         std::this_thread::sleep_until(next);
         next += tick;
 
         uint16_t seq = 0;
-        JitterBuffer::Status st = jitter_.pop(opus_payload, seq);
+        JitterBuffer::Status st = jitter_.pop(opus_payload, seq, &fec_source);
         int decoded = 0;
         if (st == JitterBuffer::Status::Data) {
             decoded = decoder_.decode(opus_payload.data(),
@@ -109,24 +124,31 @@ void AudioReceiver::thread_proc() {
                                       pcm.data(), false);
             packets_decoded_.fetch_add(1, std::memory_order_relaxed);
         } else if (st == JitterBuffer::Status::Missing) {
-            // PLC: pass nullptr to get Opus's concealment.
-            decoded = decoder_.decode(nullptr, 0, pcm.data(), false);
-            plc_frames_.fetch_add(1, std::memory_order_relaxed);
+            if (!fec_source.empty()) {
+                // Opus in-band FEC: next packet carries a LP-encoded copy
+                // of this frame. decode_fec=1 extracts that copy without
+                // consuming the next packet (it's still in the jitter ring).
+                decoded = decoder_.decode(fec_source.data(),
+                                          static_cast<int>(fec_source.size()),
+                                          pcm.data(), true);
+                if (decoded > 0) {
+                    fec_recovered_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    // Decoder rejected FEC (no redundancy in that packet) —
+                    // fall back to PLC.
+                    decoded = decoder_.decode(nullptr, 0, pcm.data(), false);
+                    plc_frames_.fetch_add(1, std::memory_order_relaxed);
+                }
+            } else {
+                decoded = decoder_.decode(nullptr, 0, pcm.data(), false);
+                plc_frames_.fetch_add(1, std::memory_order_relaxed);
+            }
         } else {
             // Empty — still prebuffering. Skip this tick.
             empty_ticks_.fetch_add(1, std::memory_order_relaxed);
-            // Still log stats on Empty path so we get visibility.
             auto now_s = clock::now();
             if (std::chrono::duration<double>(now_s - last_stats).count() >= 5.0) {
-                uint64_t r = packets_received_.load(), d = packets_decoded_.load();
-                uint64_t p = plc_frames_.load(), e = empty_ticks_.load();
-                log::info("AudioRecv", "stats: recv=%llu(+%llu) dec=%llu(+%llu) plc=%llu(+%llu) empty=%llu(+%llu)",
-                          (unsigned long long)r, (unsigned long long)(r - prev_recv),
-                          (unsigned long long)d, (unsigned long long)(d - prev_dec),
-                          (unsigned long long)p, (unsigned long long)(p - prev_plc),
-                          (unsigned long long)e, (unsigned long long)(e - prev_empty));
-                prev_recv = r; prev_dec = d; prev_plc = p; prev_empty = e;
-                last_stats = now_s;
+                emit_stats(now_s);
             }
             continue;
         }
@@ -134,15 +156,7 @@ void AudioReceiver::thread_proc() {
         // Periodic stats every ~5 seconds.
         auto now_stats = clock::now();
         if (std::chrono::duration<double>(now_stats - last_stats).count() >= 5.0) {
-            uint64_t r = packets_received_.load(), d = packets_decoded_.load();
-            uint64_t p = plc_frames_.load(), e = empty_ticks_.load();
-            log::info("AudioRecv", "stats: recv=%llu(+%llu) dec=%llu(+%llu) plc=%llu(+%llu) empty=%llu(+%llu)",
-                      (unsigned long long)r, (unsigned long long)(r - prev_recv),
-                      (unsigned long long)d, (unsigned long long)(d - prev_dec),
-                      (unsigned long long)p, (unsigned long long)(p - prev_plc),
-                      (unsigned long long)e, (unsigned long long)(e - prev_empty));
-            prev_recv = r; prev_dec = d; prev_plc = p; prev_empty = e;
-            last_stats = now_stats;
+            emit_stats(now_stats);
         }
         if (decoded <= 0) continue;
 

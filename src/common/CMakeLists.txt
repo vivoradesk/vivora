@@ -1,6 +1,7 @@
 add_library(deskbeam_common STATIC
     utils/log.cpp
     utils/metrics.cpp
+    utils/thread_priority.cpp
     protocol/packet.cpp
     net/frame_fragmenter.cpp
     net/frame_assembler.cpp
@@ -22,6 +23,21 @@ if(WIN32)
     target_link_libraries(deskbeam_common PUBLIC ws2_32 ole32 avrt)
 else()
     target_sources(deskbeam_common PRIVATE net/posix_socket.cpp)
+endif()
+
+if(APPLE)
+    target_sources(deskbeam_common PRIVATE
+        audio/mac_audio_capture.mm
+        audio/mac_audio_output.mm
+    )
+    target_link_libraries(deskbeam_common PUBLIC
+        "-framework Foundation"
+        "-framework CoreMedia"
+        "-framework CoreAudio"
+        "-framework AudioToolbox"
+        "-framework AudioUnit"
+        "-framework ScreenCaptureKit"
+    )
 endif()
 
 target_include_directories(deskbeam_common PUBLIC

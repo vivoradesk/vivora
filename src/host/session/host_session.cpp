@@ -337,7 +337,9 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
         audio_dest.ip   = sender.ip;
         audio_dest.port = client_audio_port;
         audio_sender_->add_destination(audio_dest);
-        log::info("HostSession", "Audio destination registered: port %u",
+        log::info("HostSession", "Audio destination registered: %u.%u.%u.%u:%u",
+                  (audio_dest.ip >> 0) & 0xFF, (audio_dest.ip >> 8) & 0xFF,
+                  (audio_dest.ip >> 16) & 0xFF, (audio_dest.ip >> 24) & 0xFF,
                   client_audio_port);
     }
 

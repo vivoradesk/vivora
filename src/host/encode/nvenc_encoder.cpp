@@ -315,22 +315,6 @@ bool NvencEncoder::configure_encoder() {
               enc_cfg.rcParams.averageBitRate, enc_cfg.rcParams.maxBitRate,
               enc_cfg.rcParams.vbvBufferSize, enc_cfg.gopLength,
               enc_cfg.frameIntervalP);
-    log::info(TAG, "INIT offsets: encAsync=%zu PTD=%zu tuning=%zu config=%zu sizeof=%zu",
-              offsetof(NV_ENC_INITIALIZE_PARAMS, enableEncodeAsync),
-              offsetof(NV_ENC_INITIALIZE_PARAMS, enablePTD),
-              offsetof(NV_ENC_INITIALIZE_PARAMS, tuningInfo),
-              offsetof(NV_ENC_INITIALIZE_PARAMS, encodeConfig),
-              sizeof(NV_ENC_INITIALIZE_PARAMS));
-
-    // HEX dump first 128 bytes of init_params so we can verify wire layout.
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&init_params);
-    char hex[3*128 + 1];
-    for (int i = 0; i < 128; ++i) {
-        sprintf(hex + i*3, "%02X ", bytes[i]);
-    }
-    hex[3*128] = 0;
-    log::info(TAG, "INIT[0..128]: %s", hex);
-
     st = api->nvEncInitializeEncoder(encoder_, &init_params);
 
     if (st != NV_ENC_SUCCESS) {
@@ -465,7 +449,6 @@ bool NvencEncoder::init(const EncoderConfig& config, ID3D11Device* device) {
 bool NvencEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
     if (!encoder_) return false;
     auto* api = fn(fn_list_storage_);
-    log::info(TAG, "encode: pts=%llu cross=%d", (unsigned long long)pts_us, (int)cross_device_);
 
     if (cross_device_) {
         // Cross-device path: capture texture (Intel) → CPU → NVENC staging (NVidia).
@@ -493,13 +476,11 @@ bool NvencEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
     }
 
     // Map registered resource.
-    log::info(TAG, "encode: about to Map, regRes=%p", registered_resource_);
     NV_ENC_MAP_INPUT_RESOURCE map = {};
     map.version = ver(NV_ENC_MAP_INPUT_RESOURCE_VER);
     map.registeredResource = reinterpret_cast<NV_ENC_REGISTERED_PTR>(registered_resource_);
 
     NVENCSTATUS st = api->nvEncMapInputResource(encoder_, &map);
-    log::info(TAG, "encode: Map returned %d, mapped=%p fmt=%d", (int)st, map.mappedResource, (int)map.mappedBufferFmt);
     if (st != NV_ENC_SUCCESS) {
         const char* e = api->nvEncGetLastErrorString ? api->nvEncGetLastErrorString(encoder_) : "";
         log::error(TAG, "nvEncMapInputResource failed: %d: %s", (int)st, e);
@@ -523,9 +504,7 @@ bool NvencEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
         idr_requested_ = false;
     }
 
-    log::info(TAG, "encode: about to EncodePicture picVer=0x%08X", pic.version);
     st = api->nvEncEncodePicture(encoder_, &pic);
-    log::info(TAG, "encode: EncodePicture returned %d", (int)st);
 
     // Unmap regardless of encode result.
     api->nvEncUnmapInputResource(encoder_, map.mappedResource);
@@ -543,9 +522,6 @@ bool NvencEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
         lock.outputBitstream = output_bitstream_;
 
         st = api->nvEncLockBitstream(encoder_, &lock);
-        log::info(TAG, "LockBitstream: st=%d ver=0x%08X size=%u ptr=%p type=%d",
-                  (int)st, lock.version, lock.bitstreamSizeInBytes,
-                  lock.bitstreamBufferPtr, (int)lock.pictureType);
         if (st == NV_ENC_SUCCESS) {
             EncodedPacket pkt;
             pkt.data.assign(

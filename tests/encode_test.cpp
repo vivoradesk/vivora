@@ -73,7 +73,7 @@ int main() {
         uint64_t pts = std::chrono::duration_cast<std::chrono::microseconds>(
             frame.capture_time.time_since_epoch()).count();
 
-        ok = encoder->encode(frame.texture, pts);
+        ok = encoder->encode(frame.texture.Get(), pts);
         capture->release_frame(frame);
 
         if (!ok) {

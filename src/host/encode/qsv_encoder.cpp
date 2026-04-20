@@ -76,6 +76,14 @@ struct Table {
 };
 
 static Table g_fn;
+// libvpl.dll is loaded exactly once for the lifetime of the process.  We
+// deliberately never FreeLibrary on the success path — the dispatcher pins
+// GPU driver DLLs, device contexts, and async queues whose teardown order
+// is not obvious, and unloading in ~QsvEncoder would also defeat the whole
+// point of `load_once()` on sessions that reconnect.  The module pin is
+// released by the OS at process exit, which is correct for a process-wide
+// shared dependency.  FreeLibrary remains in the failure path only because
+// there it cancels a partially-initialized load.
 static HMODULE g_dll = nullptr;
 
 template <typename T>

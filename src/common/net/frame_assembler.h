@@ -54,8 +54,16 @@ private:
         uint32_t timestamp = 0;
         bool keyframe = false;
         bool complete = false;
-        std::vector<std::vector<uint8_t>> fragments;
-        std::vector<uint8_t> assembled;  // populated when complete
+        // Zero double-copy: fragments are written directly into `assembled`
+        // at slot offsets of DATA_PER_FRAGMENT.  `arrived` replaces the
+        // previous per-fragment empty() check.  `last_frag_len` records
+        // the tail fragment's real size (only the last fragment may be
+        // shorter than DATA_PER_FRAGMENT), so finalize() can resize the
+        // buffer to the true frame length without another pass through
+        // per-fragment vectors.
+        std::vector<uint8_t> assembled;
+        std::vector<bool>    arrived;
+        size_t               last_frag_len = 0;
         TimePoint first_arrival;
         // Last NACK request time per fragment index (0 = never requested).
         std::vector<TimePoint> nack_sent_at;

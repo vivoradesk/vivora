@@ -86,7 +86,7 @@ int main() {
 
     ID3D11Texture2D* staging = nullptr;
     device->CreateTexture2D(&staging_desc, nullptr, &staging);
-    ctx->CopyResource(staging, frame.texture);
+    ctx->CopyResource(staging, frame.texture.Get());
 
     D3D11_MAPPED_SUBRESOURCE mapped;
     ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);

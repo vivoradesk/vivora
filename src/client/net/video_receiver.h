@@ -52,7 +52,12 @@ public:
 
     // Discard every buffered frame — done after loss detection so no
     // post-loss P-frames reach the decoder before the next IDR arrives.
-    void reset_stream() { assembler_.reset(); }
+    // Also drops FEC decoder state so old groups + ring entries don't
+    // linger across the IDR boundary.
+    void reset_stream() {
+        assembler_.reset();
+        fec_decoder_.reset();
+    }
 
 private:
     net::IUdpSocket& socket_;

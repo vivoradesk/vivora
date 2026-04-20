@@ -12,6 +12,8 @@
 
 #include <vector>
 #include <functional>
+#include <unordered_map>
+#include <cmath>
 
 // Device-dependent modifier flag bits (from IOKit, stable ABI).
 #define DB_NX_DEVICELCTLKEYMASK   0x00000001
@@ -51,8 +53,17 @@ namespace deskbeam { struct MacVideoViewImpl; }
     deskbeam::MacVideoViewImpl* impl;  // back pointer for input callback
     NSTrackingArea* trackingArea;
     NSUInteger lastModifierFlags;
+    // Relative-mouse mode: on when host cursor is hidden (e.g. FPS game).
+    // In this mode mouseMoved/mouseDragged forward raw hardware deltas via
+    // NSEvent.deltaX/deltaY as MouseMoveRelative, and the OS cursor is
+    // decoupled from physical motion so the trackpad keeps producing deltas
+    // even when the virtual cursor would hit a window edge.
+    BOOL relativeMode;
 }
 @property (nonatomic, strong) AVSampleBufferDisplayLayer* videoLayer;
+@property (nonatomic, strong) CALayer* cursorLayer;
+- (void)enterRelativeMode;
+- (void)exitRelativeMode;
 @end
 
 // Forward declaration so the view can call into C++.
@@ -77,6 +88,12 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         _videoLayer.backgroundColor = [[NSColor blackColor] CGColor];
         _videoLayer.frame = self.bounds;
         [self.layer addSublayer:_videoLayer];
+
+        _cursorLayer = [[CALayer alloc] init];
+        _cursorLayer.hidden = YES;
+        _cursorLayer.contentsGravity = kCAGravityResize;
+        [self.layer addSublayer:_cursorLayer];
+
         lastModifierFlags = 0;
     }
     return self;
@@ -105,6 +122,23 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 }
 
 - (void)sendMouseMove:(NSEvent*)event {
+    if (relativeMode) {
+        // Raw HID deltas — decoupled from cursor clamping by
+        // CGAssociateMouseAndMouseCursorPosition(false). Matches the
+        // Windows client's WM_INPUT path (RAWMOUSE.lLastX/lLastY).
+        // Mac reports sub-pixel float deltas on trackpads; round to int.
+        CGFloat dx = event.deltaX;
+        CGFloat dy = event.deltaY;
+        if (dx == 0 && dy == 0) return;
+        deskbeam::protocol::InputEvent ev;
+        ev.type = deskbeam::protocol::InputEventType::MouseMoveRelative;
+        ev.dx = static_cast<int32_t>(llround(dx));
+        ev.dy = static_cast<int32_t>(llround(dy));
+        if (ev.dx == 0 && ev.dy == 0) return;
+        deskbeam::emit_input(impl, ev);
+        return;
+    }
+
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     CGFloat vw = self.bounds.size.width;
     CGFloat vh = self.bounds.size.height;
@@ -120,10 +154,34 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     deskbeam::emit_input(impl, ev);
 }
 
+- (void)enterRelativeMode {
+    if (relativeMode) return;
+    relativeMode = YES;
+    // Decouple OS cursor from physical motion — trackpad/mouse events still
+    // carry raw deltas on NSEvent.deltaX/deltaY, but the Mac cursor stops
+    // moving, so we never hit a screen edge that would kill further deltas.
+    // Do NOT warp the cursor: when host flips visibility briefly (UI hover),
+    // any warp would teleport the user's mouse on each flip.
+    // Cursor visibility is managed by the tracking-area enter/exit pair —
+    // calling [NSCursor hide] here would unbalance that counter.
+    CGAssociateMouseAndMouseCursorPosition(false);
+}
+
+- (void)exitRelativeMode {
+    if (!relativeMode) return;
+    relativeMode = NO;
+    CGAssociateMouseAndMouseCursorPosition(true);
+}
+
 - (void)mouseMoved:(NSEvent*)event        { [self sendMouseMove:event]; }
 - (void)mouseDragged:(NSEvent*)event      { [self sendMouseMove:event]; }
 - (void)rightMouseDragged:(NSEvent*)event { [self sendMouseMove:event]; }
 - (void)otherMouseDragged:(NSEvent*)event { [self sendMouseMove:event]; }
+
+// Hide native Mac cursor while over the stream — host-side cursor is
+// drawn into the video via cursorLayer, so we'd otherwise see two.
+- (void)mouseEntered:(NSEvent*)event { (void)event; [NSCursor hide]; }
+- (void)mouseExited:(NSEvent*)event  { (void)event; [NSCursor unhide]; }
 
 - (void)sendMouseButton:(deskbeam::protocol::MouseButton)btn pressed:(BOOL)down {
     deskbeam::protocol::InputEvent ev;
@@ -218,6 +276,15 @@ namespace deskbeam {
 
 static const char* TAG = "MAC_RENDER";
 
+struct CursorShapeEntry {
+    std::vector<uint8_t> bgra;  // owned backing store for the CGImage
+    CGImageRef image = nullptr;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    uint16_t hotspot_x = 0;
+    uint16_t hotspot_y = 0;
+};
+
 struct MacVideoViewImpl {
     NSWindow* window = nil;
     DBStreamView* view = nil;
@@ -229,6 +296,10 @@ struct MacVideoViewImpl {
     uint64_t frames_submitted = 0;
     uint32_t host_w = 0;
     uint32_t host_h = 0;
+    VideoCodec codec = VideoCodec::HEVC;
+
+    // Cursor cache: shape_id -> CGImage (+ owned backing BGRA buffer).
+    std::unordered_map<uint32_t, CursorShapeEntry> cursor_shapes;
 
     MacVideoView::InputCallback input_cb;
 };
@@ -385,6 +456,21 @@ static int hevc_nal_type(const uint8_t* nal, size_t len) {
     return (nal[0] >> 1) & 0x3F;
 }
 
+// Parse H.264 NAL unit type: low 5 bits of first byte.
+static int h264_nal_type(const uint8_t* nal, size_t len) {
+    if (len < 1) return -1;
+    return nal[0] & 0x1F;
+}
+
+// HEVC NAL types of interest.
+static constexpr int HEVC_NAL_VPS = 32;
+static constexpr int HEVC_NAL_SPS = 33;
+static constexpr int HEVC_NAL_PPS = 34;
+
+// H.264 NAL types of interest.
+static constexpr int H264_NAL_SPS = 7;
+static constexpr int H264_NAL_PPS = 8;
+
 // Split Annex-B bitstream into NAL units. Each NAL unit data excludes the
 // start code (00 00 00 01 or 00 00 01).
 struct NalUnit {
@@ -431,6 +517,10 @@ MacVideoView::~MacVideoView() {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (impl) {
         if (impl->format_desc) CFRelease(impl->format_desc);
+        for (auto& kv : impl->cursor_shapes) {
+            if (kv.second.image) CGImageRelease(kv.second.image);
+        }
+        impl->cursor_shapes.clear();
         // ARC releases Obj-C members when the struct is destroyed.
         impl->window = nil;
         impl->view = nil;
@@ -478,6 +568,145 @@ void MacVideoView::set_input_callback(InputCallback cb) {
     impl->input_cb = std::move(cb);
 }
 
+void MacVideoView::set_codec(VideoCodec codec) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    impl->codec = codec;
+}
+
+void MacVideoView::flush_decoder() {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl) return;
+    @autoreleasepool {
+        if (impl->view && impl->view.videoLayer) {
+            AVSampleBufferVideoRenderer* renderer = impl->view.videoLayer.sampleBufferRenderer;
+            [renderer flush];
+        }
+    }
+    if (impl->format_desc) {
+        CFRelease(impl->format_desc);
+        impl->format_desc = nullptr;
+    }
+    impl->vps.clear();
+    impl->sps.clear();
+    impl->pps.clear();
+    impl->have_params = false;
+}
+
+void MacVideoView::set_stream_size(uint32_t width, uint32_t height) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || width == 0 || height == 0) return;
+    impl->host_w = width;
+    impl->host_h = height;
+}
+
+void MacVideoView::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || shape.width == 0 || shape.height == 0) return;
+    const size_t expected = (size_t)shape.width * shape.height * 4;
+    if (shape.bgra.size() < expected) return;
+
+    auto it = impl->cursor_shapes.find(shape.shape_id);
+    if (it != impl->cursor_shapes.end()) {
+        // Same id already cached — no rebuild.
+        return;
+    }
+
+    CursorShapeEntry entry;
+    entry.width     = shape.width;
+    entry.height    = shape.height;
+    entry.hotspot_x = shape.hotspot_x;
+    entry.hotspot_y = shape.hotspot_y;
+    entry.bgra      = shape.bgra;  // own the pixels; CGDataProvider aliases.
+
+    CGDataProviderRef provider = CGDataProviderCreateWithData(
+        nullptr, entry.bgra.data(), expected, nullptr);
+    if (!provider) return;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    if (!cs) { CGDataProviderRelease(provider); return; }
+
+    // BGRA bytes read as little-endian 32 → 0xAARRGGBB → PremultipliedFirst.
+    entry.image = CGImageCreate(
+        shape.width, shape.height, 8, 32, (size_t)shape.width * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little,
+        provider, nullptr, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(cs);
+    CGDataProviderRelease(provider);
+    if (!entry.image) return;
+
+    impl->cursor_shapes.emplace(shape.shape_id, std::move(entry));
+}
+
+void MacVideoView::update_cursor_position(const protocol::CursorPositionMessage& pos) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || !impl->view) return;
+
+    CALayer* cursor = impl->view.cursorLayer;
+    if (!cursor) return;
+
+    // Host cursor visibility drives relative-mouse mode: when the host hides
+    // its cursor (typical for FPS/camera-locked apps), we switch to sending
+    // raw hardware deltas and decouple the local cursor so motion isn't
+    // lost at screen edges. Mirrors Windows stream_window.cpp enter/exit.
+    if (!pos.visible) {
+        [impl->view enterRelativeMode];
+        cursor.hidden = YES;
+        return;
+    }
+    [impl->view exitRelativeMode];
+    auto it = impl->cursor_shapes.find(pos.shape_id);
+    if (it == impl->cursor_shapes.end()) {
+        cursor.hidden = YES;
+        return;
+    }
+    const CursorShapeEntry& entry = it->second;
+
+    const CGFloat view_w = impl->view.bounds.size.width;
+    const CGFloat view_h = impl->view.bounds.size.height;
+    if (view_w <= 0 || view_h <= 0) return;
+    if (impl->host_w == 0 || impl->host_h == 0) return;
+
+    // Compute letterboxed/pillarboxed video rect (bottom-up coords).
+    const double host_ar = (double)impl->host_w / (double)impl->host_h;
+    const double view_ar = (double)view_w / (double)view_h;
+    double video_w, video_h, off_x, off_y_bu;
+    if (view_ar > host_ar) {
+        video_h   = view_h;
+        video_w   = view_h * host_ar;
+        off_x     = (view_w - video_w) * 0.5;
+        off_y_bu  = 0;
+    } else {
+        video_w   = view_w;
+        video_h   = view_w / host_ar;
+        off_x     = 0;
+        off_y_bu  = (view_h - video_h) * 0.5;
+    }
+
+    // Cursor size in view space: preserve host-relative size.
+    const double cw = (double)entry.width  * video_w / (double)impl->host_w;
+    const double ch = (double)entry.height * video_h / (double)impl->host_h;
+    // Hotspot offset in view space.
+    const double hsx = (double)entry.hotspot_x * cw / (double)entry.width;
+    const double hsy = (double)entry.hotspot_y * ch / (double)entry.height;
+    // Hotspot target position (top-down, inside video rect).
+    const double px_td = (double)pos.x_norm * video_w;
+    const double py_td = (double)pos.y_norm * video_h;
+    // Cursor layer origin in bottom-up view coords.
+    const double origin_x     = off_x + (px_td - hsx);
+    const double origin_y_bu  = off_y_bu + video_h - (py_td - hsy) - ch;
+
+    CGFloat scale = impl->view.window ? impl->view.window.backingScaleFactor : 2.0;
+    if (scale <= 0) scale = 1.0;
+    cursor.contentsScale = scale;
+
+    // Avoid implicit animation on every mouse move — cursor should track instantly.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    cursor.contents = (__bridge id)entry.image;
+    cursor.frame = CGRectMake(origin_x, origin_y_bu, cw, ch);
+    cursor.hidden = NO;
+    [CATransaction commit];
+}
+
 void MacVideoView::pump_events() {
     @autoreleasepool {
         while (true) {
@@ -500,42 +729,65 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     auto nals = split_annexb(data, len);
     if (nals.empty()) return false;
 
+    const bool is_hevc = (impl->codec == VideoCodec::HEVC);
+
     // Extract parameter sets from keyframes; build format description once we have
-    // VPS+SPS+PPS.
+    // HEVC: VPS+SPS+PPS, H.264: SPS+PPS.
     if (keyframe) {
         for (const auto& n : nals) {
-            int t = hevc_nal_type(n.data, n.size);
-            switch (t) {
-                case 32: impl->vps.assign(n.data, n.data + n.size); break; // VPS_NUT
-                case 33: impl->sps.assign(n.data, n.data + n.size); break; // SPS_NUT
-                case 34: impl->pps.assign(n.data, n.data + n.size); break; // PPS_NUT
-                default: break;
+            if (is_hevc) {
+                switch (hevc_nal_type(n.data, n.size)) {
+                    case HEVC_NAL_VPS: impl->vps.assign(n.data, n.data + n.size); break;
+                    case HEVC_NAL_SPS: impl->sps.assign(n.data, n.data + n.size); break;
+                    case HEVC_NAL_PPS: impl->pps.assign(n.data, n.data + n.size); break;
+                    default: break;
+                }
+            } else {
+                switch (h264_nal_type(n.data, n.size)) {
+                    case H264_NAL_SPS: impl->sps.assign(n.data, n.data + n.size); break;
+                    case H264_NAL_PPS: impl->pps.assign(n.data, n.data + n.size); break;
+                    default: break;
+                }
             }
         }
 
-        if (!impl->vps.empty() && !impl->sps.empty() && !impl->pps.empty() && !impl->have_params) {
+        const bool have_all = is_hevc
+            ? (!impl->vps.empty() && !impl->sps.empty() && !impl->pps.empty())
+            : (!impl->sps.empty() && !impl->pps.empty());
+
+        if (have_all && !impl->have_params) {
             if (impl->format_desc) {
                 CFRelease(impl->format_desc);
                 impl->format_desc = nullptr;
             }
-            const uint8_t* params[3]   = { impl->vps.data(), impl->sps.data(), impl->pps.data() };
-            const size_t   sizes[3]    = { impl->vps.size(), impl->sps.size(), impl->pps.size() };
-            OSStatus st = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
-                kCFAllocatorDefault,
-                3, params, sizes,
-                4, // NAL unit header length (AVCC length prefix = 4 bytes)
-                nullptr,
-                &impl->format_desc);
+            OSStatus st;
+            if (is_hevc) {
+                const uint8_t* params[3] = { impl->vps.data(), impl->sps.data(), impl->pps.data() };
+                const size_t   sizes[3]  = { impl->vps.size(), impl->sps.size(), impl->pps.size() };
+                st = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                    kCFAllocatorDefault, 3, params, sizes,
+                    4, nullptr, &impl->format_desc);
+            } else {
+                const uint8_t* params[2] = { impl->sps.data(), impl->pps.data() };
+                const size_t   sizes[2]  = { impl->sps.size(), impl->pps.size() };
+                st = CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                    kCFAllocatorDefault, 2, params, sizes,
+                    4, &impl->format_desc);
+            }
             if (st != noErr) {
-                log::error(TAG, "CMVideoFormatDescriptionCreateFromHEVCParameterSets failed: %d",
-                           (int)st);
+                log::error(TAG, "CMVideoFormatDescriptionCreateFromParameterSets failed: %d (codec=%s)",
+                           (int)st, is_hevc ? "HEVC" : "H264");
                 return false;
             }
             impl->have_params = true;
             CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(impl->format_desc);
-            impl->host_w = static_cast<uint32_t>(dims.width);
-            impl->host_h = static_cast<uint32_t>(dims.height);
-            log::info(TAG, "HEVC format description ready: %dx%d", dims.width, dims.height);
+            // Respect stream-size override from set_stream_size() if already set.
+            if (impl->host_w == 0 || impl->host_h == 0) {
+                impl->host_w = static_cast<uint32_t>(dims.width);
+                impl->host_h = static_cast<uint32_t>(dims.height);
+            }
+            log::info(TAG, "%s format description ready: %dx%d",
+                      is_hevc ? "HEVC" : "H264", dims.width, dims.height);
         }
     }
 
@@ -546,8 +798,13 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     std::vector<uint8_t> avcc;
     avcc.reserve(len);
     for (const auto& n : nals) {
-        int t = hevc_nal_type(n.data, n.size);
-        if (t == 32 || t == 33 || t == 34) continue; // skip VPS/SPS/PPS
+        if (is_hevc) {
+            int t = hevc_nal_type(n.data, n.size);
+            if (t == HEVC_NAL_VPS || t == HEVC_NAL_SPS || t == HEVC_NAL_PPS) continue;
+        } else {
+            int t = h264_nal_type(n.data, n.size);
+            if (t == H264_NAL_SPS || t == H264_NAL_PPS) continue;
+        }
         uint32_t sz = static_cast<uint32_t>(n.size);
         avcc.push_back(static_cast<uint8_t>((sz >> 24) & 0xFF));
         avcc.push_back(static_cast<uint8_t>((sz >> 16) & 0xFF));

@@ -3,13 +3,21 @@
 #include "common/codec/bitrate_controller.h"
 #include "common/protocol/cursor_message.h"
 #include "common/utils/log.h"
+#include "common/utils/thread_priority.h"
 #include "common/utils/types.h"
 #include "host/audio/audio_sender.h"
 #include "host/session/host_session.h"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace deskbeam {
 
 int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
+    // Capture → encode → fragment → send all runs single-threaded on this
+    // loop; a background compile or Windows Update scan preempting it adds
+    // straight jitter to end-to-end latency.
+    utils::boost_current_thread_priority();
     const uint32_t cap_w = platform.capture_width();
     const uint32_t cap_h = platform.capture_height();
 
@@ -26,6 +34,17 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
               bitrate_ctl.current() / 1000,
               cfg.manual_bitrate_bps ? "manual" : "auto");
 
+    // Diagnostic env-var: raise the hard warmup/recovery ceiling above
+    // 10 Mbps so a real channel-capacity test can ramp further.
+    if (const char* env = std::getenv("DESKBEAM_MAX_BPS")) {
+        uint32_t max_bps = static_cast<uint32_t>(std::atoll(env));
+        if (max_bps > 0) {
+            bitrate_ctl.set_ceiling_override(max_bps);
+            log::info("HOST", "DESKBEAM_MAX_BPS=%u -> ceiling override %u kbps",
+                      max_bps, max_bps / 1000);
+        }
+    }
+
     // Start session.
     host::HostSession session;
     session.set_screen_resolution(platform.input_width(), platform.input_height());
@@ -35,6 +54,17 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         return 1;
     }
     log::info("HOST", "Waiting for client on port %u... (Ctrl+C to stop)", cfg.port);
+
+    // Diagnostic env-var: freeze FEC M at a fixed value, disabling
+    // loss-adaptive and RTT-lock behavior. For probing the real channel
+    // capacity with known redundancy (e.g. M=10 at K=10 = 50%).
+    if (const char* env = std::getenv("DESKBEAM_FEC_M")) {
+        int m = std::atoi(env);
+        if (m > 0 && m <= 32 && session.sender()) {
+            session.sender()->set_force_m(static_cast<uint8_t>(m));
+            log::info("HOST", "DESKBEAM_FEC_M=%d -> force M (adaptive disabled)", m);
+        }
+    }
 
     // Start system audio loopback capture and pipe into the session's
     // AudioSender. Packets go out only once the sender has a registered

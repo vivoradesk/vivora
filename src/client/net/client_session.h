@@ -99,7 +99,10 @@ private:
     TimePoint last_recv_time_;
     TimePoint last_fec_report_time_;
     double rtt_ms_ = 0.0;
-    bool audio_hole_punched_ = false;
+    TimePoint last_audio_punch_{};
+    TimePoint last_audio_stat_log_{};
+    uint64_t audio_raw_packets_ = 0;
+    uint64_t audio_raw_bytes_ = 0;
 
     // Bandwidth probe measurement state.
     uint16_t  probe_id_ = 0;
@@ -136,6 +139,12 @@ private:
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
     static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;
+
+    // Scratch buffers reused across handle_packet() / poll() calls so we
+    // don't allocate a fresh std::vector<std::vector<uint8_t>> per UDP
+    // packet (tens of fragments/frame × 60fps).  Cleared on entry; the
+    // outer vector keeps its capacity between calls.
+    std::vector<std::vector<uint8_t>> fec_recovered_scratch_;
 };
 
 } // namespace deskbeam::client
