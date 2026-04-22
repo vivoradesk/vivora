@@ -155,10 +155,13 @@ WebRTC слишком тяжёлый и несёт ненужные зависи
   - Не критично к латенси
 
 ### Шифрование
-- **DTLS 1.3** для UDP каналов
-- **TLS 1.3** для TCP control channel
-- AES-256-GCM для симметричного шифрования после handshake
-- Curve25519 для key exchange
+- **Noise Protocol (pattern NK)** для всех каналов (UDP и control)
+  - Реализация через libsodium (~100KB vs OpenSSL ~1-2MB)
+  - Curve25519 для key exchange + ChaCha20-Poly1305 для symmetric encryption
+  - Single-flight handshake (1-2 пакетов) — совместим с UDP hole punching
+  - 16 байт auth tag на пакет (vs 29 байт у DTLS)
+  - Публичный ключ хоста = его ID (показывается как QR-код, TOFU при первом подключении)
+  - Эквивалентно DTLS по уровню защиты, используется в WireGuard/Tailscale
 
 ### Congestion Control
 - Кастомный алгоритм, адаптированный для видеостриминга:
@@ -291,7 +294,7 @@ Scope:
 - [ ] AMF и QSV поддержка (AMD, Intel)
 - [ ] Software encoding fallback (x264)
 - [ ] FEC для video channel
-- [ ] Шифрование (DTLS)
+- [ ] Шифрование (Noise_NK + libsodium)
 - [ ] Adaptive bitrate
 - [ ] Clipboard sync
 - [ ] Qt/QML GUI для host и client
@@ -376,7 +379,7 @@ deskbeam/
 - **NVIDIA Video Codec SDK** — NVENC encode/NVDEC decode (header-only)
 - **FFmpeg** (libavcodec, libavutil) — fallback codecs, pixel format conversion
 - **Opus** — audio codec
-- **OpenSSL 3.x** — DTLS, TLS, crypto primitives
+- **libsodium** — Noise Protocol (Curve25519, ChaCha20-Poly1305)
 
 ### Опциональные
 - **AMD AMF SDK** — AMD HW encoding
