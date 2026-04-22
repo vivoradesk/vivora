@@ -206,12 +206,27 @@ bool MacHostPlatform::get_cursor_state(CursorState& out) {
 
         out.x_norm   = (float)x_norm;
         out.y_norm   = (float)y_norm;
-        out.visible  = true;
+        // CGCursorIsVisible is imperfect (Apple flags it "with known issues"
+        // on 10.9+) but catches the primary target — fullscreen games that
+        // call CGDisplayHideCursor. Client-side 50ms debouncer absorbs brief
+        // flicker. Private CGSIsCursorVisible is a future upgrade if needed.
+        out.visible  = CGCursorIsVisible() ? true : false;
         out.shape_id = current_shape_id_;
 
-        // Also poll shape change here so callers see a fresh shape_id on the
-        // same cycle as the position.
+        // Pointer-identity fast-path: if neither the NSCursor instance nor
+        // its NSImage changed, skip the full render+hash (CGBitmapContext
+        // + drawInRect is O(w*h) and ran on every tick previously).
         NSCursor* cursor = [NSCursor currentSystemCursor];
+        std::uintptr_t cursor_id = (std::uintptr_t)(__bridge void*)cursor;
+        std::uintptr_t image_id  = cursor
+            ? (std::uintptr_t)(__bridge void*)(cursor.image)
+            : 0;
+        if (cursor_id == last_cursor_id_ && image_id == last_image_id_) {
+            return true;
+        }
+        last_cursor_id_ = cursor_id;
+        last_image_id_  = image_id;
+
         std::vector<uint8_t> bgra;
         uint16_t w = 0, h = 0, hx = 0, hy = 0;
         if (render_cursor_bgra(cursor, bgra, w, h, hx, hy)) {
