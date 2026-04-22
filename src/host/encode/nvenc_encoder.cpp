@@ -403,6 +403,115 @@ void NvencEncoder::destroy_io_buffers() {
     }
 }
 
+bool NvencEncoder::rebuild_registered_resource() {
+    auto* api = fn(fn_list_storage_);
+    if (!encoder_ || !device_) return false;
+
+    if (registered_resource_) {
+        api->nvEncUnregisterResource(encoder_,
+            reinterpret_cast<NV_ENC_REGISTERED_PTR>(registered_resource_));
+        registered_resource_ = nullptr;
+    }
+
+    // Drop and recreate the staging texture itself — not just the NVENC
+    // registration.  On hybrid laptops the D3D11 resource can lose its GPU
+    // residency when the NVidia dGPU transitions power states, and simply
+    // re-registering the same (broken) texture returns Map errors forever.
+    staging_texture_.Reset();
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width  = config_.width;
+    desc.Height = config_.height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = config_.input_format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage  = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    HRESULT hr = device_->CreateTexture2D(&desc, nullptr,
+                                          staging_texture_.GetAddressOf());
+    if (FAILED(hr)) {
+        log::error(TAG, "rebuild CreateTexture2D failed: 0x%08X", hr);
+        return false;
+    }
+
+    NV_ENC_BUFFER_FORMAT nvenc_fmt = is_hdr_
+        ? NV_ENC_BUFFER_FORMAT_ARGB10
+        : NV_ENC_BUFFER_FORMAT_ARGB;
+
+    NV_ENC_REGISTER_RESOURCE reg = {};
+    reg.version        = ver(NV_ENC_REGISTER_RESOURCE_VER);
+    reg.resourceType   = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
+    reg.width          = config_.width;
+    reg.height         = config_.height;
+    reg.resourceToRegister = staging_texture_.Get();
+    reg.bufferFormat   = nvenc_fmt;
+    reg.bufferUsage    = 0;
+
+    NVENCSTATUS st = api->nvEncRegisterResource(encoder_, &reg);
+    if (st != NV_ENC_SUCCESS) {
+        log::error(TAG, "rebuild nvEncRegisterResource failed: %d", (int)st);
+        return false;
+    }
+    registered_resource_ = reg.registeredResource;
+    // Do NOT force IDR here — dropped frames on our side create a gap the
+    // decoder will NACK on its own if the gap is large enough.  Forcing IDR
+    // on every rebuild while Map keeps failing creates bandwidth bursts that
+    // make the freeze worse (the IDR is 5-10x a P-frame, swamping the link
+    // during the same moment the encoder is already struggling).
+    return true;
+}
+
+bool NvencEncoder::restart_session() {
+    auto* api = fn(fn_list_storage_);
+
+    // Diagnostic: GetDeviceRemovedReason() returns S_OK on this hardware
+    // even when Map has been failing for 20+ seconds across multiple
+    // session restarts — the D3D device context is stuck in some state
+    // the driver doesn't flag as REMOVED but still can't service NVENC.
+    // So we unconditionally recreate own_device_ on the NVidia adapter.
+    // Cost: one extra D3D11CreateDevice (~100-200ms), worth it compared
+    // to an 8+ second visual freeze.
+    HRESULT removed = S_OK;
+    if (device_) removed = device_->GetDeviceRemovedReason();
+
+    // Tear down IO buffers, encoder handle, and (in cross-device mode)
+    // the NVidia-side D3D device itself.  Keep capture_device_ (Intel)
+    // and its context — DXGI duplication owns them and re-creating them
+    // would also require tearing down the capture path, which is a much
+    // bigger surgery than needed here.
+    destroy_io_buffers();
+    staging_texture_.Reset();
+    if (encoder_) {
+        api->nvEncDestroyEncoder(encoder_);
+        encoder_ = nullptr;
+    }
+
+    if (cross_device_ && capture_device_) {
+        d3d_context_.Reset();
+        own_context_.Reset();
+        own_device_.Reset();
+        device_ = nullptr;
+        cross_device_ = false;  // find_nvidia_device will set it back.
+        if (!find_nvidia_device(capture_device_)) {
+            log::error(TAG, "restart_session: find_nvidia_device failed");
+            return false;
+        }
+    }
+
+    // Re-open in the same order init() uses — each step reports its own
+    // error, we just propagate.
+    if (!open_session())       { log::error(TAG, "restart_session: open_session failed"); return false; }
+    if (!configure_encoder())  { log::error(TAG, "restart_session: configure_encoder failed"); return false; }
+    if (!create_io_buffers())  { log::error(TAG, "restart_session: create_io_buffers failed"); return false; }
+    // The new session has no reference frames — first output must be IDR
+    // or the decoder will choke on P-frames referencing unknown pictures.
+    idr_requested_ = true;
+    log::info(TAG, "NVENC session fully restarted (after %u consecutive Map failures, d3d_removed=0x%08X)",
+              consecutive_map_fails_, removed);
+    return true;
+}
+
 bool NvencEncoder::init(const EncoderConfig& config, ID3D11Device* device) {
     config_ = config;
 
@@ -482,8 +591,48 @@ bool NvencEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
 
     NVENCSTATUS st = api->nvEncMapInputResource(encoder_, &map);
     if (st != NV_ENC_SUCCESS) {
-        const char* e = api->nvEncGetLastErrorString ? api->nvEncGetLastErrorString(encoder_) : "";
-        log::error(TAG, "nvEncMapInputResource failed: %d: %s", (int)st, e);
+        ++consecutive_map_fails_;
+        // Lessons learned on hybrid Intel+NVidia under heavy game load:
+        //   - session restart doesn't help: fresh encoder handle + fresh
+        //     D3D device on NVidia still returns INVALID_PARAM on Map
+        //     for 20+ seconds straight;
+        //   - `GetDeviceRemovedReason` stays S_OK through the whole
+        //     outage, so it's not a device-lost path;
+        //   - Map recovers by itself once the game releases whatever GPU
+        //     resource it's holding — probably a shared scheduler state.
+        // So: try a single cheap staging-texture rebuild at n==5 (covers
+        // isolated glitches like language popups / DXGI reinit) and
+        // otherwise silently drop frames.  Repeatedly rebuilding /
+        // restarting just burns CPU and log space without helping.
+        if (consecutive_map_fails_ == 5) {
+            log::warn(TAG, "Map failing persistently (%u frames), rebuilding input",
+                      consecutive_map_fails_);
+            if (rebuild_registered_resource()) {
+                map.registeredResource =
+                    reinterpret_cast<NV_ENC_REGISTERED_PTR>(registered_resource_);
+                st = api->nvEncMapInputResource(encoder_, &map);
+                if (st == NV_ENC_SUCCESS) {
+                    log::info(TAG, "NVENC input resource rebuilt successfully");
+                    consecutive_map_fails_ = 0;
+                }
+            }
+        }
+    } else {
+        if (consecutive_map_fails_ > 0) {
+            log::info(TAG, "NVENC Map recovered after %u failed frames",
+                      consecutive_map_fails_);
+        }
+        consecutive_map_fails_ = 0;
+    }
+    if (st != NV_ENC_SUCCESS) {
+        const uint64_t now_ms = static_cast<uint64_t>(GetTickCount64());
+        if (now_ms - last_map_error_log_ms_ >= 1000) {
+            const char* e = api->nvEncGetLastErrorString
+                ? api->nvEncGetLastErrorString(encoder_) : "";
+            log::error(TAG, "nvEncMapInputResource failed: %d: %s (throttled)",
+                       (int)st, e);
+            last_map_error_log_ms_ = now_ms;
+        }
         return false;
     }
 

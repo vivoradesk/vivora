@@ -22,6 +22,7 @@ DxgiCapture::~DxgiCapture() {
 }
 
 bool DxgiCapture::init(uint32_t monitor_index) {
+    monitor_index_ = monitor_index;
     if (!init_d3d11()) return false;
     if (!init_output_duplication(monitor_index)) return false;
 
@@ -138,7 +139,13 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
 bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
     ScopedTimer timer(TAG, "capture_frame");
 
-    if (!duplication_) return false;
+    // Silently recreate the duplication if it was dropped on a previous tick
+    // (exclusive fullscreen enter/exit, UAC, secure-desktop, mode switch).
+    // init_output_duplication logs on success, so we stay quiet here on the
+    // failure path — next tick will retry.
+    if (!duplication_) {
+        if (!init_output_duplication(monitor_index_)) return false;
+    }
 
     // Release previous frame if held
     if (frame_acquired_) {
@@ -157,14 +164,17 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
     }
 
     if (hr == DXGI_ERROR_ACCESS_LOST) {
-        log::warn(TAG, "Access lost, reinitializing...");
+        log::warn(TAG, "Access lost, will reinit on next tick");
         duplication_.Reset();
-        // Caller should re-init
         return false;
     }
 
     if (FAILED(hr)) {
-        log::error(TAG, "AcquireNextFrame failed: 0x%08X", hr);
+        // Any other failure (observed: DXGI_ERROR_INVALID_CALL 0x887A0001 after
+        // language-switcher popup + game minimize) means the duplication handle
+        // is permanently broken — drop it so the next tick re-runs init.
+        log::error(TAG, "AcquireNextFrame failed: 0x%08X, will reinit on next tick", hr);
+        duplication_.Reset();
         return false;
     }
 

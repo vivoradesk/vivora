@@ -31,6 +31,19 @@ private:
     bool create_io_buffers();
     void destroy_io_buffers();
 
+    // Unregister and re-register the staging texture with NVENC.  Used to
+    // recover from nvEncMapInputResource failures after the graphics adapter
+    // changes state (e.g. DXGI duplication re-init on hybrid Intel+NVidia
+    // laptops after a game enters fullscreen / language popup appears).
+    bool rebuild_registered_resource();
+
+    // Full session teardown + recreate.  Escalation when repeated
+    // rebuild_registered_resource() calls fail to clear Map errors — on
+    // hybrid laptops the NVENC session itself can enter a bad state that
+    // only a fresh encoder handle recovers from.  Forces IDR on next frame
+    // because the reference-picture chain is gone.
+    bool restart_session();
+
     EncoderConfig config_;
     bool idr_requested_ = false;
 
@@ -61,6 +74,15 @@ private:
     void* registered_resource_ = nullptr;  // NV_ENC_REGISTERED_PTR
     void* output_bitstream_    = nullptr;  // NV_ENC_OUTPUT_PTR
     ComPtr<ID3D11Texture2D> staging_texture_;  // on NVENC device
+
+    // Throttle for Map failure log lines — on hybrid GPUs the error can fire
+    // hundreds of times per second until rebuild succeeds; we don't want to
+    // drown the log.
+    uint64_t last_map_error_log_ms_ = 0;
+    // Consecutive Map failures; isolated one-frame glitches are ignored
+    // (dropping the frame is fine), but a sustained run means the registered
+    // resource went stale — triggers rebuild_registered_resource().
+    uint32_t consecutive_map_fails_ = 0;
 
     // Output queue
     std::queue<EncodedPacket> output_packets_;

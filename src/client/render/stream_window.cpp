@@ -358,20 +358,60 @@ void StreamWindow::wheelEvent(QWheelEvent* event) {
 
 void StreamWindow::keyPressEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return; // skip auto-repeat, host handles it
+    const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+    const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
+    pressed_keys_[vk] = scan;
     protocol::InputEvent ev;
     ev.type = protocol::InputEventType::KeyDown;
-    ev.scan_code = static_cast<uint16_t>(event->nativeScanCode());
-    ev.vk_code = static_cast<uint16_t>(event->nativeVirtualKey());
+    ev.scan_code = scan;
+    ev.vk_code = vk;
     send_event(ev);
 }
 
 void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return;
+    const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+    const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
+    pressed_keys_.erase(vk);
     protocol::InputEvent ev;
     ev.type = protocol::InputEventType::KeyUp;
-    ev.scan_code = static_cast<uint16_t>(event->nativeScanCode());
-    ev.vk_code = static_cast<uint16_t>(event->nativeVirtualKey());
+    ev.scan_code = scan;
+    ev.vk_code = vk;
     send_event(ev);
+}
+
+void StreamWindow::focusOutEvent(QFocusEvent* event) {
+    // Release every key we believe is still down on the host — otherwise
+    // pressing Win (or any shortcut that steals focus) strands the modifier
+    // pressed on the host, because the matching KeyUp is delivered to
+    // whichever window took focus, not to us.
+    if (!pressed_keys_.empty()) {
+        for (const auto& [vk, scan] : pressed_keys_) {
+            protocol::InputEvent ev;
+            ev.type = protocol::InputEventType::KeyUp;
+            ev.scan_code = scan;
+            ev.vk_code = static_cast<uint16_t>(vk);
+            send_event(ev);
+        }
+        log::info("INPUT", "focus lost, released %zu stuck key(s)", pressed_keys_.size());
+        pressed_keys_.clear();
+    }
+
+    // Drop relative mode while we're backgrounded so the cursor is visible
+    // and the user can actually interact with whatever took focus.  Remember
+    // the prior state and re-enter on focusIn.
+    was_relative_on_focus_loss_ = relative_mode_;
+    if (relative_mode_) exit_relative_mode();
+
+    QWidget::focusOutEvent(event);
+}
+
+void StreamWindow::focusInEvent(QFocusEvent* event) {
+    if (was_relative_on_focus_loss_ && !host_cursor_visible_) {
+        enter_relative_mode();
+    }
+    was_relative_on_focus_loss_ = false;
+    QWidget::focusInEvent(event);
 }
 
 } // namespace deskbeam

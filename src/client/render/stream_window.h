@@ -46,6 +46,8 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
     QPaintEngine* paintEngine() const override { return nullptr; }
 
@@ -81,6 +83,18 @@ private:
     bool  relative_mode_ = false;
     bool  raw_input_registered_ = false;
     QPoint saved_global_pos_;
+
+    // Tracks keys currently considered pressed on the host side (we sent a
+    // KeyDown but no matching KeyUp yet).  On focus loss we synthesise KeyUp
+    // for every entry so a Win-key-triggered focus change can't leave a
+    // modifier stuck.  Keyed by nativeVirtualKey; value is the last scancode
+    // we reported so the KeyUp we send matches the original KeyDown.
+    std::unordered_map<uint32_t, uint16_t> pressed_keys_;
+
+    // Whether relative mode was active when we lost focus — restored on
+    // re-focus so alt-tabbing out and back doesn't strand the user with a
+    // visible cursor in a game that expects it hidden.
+    bool was_relative_on_focus_loss_ = false;
 
     // Visibility flicker debounce — some games toggle cursor visibility on
     // HUD/menu interactions.  Require stable signal for DEBOUNCE_MS before

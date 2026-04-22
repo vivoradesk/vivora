@@ -67,6 +67,7 @@ if(WIN32)
         ${CMAKE_SOURCE_DIR}/src/host/encode/nvenc_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/qsv_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/encoder_factory.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/fallback_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_windows.cpp
     )
     # Client decode/render (D3D11 — Windows-only)

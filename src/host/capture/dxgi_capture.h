@@ -60,6 +60,10 @@ private:
     Resolution resolution_;
     uint64_t frame_count_ = 0;
     bool frame_acquired_ = false;
+    // Saved so capture_frame() can silently re-run init_output_duplication()
+    // after a DXGI_ERROR_ACCESS_LOST (exclusive-fullscreen enter/exit, UAC
+    // prompt, secure-desktop switch, display-mode change, etc.).
+    uint32_t monitor_index_ = 0;
 
     // Cursor shape state. DXGI only hands us pointer pixels on change,
     // so we cache the latest shape and hand it to the sender on demand.
