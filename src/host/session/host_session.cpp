@@ -1,4 +1,5 @@
 #include "host/session/host_session.h"
+#include "common/net/stun_client.h"
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
 #include "common/utils/log.h"
@@ -56,6 +57,25 @@ bool HostSession::start(uint16_t port) {
     new_client_flag_ = false;
 
     log::info("HostSession", "Listening on port %u", port);
+
+    // STUN runs on the *same* socket so the NAT binding the STUN server
+    // observes is exactly the binding any future peer will reach. No client
+    // has connected yet — the socket is quiet. Failure is non-fatal: LAN
+    // usage doesn't need a reflexive address and a misconfigured or
+    // unreachable STUN server shouldn't block the session.
+    if (stun_server_.ip != 0 && stun_server_.port != 0) {
+        reflexive_addr_ = net::StunClient::discover(stun_server_, *socket_);
+        if (reflexive_addr_.ip != 0) {
+            log::info("HostSession",
+                "Reflexive address: %u.%u.%u.%u:%u (share this with the peer)",
+                (reflexive_addr_.ip >> 0) & 0xFF, (reflexive_addr_.ip >> 8) & 0xFF,
+                (reflexive_addr_.ip >> 16) & 0xFF, (reflexive_addr_.ip >> 24) & 0xFF,
+                reflexive_addr_.port);
+        } else {
+            log::warn("HostSession", "STUN discovery failed — reflexive address unknown");
+        }
+    }
+
     return true;
 }
 

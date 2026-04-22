@@ -1,4 +1,5 @@
 #include "app/view_loop.h"
+#include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/log.h"
@@ -17,6 +18,15 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     utils::boost_current_thread_priority();
     // Connect session.
     client::ClientSession session;
+    if (cfg.stun_server && *cfg.stun_server) {
+        net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
+        if (stun.ip == 0) {
+            log::warn("VIEW", "Could not resolve STUN server '%s' — skipping discovery",
+                      cfg.stun_server);
+        } else {
+            session.set_stun_server(stun);
+        }
+    }
     if (!session.start(cfg.host_ip, cfg.port)) {
         log::error("VIEW", "Failed to start client session");
         return 1;

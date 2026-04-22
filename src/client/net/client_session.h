@@ -27,6 +27,13 @@ public:
     bool start(const char* host_ip, uint16_t port);
     void stop();
 
+    // Optional STUN server used at start() to discover our reflexive
+    // address. ip=0 disables it. The discovered address is only logged
+    // today — it becomes the rendezvous point for p2p hole-punching once
+    // signaling is in place.
+    void set_stun_server(const net::SocketAddr& addr) { stun_server_ = addr; }
+    net::SocketAddr reflexive_addr() const { return reflexive_addr_; }
+
     // Drive the session: send hellos, receive packets, respond to pings.
     void poll();
 
@@ -94,6 +101,8 @@ private:
     SessionState state_ = SessionState::Disconnected;
     VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};
+    net::SocketAddr stun_server_{};
+    net::SocketAddr reflexive_addr_{};
     TimePoint connect_start_;
     TimePoint last_hello_time_;
     TimePoint last_recv_time_;

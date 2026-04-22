@@ -20,6 +20,16 @@ struct SocketAddr {
 // Parse "1.2.3.4" -> network byte order IP. Returns 0 on failure.
 uint32_t parse_ip(const char* str);
 
+// DNS-resolve `host` (IPv4 only) and combine with `port` into a SocketAddr.
+// Accepts a literal IP too (parse_ip fast-path). Returns SocketAddr{0,0} on
+// failure. Blocking — use at startup, not on hot paths.
+SocketAddr resolve_host(const char* host, uint16_t port);
+
+// Parse and resolve a "host:port" literal — e.g. "stun.l.google.com:19302".
+// Delegates to resolve_host for the host half. Returns {0,0} on any parse
+// failure, unknown host, or missing port. Blocking.
+SocketAddr resolve_host_port(const char* host_port);
+
 class IUdpSocket {
 public:
     virtual ~IUdpSocket() = default;

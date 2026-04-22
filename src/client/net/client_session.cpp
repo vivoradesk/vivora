@@ -1,4 +1,5 @@
 #include "client/net/client_session.h"
+#include "common/net/stun_client.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
@@ -44,6 +45,22 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
         log::warn("ClientSession", "Failed to bind audio socket — audio disabled");
         audio_socket_.reset();
         audio_local_port_ = 0;
+    }
+
+    // STUN before the first HELLO so the socket is still quiet and the NAT
+    // mapping we discover is the same one the host will see. Non-fatal:
+    // a broken STUN server shouldn't block a LAN connect.
+    if (stun_server_.ip != 0 && stun_server_.port != 0) {
+        reflexive_addr_ = net::StunClient::discover(stun_server_, *socket_);
+        if (reflexive_addr_.ip != 0) {
+            log::info("ClientSession",
+                "Reflexive address: %u.%u.%u.%u:%u (share this with the peer)",
+                (reflexive_addr_.ip >> 0) & 0xFF, (reflexive_addr_.ip >> 8) & 0xFF,
+                (reflexive_addr_.ip >> 16) & 0xFF, (reflexive_addr_.ip >> 24) & 0xFF,
+                reflexive_addr_.port);
+        } else {
+            log::warn("ClientSession", "STUN discovery failed — reflexive address unknown");
+        }
     }
 
     state_ = SessionState::Connecting;

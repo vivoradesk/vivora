@@ -3,9 +3,11 @@ add_library(deskbeam_common STATIC
     utils/metrics.cpp
     utils/thread_priority.cpp
     protocol/packet.cpp
+    net/socket.cpp
     net/frame_fragmenter.cpp
     net/frame_assembler.cpp
     net/fec_codec.cpp
+    net/stun_client.cpp
     audio/audio_codec.cpp
     audio/resampler.cpp
     audio/jitter_buffer.cpp

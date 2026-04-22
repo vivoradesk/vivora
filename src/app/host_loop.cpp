@@ -1,6 +1,7 @@
 #include "app/host_loop.h"
 #include "common/audio/audio_capture.h"
 #include "common/codec/bitrate_controller.h"
+#include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
 #include "common/utils/log.h"
 #include "common/utils/thread_priority.h"
@@ -49,6 +50,15 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     host::HostSession session;
     session.set_screen_resolution(platform.input_width(), platform.input_height());
     session.set_codec(platform.actual_codec());
+    if (cfg.stun_server && *cfg.stun_server) {
+        net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
+        if (stun.ip == 0) {
+            log::warn("HOST", "Could not resolve STUN server '%s' — skipping discovery",
+                      cfg.stun_server);
+        } else {
+            session.set_stun_server(stun);
+        }
+    }
     if (!session.start(cfg.port)) {
         log::error("HOST", "Failed to start session on port %u", cfg.port);
         return 1;

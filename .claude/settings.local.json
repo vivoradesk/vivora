@@ -182,7 +182,10 @@
       "Bash(powershell.exe *)",
       "Bash(./deskbeam.exe --help)",
       "Bash(grep -i \"\\\\\\\\.cpp\\\\|\\\\\\\\.h\")",
-      "Bash(ctest --test-dir build -C Release --output-on-failure)"
+      "Bash(ctest --test-dir build -C Release --output-on-failure)",
+      "Bash(./build/bin/Release/stun_test.exe *)",
+      "Bash(ctest --test-dir build -C Release --output-on-failure -R \"stun_test|fragment_test|fec_test|audio_test|capture_test\")",
+      "Bash(./build/bin/Release/fec_test.exe)"
     ]
   }
 }

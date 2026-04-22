@@ -45,6 +45,9 @@ static void print_usage(const char* prog) {
     std::printf("  --bitrate Mbps    Manual encoder bitrate; default is auto from resolution\n");
     std::printf("  --encoder NAME    Force encoder backend: auto|amf|nvenc|qsv (default auto)\n");
     std::printf("  --codec NAME      Video codec: h264|hevc (default hevc)\n");
+    std::printf("  --stun-server HP  STUN \"host:port\" for reflexive-address discovery\n");
+    std::printf("                    (default stun.l.google.com:19302 — use --no-stun to disable)\n");
+    std::printf("  --no-stun         Disable STUN discovery (LAN-only)\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -62,6 +65,10 @@ int main(int argc, char* argv[]) {
     uint32_t manual_bitrate_bps = 0;
     deskbeam::EncoderKind encoder_kind = deskbeam::EncoderKind::Auto;
     deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
+    // Google's public STUN server is the unofficial WebRTC default and is
+    // reliable enough to use out-of-the-box.  Users can override for privacy
+    // or run their own (coturn) in production.
+    const char* stun_server = "stun.l.google.com:19302";
 
     for (int i = 1; i < argc; ++i) {
         const char* v = nullptr;
@@ -98,6 +105,10 @@ int main(int argc, char* argv[]) {
             }
         } else if ((v = flag_value("--port", argv, argc, i)) != nullptr) {
             port = static_cast<uint16_t>(std::atoi(v));
+        } else if ((v = flag_value("--stun-server", argv, argc, i)) != nullptr) {
+            stun_server = v;
+        } else if (std::strcmp(argv[i], "--no-stun") == 0) {
+            stun_server = nullptr;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -128,6 +139,7 @@ int main(int argc, char* argv[]) {
         lcfg.manual_bitrate_bps = manual_bitrate_bps;
         lcfg.encoder_kind = encoder_kind;
         lcfg.codec = codec;
+        lcfg.stun_server = stun_server;
         return deskbeam::run_host_loop(platform, lcfg);
     }
 
@@ -152,6 +164,7 @@ int main(int argc, char* argv[]) {
         deskbeam::ViewLoopConfig vcfg;
         vcfg.host_ip = host_ip;
         vcfg.port = port;
+        vcfg.stun_server = stun_server;
         return deskbeam::run_view_loop(platform, vcfg);
     }
 

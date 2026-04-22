@@ -33,6 +33,36 @@ uint32_t parse_ip(const char* str) {
     return 0;
 }
 
+SocketAddr resolve_host(const char* host, uint16_t port) {
+    SocketAddr out;
+    if (!host || !*host) return out;
+    uint32_t lit = parse_ip(host);
+    if (lit != 0) {
+        out.ip   = lit;
+        out.port = port;
+        return out;
+    }
+    addrinfo hints = {};
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    addrinfo* res = nullptr;
+    int rc = getaddrinfo(host, nullptr, &hints, &res);
+    if (rc != 0 || !res) {
+        log::warn(TAG, "getaddrinfo(%s) failed: %d", host, rc);
+        return out;
+    }
+    for (addrinfo* it = res; it; it = it->ai_next) {
+        if (it->ai_family == AF_INET && it->ai_addr && it->ai_addrlen >= sizeof(sockaddr_in)) {
+            auto* sa = reinterpret_cast<sockaddr_in*>(it->ai_addr);
+            out.ip   = sa->sin_addr.s_addr;
+            out.port = port;
+            break;
+        }
+    }
+    freeaddrinfo(res);
+    return out;
+}
+
 // --- WinsockUdpSocket ---
 
 WinsockUdpSocket::WinsockUdpSocket() {

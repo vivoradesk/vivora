@@ -46,6 +46,13 @@ public:
     bool start(uint16_t port = DEFAULT_PORT);
     void stop();
 
+    // Optional STUN server used at start() to discover our reflexive
+    // (public) address. ip=0 disables it. The discovered address is only
+    // logged today — it becomes the rendezvous point for p2p hole-punching
+    // once signaling is in place.
+    void set_stun_server(const net::SocketAddr& addr) { stun_server_ = addr; }
+    net::SocketAddr reflexive_addr() const { return reflexive_addr_; }
+
     // Advertise which codec the host is encoding in.  Sent to the client
     // in HELLO_ACK so it can initialise the matching decoder.
     void set_codec(VideoCodec codec) { codec_ = codec; }
@@ -128,6 +135,11 @@ private:
 
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;
+
+    // STUN discovery: target server (zeroed = disabled) and the result
+    // captured at start() for external signaling to pick up.
+    net::SocketAddr stun_server_{};
+    net::SocketAddr reflexive_addr_{};
 
     // Bandwidth probe constants.
     static constexpr uint16_t BW_PROBE_COUNT = 1000;

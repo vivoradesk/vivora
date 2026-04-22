@@ -11,6 +11,9 @@ struct HostLoopConfig {
     uint32_t manual_bitrate_bps = 0;   // 0 = auto from resolution
     EncoderKind encoder_kind = EncoderKind::Auto;
     VideoCodec  codec = VideoCodec::HEVC;
+    // STUN server "host:port" for reflexive-address discovery.  Empty string
+    // disables STUN (LAN-only). Hostnames are resolved via getaddrinfo.
+    const char* stun_server = nullptr;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.
