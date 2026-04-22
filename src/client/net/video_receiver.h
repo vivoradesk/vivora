@@ -17,7 +17,8 @@ public:
     explicit VideoReceiver(net::IUdpSocket& socket) : socket_(socket) {}
 
     // Poll socket and feed any received packets to the assembler.
-    // Returns number of packets received this call.
+    // Returns number of packets received this call.  Used by
+    // transport_test; production uses ClientSession::handle_packet directly.
     int poll();
 
     // Feed raw wire bytes through FEC decoder (may recover lost packets).
@@ -63,6 +64,7 @@ private:
     net::IUdpSocket& socket_;
     net::FecDecoder fec_decoder_;
     net::FrameAssembler assembler_;
+    std::vector<std::vector<uint8_t>> recovered_scratch_;  // reused across poll() calls
     uint64_t packets_received_ = 0;
     uint64_t bytes_received_ = 0;
 

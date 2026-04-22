@@ -18,12 +18,14 @@ int VideoReceiver::poll() {
         if (static_cast<size_t>(n) < protocol::PacketHeader::WIRE_SIZE)
             continue; // runt packet
 
-        // Feed raw wire bytes to FEC decoder. It may recover lost packets.
-        std::vector<std::vector<uint8_t>> recovered;
-        fec_decoder_.feed(buf, static_cast<size_t>(n), recovered);
+        // Reusable scratch — avoids a per-packet allocation on the UDP
+        // receive hot path (poll() is called from transport_test; the
+        // production path uses ClientSession::handle_packet which has
+        // its own scratch buffer).
+        recovered_scratch_.clear();
+        fec_decoder_.feed(buf, static_cast<size_t>(n), recovered_scratch_);
 
-        // Feed recovered packets to assembler
-        for (const auto& rec_wire : recovered) {
+        for (const auto& rec_wire : recovered_scratch_) {
             if (rec_wire.size() >= protocol::PacketHeader::WIRE_SIZE) {
                 auto rec_pkt = protocol::Packet::deserialize(
                     rec_wire.data(), rec_wire.size());
