@@ -39,13 +39,7 @@ WasapiLoopbackCapture::WasapiLoopbackCapture() = default;
 
 WasapiLoopbackCapture::~WasapiLoopbackCapture() { stop(); }
 
-bool WasapiLoopbackCapture::start(AudioCaptureCallback cb) {
-    if (running_.load()) return true;
-    cb_ = std::move(cb);
-
-    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    // S_FALSE means already initialised on this thread — still OK.
-
+bool WasapiLoopbackCapture::open_endpoint() {
     IMMDeviceEnumerator* enumerator = nullptr;
     CHK(CoCreateInstance(kClsidMMDeviceEnumerator, nullptr, CLSCTX_ALL,
                          kIidIMMDeviceEnumerator,
@@ -76,7 +70,7 @@ bool WasapiLoopbackCapture::start(AudioCaptureCallback cb) {
         is_float_ = (fmt_tag == WAVE_FORMAT_IEEE_FLOAT);
     }
 
-    const REFERENCE_TIME buffer_duration = 200000; // 20 ms hAdmin low-latency buffer
+    const REFERENCE_TIME buffer_duration = 200000; // 20 ms low-latency buffer
 
     DWORD flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
                   AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
@@ -85,11 +79,6 @@ bool WasapiLoopbackCapture::start(AudioCaptureCallback cb) {
     CoTaskMemFree(mix);
     CHK(hr, "IAudioClient::Initialize");
 
-    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!event_) {
-        log::error("WASAPICap", "CreateEvent failed");
-        return false;
-    }
     CHK(client_->SetEventHandle(static_cast<HANDLE>(event_)),
         "SetEventHandle");
 
@@ -99,13 +88,41 @@ bool WasapiLoopbackCapture::start(AudioCaptureCallback cb) {
 
     CHK(client_->Start(), "IAudioClient::Start");
 
-    log::info("WASAPICap", "loopback started: %u Hz, %u ch, %u bps, %s",
+    log::info("WASAPICap", "loopback endpoint opened: %u Hz, %u ch, %u bps, %s",
               sample_rate_, channels_, bits_per_sample_,
               is_float_ ? "float" : "int");
+    return true;
+}
+
+void WasapiLoopbackCapture::close_endpoint() {
+    if (client_)  { client_->Stop(); client_->Release();  client_  = nullptr; }
+    if (capture_) { capture_->Release();                  capture_ = nullptr; }
+    if (device_)  { device_->Release();                   device_  = nullptr; }
+}
+
+bool WasapiLoopbackCapture::start(AudioCaptureCallback cb) {
+    if (running_.load()) return true;
+    cb_ = std::move(cb);
+
+    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // S_FALSE means already initialised on this thread — still OK.
+    (void)co;
+
+    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!event_) {
+        log::error("WASAPICap", "CreateEvent failed");
+        return false;
+    }
+
+    if (!open_endpoint()) {
+        close_endpoint();
+        CloseHandle(static_cast<HANDLE>(event_));
+        event_ = nullptr;
+        return false;
+    }
 
     running_.store(true);
     worker_ = std::thread(&WasapiLoopbackCapture::thread_proc, this);
-    (void)co;
     return true;
 }
 
@@ -115,9 +132,7 @@ void WasapiLoopbackCapture::stop() {
     if (event_) SetEvent(static_cast<HANDLE>(event_));
     if (worker_.joinable()) worker_.join();
 
-    if (client_)  { client_->Stop(); client_->Release();  client_  = nullptr; }
-    if (capture_) { capture_->Release();                  capture_ = nullptr; }
-    if (device_)  { device_->Release();                   device_  = nullptr; }
+    close_endpoint();
     if (event_)   { CloseHandle(static_cast<HANDLE>(event_)); event_ = nullptr; }
 }
 
@@ -151,6 +166,15 @@ void WasapiLoopbackCapture::thread_proc() {
 
         UINT32 packet_frames = 0;
         HRESULT hr_next = capture_->GetNextPacketSize(&packet_frames);
+        if (hr_next == AUDCLNT_E_DEVICE_INVALIDATED) {
+            log::warn("WASAPICap", "default render endpoint invalidated — reopening");
+            close_endpoint();
+            if (!open_endpoint()) {
+                log::error("WASAPICap", "reopen after invalidation failed — stopping capture");
+                break;
+            }
+            continue;
+        }
         if (FAILED(hr_next)) {
             log::error("WASAPICap", "GetNextPacketSize failed: 0x%08lx — stopping capture",
                        static_cast<long>(hr_next));
@@ -161,6 +185,15 @@ void WasapiLoopbackCapture::thread_proc() {
             UINT32 frames = 0;
             DWORD flags = 0;
             HRESULT hr = capture_->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+                log::warn("WASAPICap", "GetBuffer reports device invalidated — reopening");
+                close_endpoint();
+                if (!open_endpoint()) {
+                    log::error("WASAPICap", "reopen after invalidation failed — stopping capture");
+                    goto done;
+                }
+                break; // exit inner loop, continue outer event wait
+            }
             if (FAILED(hr)) {
                 log::error("WASAPICap", "GetBuffer failed: 0x%08lx — stopping capture",
                            static_cast<long>(hr));
@@ -193,6 +226,15 @@ void WasapiLoopbackCapture::thread_proc() {
             capture_->ReleaseBuffer(frames);
 
             hr_next = capture_->GetNextPacketSize(&packet_frames);
+            if (hr_next == AUDCLNT_E_DEVICE_INVALIDATED) {
+                log::warn("WASAPICap", "GetNextPacketSize reports device invalidated — reopening");
+                close_endpoint();
+                if (!open_endpoint()) {
+                    log::error("WASAPICap", "reopen after invalidation failed — stopping capture");
+                    goto done;
+                }
+                break;
+            }
             if (FAILED(hr_next)) {
                 log::error("WASAPICap", "GetNextPacketSize failed: 0x%08lx — stopping capture",
                            static_cast<long>(hr_next));

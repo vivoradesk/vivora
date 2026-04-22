@@ -25,6 +25,16 @@ public:
 
     virtual uint32_t sample_rate() const = 0;
     virtual uint16_t channels()    const = 0;
+
+    // Returns true if the underlying device endpoint was re-opened with a new
+    // format since the last call (e.g. user switched the default audio device
+    // or the current device was unplugged). On true, new_rate/new_channels hold
+    // the post-reopen values and the internal flag is cleared. Default
+    // implementation returns false (no device-change detection).
+    virtual bool poll_device_change(uint32_t& /*new_rate*/,
+                                    uint16_t& /*new_channels*/) {
+        return false;
+    }
 };
 
 std::unique_ptr<AudioOutput> create_default_audio_output();

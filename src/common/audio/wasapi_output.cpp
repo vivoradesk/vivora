@@ -37,11 +37,7 @@ static const IID kIidIAudioRenderClient =
 WasapiOutput::WasapiOutput() = default;
 WasapiOutput::~WasapiOutput() { stop(); }
 
-bool WasapiOutput::start(uint32_t /*requested_rate*/, uint16_t /*requested_ch*/) {
-    if (running_.load()) return true;
-
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-
+bool WasapiOutput::open_endpoint() {
     IMMDeviceEnumerator* enumerator = nullptr;
     CHK(CoCreateInstance(kClsidMMDeviceEnumerator, nullptr, CLSCTX_ALL,
                          kIidIMMDeviceEnumerator,
@@ -59,9 +55,8 @@ bool WasapiOutput::start(uint32_t /*requested_rate*/, uint16_t /*requested_ch*/)
     WAVEFORMATEX* mix = nullptr;
     CHK(client_->GetMixFormat(&mix), "GetMixFormat");
 
-    // We accept the device's native mix format (typically float32).
-    sample_rate_ = mix->nSamplesPerSec;
-    channels_    = mix->nChannels;
+    uint32_t new_rate  = mix->nSamplesPerSec;
+    uint16_t new_chans = mix->nChannels;
 
     const REFERENCE_TIME buffer_duration = 300000; // 30 ms
     HRESULT hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
@@ -74,26 +69,52 @@ bool WasapiOutput::start(uint32_t /*requested_rate*/, uint16_t /*requested_ch*/)
     CHK(client_->GetBufferSize(&ep_frames), "GetBufferSize");
     endpoint_frames_ = ep_frames;
 
-    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!event_) {
-        log::error("WASAPIOut", "CreateEvent failed");
-        return false;
-    }
     CHK(client_->SetEventHandle(static_cast<HANDLE>(event_)), "SetEventHandle");
 
     CHK(client_->GetService(kIidIAudioRenderClient,
                             reinterpret_cast<void**>(&render_)),
         "GetService(IAudioRenderClient)");
 
-    // Ring buffer sized for ~80ms of audio at device rate.
-    ring_size_frames_ = sample_rate_ * 80 / 1000;
-    ring_.assign(ring_size_frames_ * channels_, 0.0f);
-    ring_read_  = 0;
-    ring_write_ = 0;
+    {
+        std::lock_guard<std::mutex> lk(ring_mu_);
+        sample_rate_ = new_rate;
+        channels_    = new_chans;
+        // Ring buffer sized for ~80ms of audio at device rate.
+        ring_size_frames_ = sample_rate_ * 80 / 1000;
+        ring_.assign(ring_size_frames_ * channels_, 0.0f);
+        ring_read_  = 0;
+        ring_write_ = 0;
+    }
 
     CHK(client_->Start(), "IAudioClient::Start");
-    log::info("WASAPIOut", "output started: %u Hz, %u ch, endpoint=%u frames",
+    log::info("WASAPIOut", "endpoint opened: %u Hz, %u ch, endpoint=%u frames",
               sample_rate_, channels_, endpoint_frames_);
+    return true;
+}
+
+void WasapiOutput::close_endpoint() {
+    if (client_) { client_->Stop(); client_->Release(); client_ = nullptr; }
+    if (render_) { render_->Release();                  render_ = nullptr; }
+    if (device_) { device_->Release();                  device_ = nullptr; }
+}
+
+bool WasapiOutput::start(uint32_t /*requested_rate*/, uint16_t /*requested_ch*/) {
+    if (running_.load()) return true;
+
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!event_) {
+        log::error("WASAPIOut", "CreateEvent failed");
+        return false;
+    }
+
+    if (!open_endpoint()) {
+        close_endpoint();
+        CloseHandle(static_cast<HANDLE>(event_));
+        event_ = nullptr;
+        return false;
+    }
 
     running_.store(true);
     worker_ = std::thread(&WasapiOutput::thread_proc, this);
@@ -106,10 +127,17 @@ void WasapiOutput::stop() {
     if (event_) SetEvent(static_cast<HANDLE>(event_));
     if (worker_.joinable()) worker_.join();
 
-    if (client_) { client_->Stop(); client_->Release(); client_ = nullptr; }
-    if (render_) { render_->Release();                  render_ = nullptr; }
-    if (device_) { device_->Release();                  device_ = nullptr; }
+    close_endpoint();
     if (event_)  { CloseHandle(static_cast<HANDLE>(event_)); event_ = nullptr; }
+}
+
+bool WasapiOutput::poll_device_change(uint32_t& new_rate, uint16_t& new_channels) {
+    std::lock_guard<std::mutex> lk(ring_mu_);
+    if (!device_changed_) return false;
+    device_changed_ = false;
+    new_rate     = sample_rate_;
+    new_channels = channels_;
+    return true;
 }
 
 uint32_t WasapiOutput::write(const float* samples, uint32_t frames) {
@@ -139,18 +167,48 @@ void WasapiOutput::thread_proc() {
     DWORD task_index = 0;
     HANDLE mm = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_index);
 
+    auto try_reopen = [this]() -> bool {
+        uint32_t old_rate = sample_rate_;
+        uint16_t old_ch   = channels_;
+        close_endpoint();
+        if (!open_endpoint()) return false;
+        if (sample_rate_ != old_rate || channels_ != old_ch) {
+            std::lock_guard<std::mutex> lk(ring_mu_);
+            device_changed_ = true;
+        }
+        return true;
+    };
+
     while (running_.load()) {
         DWORD wr = WaitForSingleObject(static_cast<HANDLE>(event_), 200);
         if (!running_.load()) break;
         if (wr != WAIT_OBJECT_0) continue;
 
         UINT32 padding = 0;
-        if (FAILED(client_->GetCurrentPadding(&padding))) continue;
+        HRESULT hr_pad = client_->GetCurrentPadding(&padding);
+        if (hr_pad == AUDCLNT_E_DEVICE_INVALIDATED) {
+            log::warn("WASAPIOut", "default render endpoint invalidated — reopening");
+            if (!try_reopen()) {
+                log::error("WASAPIOut", "reopen after invalidation failed — stopping output");
+                break;
+            }
+            continue;
+        }
+        if (FAILED(hr_pad)) continue;
         UINT32 avail = endpoint_frames_ - padding;
         if (avail == 0) continue;
 
         BYTE* out_bytes = nullptr;
-        if (FAILED(render_->GetBuffer(avail, &out_bytes))) continue;
+        HRESULT hr_buf = render_->GetBuffer(avail, &out_bytes);
+        if (hr_buf == AUDCLNT_E_DEVICE_INVALIDATED) {
+            log::warn("WASAPIOut", "GetBuffer reports device invalidated — reopening");
+            if (!try_reopen()) {
+                log::error("WASAPIOut", "reopen after invalidation failed — stopping output");
+                break;
+            }
+            continue;
+        }
+        if (FAILED(hr_buf)) continue;
 
         float* out = reinterpret_cast<float*>(out_bytes);
         uint32_t written = 0;

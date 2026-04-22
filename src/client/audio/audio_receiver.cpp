@@ -115,6 +115,21 @@ void AudioReceiver::thread_proc() {
         std::this_thread::sleep_until(next);
         next += tick;
 
+        uint32_t new_rate = 0;
+        uint16_t new_ch   = 0;
+        if (output_ && output_->poll_device_change(new_rate, new_ch)) {
+            log::info("AudioRecv",
+                      "output device changed: %u Hz / %u ch -> %u Hz / %u ch",
+                      device_rate_, device_channels_, new_rate, new_ch);
+            device_rate_     = new_rate;
+            device_channels_ = new_ch;
+            if (!resampler_.init(TRANSPORT_CHANNELS,
+                                 TRANSPORT_SAMPLE_RATE,
+                                 static_cast<int>(device_rate_))) {
+                log::error("AudioRecv", "resampler re-init after device change failed");
+            }
+        }
+
         uint16_t seq = 0;
         JitterBuffer::Status st = jitter_.pop(opus_payload, seq, &fec_source);
         int decoded = 0;

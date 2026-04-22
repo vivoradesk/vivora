@@ -30,8 +30,12 @@ public:
     uint32_t sample_rate() const override { return sample_rate_; }
     uint16_t channels()    const override { return channels_;    }
 
+    bool poll_device_change(uint32_t& new_rate, uint16_t& new_channels) override;
+
 private:
     void thread_proc();
+    bool open_endpoint();   // opens device/client/render; binds event_; sizes ring under ring_mu_
+    void close_endpoint();  // releases client/render/device; keeps event_
 
     std::atomic<bool> running_{false};
     std::thread worker_;
@@ -50,6 +54,7 @@ private:
     size_t ring_read_  = 0;
     size_t ring_write_ = 0;
     size_t ring_size_frames_ = 0;
+    bool   device_changed_ = false; // guarded by ring_mu_
 };
 
 } // namespace deskbeam::audio

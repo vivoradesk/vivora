@@ -181,7 +181,8 @@
       "Bash(out/fec_test.exe *)",
       "Bash(powershell.exe *)",
       "Bash(./deskbeam.exe --help)",
-      "Bash(grep -i \"\\\\\\\\.cpp\\\\|\\\\\\\\.h\")"
+      "Bash(grep -i \"\\\\\\\\.cpp\\\\|\\\\\\\\.h\")",
+      "Bash(ctest --test-dir build -C Release --output-on-failure)"
     ]
   }
 }

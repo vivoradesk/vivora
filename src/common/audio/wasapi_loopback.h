@@ -26,6 +26,8 @@ public:
 
 private:
     void thread_proc();
+    bool open_endpoint();   // opens device/client/capture, binds event_
+    void close_endpoint();  // releases client/capture/device; keeps event_
 
     AudioCaptureCallback cb_;
     std::atomic<bool> running_{false};

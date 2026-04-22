@@ -5,11 +5,18 @@
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AudioUnit/AudioUnit.h>
+#import <CoreAudio/AudioHardware.h>
 
 #include <atomic>
 #include <cstring>
 #include <mutex>
 #include <vector>
+
+// macOS 12 renamed kAudioObjectPropertyElementMaster -> ...ElementMain. Both
+// resolve to value 0; this ifndef keeps the file buildable on older SDKs.
+#ifndef kAudioObjectPropertyElementMain
+#define kAudioObjectPropertyElementMain kAudioObjectPropertyElementMaster
+#endif
 
 namespace deskbeam::audio {
 
@@ -82,75 +89,18 @@ public:
         // ~40 ms buffer: rate * ch * 0.04.
         ring_.reset((size_t)sample_rate * channels * 40 / 1000);
 
-        AudioComponentDescription desc = {};
-        desc.componentType = kAudioUnitType_Output;
-        desc.componentSubType = kAudioUnitSubType_DefaultOutput;
-        desc.componentManufacturer = kAudioUnitManufacturer_Apple;
-        AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
-        if (!comp) {
-            log::error(TAG, "Default output AudioComponent not found");
-            return false;
-        }
-        OSStatus st = AudioComponentInstanceNew(comp, &unit_);
-        if (st != noErr) {
-            log::error(TAG, "AudioComponentInstanceNew failed: %d", (int)st);
-            return false;
-        }
+        if (!build_unit()) return false;
 
-        AudioStreamBasicDescription asbd = {};
-        asbd.mSampleRate       = sample_rate;
-        asbd.mFormatID         = kAudioFormatLinearPCM;
-        asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-        asbd.mFramesPerPacket  = 1;
-        asbd.mChannelsPerFrame = channels;
-        asbd.mBitsPerChannel   = 32;
-        asbd.mBytesPerFrame    = sizeof(float) * channels;
-        asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
-
-        st = AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat,
-                                  kAudioUnitScope_Input, 0, &asbd, sizeof(asbd));
-        if (st != noErr) {
-            log::error(TAG, "SetProperty StreamFormat failed: %d", (int)st);
-            teardown();
-            return false;
-        }
-
-        AURenderCallbackStruct cb = {};
-        cb.inputProc = &MacAudioOutput::render_cb;
-        cb.inputProcRefCon = this;
-        st = AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback,
-                                  kAudioUnitScope_Input, 0, &cb, sizeof(cb));
-        if (st != noErr) {
-            log::error(TAG, "SetProperty RenderCallback failed: %d", (int)st);
-            teardown();
-            return false;
-        }
-
-        st = AudioUnitInitialize(unit_);
-        if (st != noErr) {
-            log::error(TAG, "AudioUnitInitialize failed: %d", (int)st);
-            teardown();
-            return false;
-        }
-        st = AudioOutputUnitStart(unit_);
-        if (st != noErr) {
-            log::error(TAG, "AudioOutputUnitStart failed: %d", (int)st);
-            teardown();
-            return false;
-        }
-
+        install_default_device_listener();
         started_ = true;
         log::info(TAG, "Audio output started: %u Hz, %u ch", sample_rate, channels);
         return true;
     }
 
     void stop() override {
-        if (!started_) { teardown(); return; }
-        if (unit_) {
-            AudioOutputUnitStop(unit_);
-            AudioUnitUninitialize(unit_);
-        }
-        teardown();
+        remove_default_device_listener();
+        if (!started_) { teardown_unit(); return; }
+        stop_and_dispose_unit();
         started_ = false;
     }
 
@@ -162,6 +112,25 @@ public:
 
     uint32_t sample_rate() const override { return sample_rate_; }
     uint16_t channels()    const override { return channels_; }
+
+    // Rebinds the AudioUnit to the newly-selected default output device.
+    // Rate/channels don't change from the receiver's POV (CoreAudio resamples
+    // internally to whatever the new device needs), but we still return true
+    // so the caller can log/see the transition.
+    bool poll_device_change(uint32_t& new_rate, uint16_t& new_channels) override {
+        if (!device_pending_.exchange(false)) return false;
+        if (!started_) return false;
+        log::info(TAG, "default output device changed — rebinding AudioUnit");
+        stop_and_dispose_unit();
+        if (!build_unit()) {
+            log::error(TAG, "rebuild after default-device change failed");
+            started_ = false;
+            return false;
+        }
+        new_rate     = sample_rate_;
+        new_channels = channels_;
+        return true;
+    }
 
 private:
     static OSStatus render_cb(void* refcon,
@@ -179,11 +148,121 @@ private:
         return noErr;
     }
 
-    void teardown() {
+    bool build_unit() {
+        AudioComponentDescription desc = {};
+        desc.componentType = kAudioUnitType_Output;
+        desc.componentSubType = kAudioUnitSubType_DefaultOutput;
+        desc.componentManufacturer = kAudioUnitManufacturer_Apple;
+        AudioComponent comp = AudioComponentFindNext(nullptr, &desc);
+        if (!comp) {
+            log::error(TAG, "Default output AudioComponent not found");
+            return false;
+        }
+        OSStatus st = AudioComponentInstanceNew(comp, &unit_);
+        if (st != noErr) {
+            log::error(TAG, "AudioComponentInstanceNew failed: %d", (int)st);
+            return false;
+        }
+
+        AudioStreamBasicDescription asbd = {};
+        asbd.mSampleRate       = sample_rate_;
+        asbd.mFormatID         = kAudioFormatLinearPCM;
+        asbd.mFormatFlags      = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+        asbd.mFramesPerPacket  = 1;
+        asbd.mChannelsPerFrame = channels_;
+        asbd.mBitsPerChannel   = 32;
+        asbd.mBytesPerFrame    = sizeof(float) * channels_;
+        asbd.mBytesPerPacket   = asbd.mBytesPerFrame;
+
+        st = AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat,
+                                  kAudioUnitScope_Input, 0, &asbd, sizeof(asbd));
+        if (st != noErr) {
+            log::error(TAG, "SetProperty StreamFormat failed: %d", (int)st);
+            teardown_unit();
+            return false;
+        }
+
+        AURenderCallbackStruct cb = {};
+        cb.inputProc = &MacAudioOutput::render_cb;
+        cb.inputProcRefCon = this;
+        st = AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback,
+                                  kAudioUnitScope_Input, 0, &cb, sizeof(cb));
+        if (st != noErr) {
+            log::error(TAG, "SetProperty RenderCallback failed: %d", (int)st);
+            teardown_unit();
+            return false;
+        }
+
+        st = AudioUnitInitialize(unit_);
+        if (st != noErr) {
+            log::error(TAG, "AudioUnitInitialize failed: %d", (int)st);
+            teardown_unit();
+            return false;
+        }
+        st = AudioOutputUnitStart(unit_);
+        if (st != noErr) {
+            log::error(TAG, "AudioOutputUnitStart failed: %d", (int)st);
+            teardown_unit();
+            return false;
+        }
+        return true;
+    }
+
+    void stop_and_dispose_unit() {
+        if (unit_) {
+            AudioOutputUnitStop(unit_);
+            AudioUnitUninitialize(unit_);
+        }
+        teardown_unit();
+    }
+
+    void teardown_unit() {
         if (unit_) {
             AudioComponentInstanceDispose(unit_);
             unit_ = nullptr;
         }
+    }
+
+    static OSStatus default_device_listener_cb(AudioObjectID /*objectID*/,
+                                               UInt32 /*numAddresses*/,
+                                               const AudioObjectPropertyAddress* /*addresses*/,
+                                               void* clientData) {
+        // Runs on a CoreAudio internal queue. Just flip the pending flag —
+        // the AudioReceiver thread picks it up via poll_device_change().
+        auto* self = static_cast<MacAudioOutput*>(clientData);
+        self->device_pending_.store(true);
+        return noErr;
+    }
+
+    void install_default_device_listener() {
+        AudioObjectPropertyAddress addr = {
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        OSStatus st = AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject, &addr,
+            &MacAudioOutput::default_device_listener_cb, this);
+        if (st != noErr) {
+            log::warn(TAG, "AudioObjectAddPropertyListener failed: %d (device-change "
+                           "handling disabled)", (int)st);
+            listener_installed_ = false;
+            return;
+        }
+        listener_installed_ = true;
+    }
+
+    void remove_default_device_listener() {
+        if (!listener_installed_) return;
+        AudioObjectPropertyAddress addr = {
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        AudioObjectRemovePropertyListener(
+            kAudioObjectSystemObject, &addr,
+            &MacAudioOutput::default_device_listener_cb, this);
+        listener_installed_ = false;
     }
 
     AudioUnit unit_ = nullptr;
@@ -191,6 +270,8 @@ private:
     uint32_t sample_rate_ = 0;
     uint16_t channels_ = 0;
     bool started_ = false;
+    bool listener_installed_ = false;
+    std::atomic<bool> device_pending_{false};
 };
 
 std::unique_ptr<AudioOutput> create_default_audio_output() {
