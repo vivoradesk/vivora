@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
@@ -12,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <functional>
+#include <string>
 
 namespace deskbeam::host {
 
@@ -35,6 +37,19 @@ struct ClientInfo {
     uint32_t  probe_bw_bps   = 0;
     bool      probe_pending  = false;
     TimePoint probe_sent_time;
+
+    // Noise_NK handshake state.  `handshake` is created on msg1 arrival and
+    // destroyed once finalize() has populated `send_cs` / `recv_cs`.
+    // `handshake_complete` gates any transport-level decrypt/encrypt.
+    // `audio_send_cs` / `audio_recv_cs` are derived in the same finalize()
+    // call from two extra HKDF outputs — used exclusively on the audio
+    // socket so the nonce counters stay independent from video.
+    std::unique_ptr<crypto::HandshakeStateNK> handshake;
+    crypto::CipherState send_cs;
+    crypto::CipherState recv_cs;
+    crypto::CipherState audio_send_cs;
+    crypto::CipherState audio_recv_cs;
+    bool handshake_complete = false;
 };
 
 class HostSession {
@@ -45,6 +60,16 @@ public:
 
     bool start(uint16_t port = DEFAULT_PORT);
     void stop();
+
+    // Override the host-identity file location. Empty string (default) picks
+    // the platform-native path from default_host_key_path().  Must be called
+    // before start() — we load the key once at startup.
+    void set_host_identity_path(const std::string& path) { host_identity_path_ = path; }
+
+    // Host's long-term Curve25519 public key, as a 64-char lowercase hex
+    // string.  Use this to print on startup / show in a QR so the client can
+    // pin it via --host-key HEX.  Valid after start() succeeds.
+    std::string host_public_key_hex() const;
 
     // Optional STUN server used at start() to discover our reflexive
     // (public) address. ip=0 disables it. The discovered address is only
@@ -113,6 +138,10 @@ public:
 private:
     void handle_packet(const uint8_t* data, size_t len, const net::SocketAddr& sender);
     void handle_hello(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
+    // Seal `wire` with client's send_cs and push it out the main socket.
+    // Returns true on success.  Used by every non-handshake send path so the
+    // encryption layer lives in exactly one place.
+    bool send_sealed(ClientInfo& client, const std::vector<uint8_t>& wire);
     void handle_pong(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
     void handle_input(const uint8_t* payload, size_t len);
     void handle_bw_probe_ack(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
@@ -140,6 +169,12 @@ private:
     // captured at start() for external signaling to pick up.
     net::SocketAddr stun_server_{};
     net::SocketAddr reflexive_addr_{};
+
+    // Long-term host identity.  Loaded once from disk (or generated on
+    // first run) in start().  Its public key is shared out-of-band with the
+    // client so Noise_NK can authenticate us.
+    crypto::KeyPair host_identity_{};
+    std::string     host_identity_path_;
 
     // Bandwidth probe constants.
     static constexpr uint16_t BW_PROBE_COUNT = 1000;

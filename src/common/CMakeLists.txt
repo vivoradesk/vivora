@@ -12,9 +12,13 @@ add_library(deskbeam_common STATIC
     audio/resampler.cpp
     audio/jitter_buffer.cpp
     audio/audio_platform_stub.cpp
+    crypto/random.cpp
+    crypto/noise_nk.cpp
+    crypto/host_identity.cpp
+    crypto/packet_crypto.cpp
 )
 
-target_link_libraries(deskbeam_common PUBLIC opus speex_resampler)
+target_link_libraries(deskbeam_common PUBLIC opus speex_resampler monocypher)
 
 if(WIN32)
     target_sources(deskbeam_common PRIVATE
@@ -22,7 +26,7 @@ if(WIN32)
         audio/wasapi_loopback.cpp
         audio/wasapi_output.cpp
     )
-    target_link_libraries(deskbeam_common PUBLIC ws2_32 ole32 avrt)
+    target_link_libraries(deskbeam_common PUBLIC ws2_32 ole32 avrt bcrypt shell32)
 else()
     target_sources(deskbeam_common PRIVATE net/posix_socket.cpp)
 endif()

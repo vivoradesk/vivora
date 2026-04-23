@@ -45,3 +45,13 @@ target_compile_definitions(speex_resampler PRIVATE
 if(MSVC)
     target_compile_options(speex_resampler PRIVATE /wd4244 /wd4267 /wd4305)
 endif()
+
+# --- Monocypher (crypto primitives for Noise_NK) ------------------------------
+# Single-file public-domain implementation of Curve25519, ChaCha20-Poly1305
+# (IETF 12-byte nonce variant via crypto_aead_lock), and BLAKE2b.  We pick
+# Monocypher over libsodium for build economy — two source files vs ~500,
+# no autoconf / feature-detection, same cryptographic properties.
+add_library(monocypher STATIC
+    monocypher/monocypher.c
+)
+target_include_directories(monocypher PUBLIC monocypher)

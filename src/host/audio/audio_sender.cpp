@@ -1,4 +1,5 @@
 #include "host/audio/audio_sender.h"
+#include "common/crypto/packet_crypto.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
 
@@ -22,16 +23,23 @@ bool AudioSender::init(int bitrate_bps) {
     return true;
 }
 
-void AudioSender::add_destination(const net::SocketAddr& dest) {
+void AudioSender::add_destination(const net::SocketAddr& dest,
+                                  crypto::CipherState* send_cs) {
     std::lock_guard<std::mutex> lk(dests_mu_);
-    if (std::find(dests_.begin(), dests_.end(), dest) == dests_.end()) {
-        dests_.push_back(dest);
+    auto it = std::find_if(dests_.begin(), dests_.end(),
+                           [&](const Dest& d){ return d.addr == dest; });
+    if (it == dests_.end()) {
+        dests_.push_back(Dest{dest, send_cs});
+    } else {
+        it->send_cs = send_cs;  // re-handshake from same address: refresh cipher
     }
 }
 
 void AudioSender::remove_destination(const net::SocketAddr& dest) {
     std::lock_guard<std::mutex> lk(dests_mu_);
-    dests_.erase(std::remove(dests_.begin(), dests_.end(), dest), dests_.end());
+    dests_.erase(std::remove_if(dests_.begin(), dests_.end(),
+                                [&](const Dest& d){ return d.addr == dest; }),
+                 dests_.end());
 }
 
 size_t AudioSender::destination_count() const {
@@ -144,13 +152,29 @@ void AudioSender::emit_packet() {
     std::memcpy(wire.data() + protocol::PacketHeader::WIRE_SIZE,
                 opus_pkt.data(), opus_pkt.size());
 
-    std::vector<net::SocketAddr> snapshot;
+    std::vector<Dest> snapshot;
     {
         std::lock_guard<std::mutex> lk(dests_mu_);
         snapshot = dests_;
     }
-    for (const auto& dest : snapshot) {
-        int n = socket_.send_to(wire.data(), wire.size(), dest);
+    // Scratch buffer for sealed wires.  10B header + opus payload + 24B AEAD
+    // overhead is well under 1500.  Stack-allocated to keep the hot path
+    // allocation-free.
+    uint8_t sealed[2048];
+    for (const auto& d : snapshot) {
+        const uint8_t* out_data = wire.data();
+        size_t         out_size = wire.size();
+        if (d.send_cs) {
+            size_t sealed_len = crypto::seal_packet(wire.data(), wire.size(),
+                                                    *d.send_cs, sealed);
+            if (sealed_len == 0) {
+                send_fail_count_++;
+                continue;
+            }
+            out_data = sealed;
+            out_size = sealed_len;
+        }
+        int n = socket_.send_to(out_data, out_size, d.addr);
         if (n > 0) {
             packets_sent_++;
             bytes_sent_ += static_cast<uint64_t>(n);
@@ -160,9 +184,9 @@ void AudioSender::emit_packet() {
                 log::warn("AudioSend",
                           "send_to failed (rc=%d) to %u.%u.%u.%u:%u (fail_total=%llu)",
                           n,
-                          (dest.ip >> 0) & 0xFF, (dest.ip >> 8) & 0xFF,
-                          (dest.ip >> 16) & 0xFF, (dest.ip >> 24) & 0xFF,
-                          dest.port,
+                          (d.addr.ip >> 0) & 0xFF, (d.addr.ip >> 8) & 0xFF,
+                          (d.addr.ip >> 16) & 0xFF, (d.addr.ip >> 24) & 0xFF,
+                          d.addr.port,
                           (unsigned long long)send_fail_count_);
             }
         }

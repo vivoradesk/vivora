@@ -1,4 +1,5 @@
 #include "app/view_loop.h"
+#include "common/crypto/host_identity.h"
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
@@ -18,6 +19,22 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     utils::boost_current_thread_priority();
     // Connect session.
     client::ClientSession session;
+
+    // The host's static pubkey is mandatory — Noise_NK won't run without it.
+    // Paste it via --host-key (hex) at the CLI; the host prints its own key
+    // on startup.
+    if (!cfg.host_key_hex || !*cfg.host_key_hex) {
+        log::error("VIEW", "Missing --host-key HEX (64 hex chars). "
+                           "Get it from the host's startup log.");
+        return 1;
+    }
+    uint8_t host_pk[32];
+    if (!crypto::hex_decode_32(cfg.host_key_hex, host_pk)) {
+        log::error("VIEW", "Invalid --host-key — expected 64 lowercase hex chars");
+        return 1;
+    }
+    session.set_host_key(host_pk);
+
     if (cfg.stun_server && *cfg.stun_server) {
         net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
         if (stun.ip == 0) {

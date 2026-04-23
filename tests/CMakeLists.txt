@@ -48,6 +48,11 @@ if(WIN32)
     target_include_directories(stun_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME stun_test COMMAND stun_test)
 
+    add_executable(noise_test noise_test.cpp)
+    target_link_libraries(noise_test PRIVATE deskbeam_common)
+    target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME noise_test COMMAND noise_test)
+
     add_executable(transport_test
         transport_test.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp

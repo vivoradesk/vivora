@@ -8,7 +8,11 @@ namespace deskbeam::net {
 
 class FrameFragmenter {
 public:
-    static constexpr size_t MAX_PAYLOAD = 1350;
+    // Plaintext payload budget per UDP packet.  Transport AEAD adds 24 bytes
+    // (8B nonce + 16B Poly1305 tag) of overhead on top, so the wire form is
+    // up to 10B header + MAX_PAYLOAD + 24B crypto = 1360B — unchanged from
+    // the pre-encryption budget and still safely under a typical MTU.
+    static constexpr size_t MAX_PAYLOAD = 1326;
     static constexpr size_t FRAG_HEADER_SIZE = 4;  // FragIndex(2B) + FragCount(2B)
     static constexpr size_t DATA_PER_FRAGMENT = MAX_PAYLOAD - FRAG_HEADER_SIZE;
 

@@ -1,4 +1,5 @@
 #include "client/net/client_session.h"
+#include "common/crypto/packet_crypto.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
@@ -11,7 +12,17 @@ namespace deskbeam::client {
 static const uint8_t HELLO_MAGIC[] = { 'D','E','S','K','B','E','A','M', 0x01 };
 static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x00 };
 
+void ClientSession::set_host_key(const uint8_t host_pk[32]) {
+    std::memcpy(host_static_pk_, host_pk, 32);
+    host_key_set_ = true;
+}
+
 bool ClientSession::start(const char* host_ip, uint16_t port) {
+    if (!host_key_set_) {
+        log::error("ClientSession", "Host public key not set — refusing to start");
+        return false;
+    }
+
     socket_ = net::IUdpSocket::create();
     if (!socket_) return false;
 
@@ -62,6 +73,15 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
             log::warn("ClientSession", "STUN discovery failed — reflexive address unknown");
         }
     }
+
+    // Prime a fresh Noise_NK handshake.  send_hello() will write msg1 into
+    // the wire; handle_control() processes msg2.  init_initiator() re-runs
+    // InitializeSymmetric internally, so calling it is equivalent to a reset.
+    if (!handshake_.init_initiator(host_static_pk_)) {
+        log::error("ClientSession", "Noise init_initiator failed");
+        return false;
+    }
+    handshake_complete_ = false;
 
     state_ = SessionState::Connecting;
     connect_start_ = Clock::now();
@@ -150,9 +170,11 @@ void ClientSession::poll() {
     }
 
     // Drain audio socket: each packet is a PacketType::Audio wrapper holding
-    // an Opus frame. Feed the Opus payload directly into the jitter buffer.
+    // an Opus frame, AEAD-sealed with audio_recv_cs_.  Feed the decrypted
+    // Opus payload directly into the jitter buffer.
     if (audio_socket_ && audio_receiver_) {
         net::SocketAddr a_sender;
+        uint8_t opened[RECV_BUF_SIZE];
         for (;;) {
             int n = audio_socket_->recv_from(buf, sizeof(buf), a_sender);
             if (n <= 0) break;
@@ -161,13 +183,20 @@ void ClientSession::poll() {
             // receives but parser rejects" (bad header, wrong type, etc.).
             audio_raw_packets_++;
             audio_raw_bytes_ += static_cast<uint64_t>(n);
-            if (n < static_cast<int>(protocol::PacketHeader::WIRE_SIZE)) continue;
-            auto h = protocol::PacketHeader::deserialize(buf);
+            // Sealed audio wire must carry at least header + AEAD overhead.
+            // Anything shorter is either a stray packet or a truncated record.
+            if (!handshake_complete_) continue;
+            if (static_cast<size_t>(n) < protocol::PacketHeader::WIRE_SIZE +
+                                         crypto::CipherState::OVERHEAD) continue;
+            size_t opened_len = crypto::open_packet(buf, static_cast<size_t>(n),
+                                                    audio_recv_cs_, opened);
+            if (opened_len == 0) continue;  // auth fail / replay / tamper
+            auto h = protocol::PacketHeader::deserialize(opened);
             if (h.type != protocol::PacketType::Audio) continue;
-            size_t plen = static_cast<size_t>(n) - protocol::PacketHeader::WIRE_SIZE;
+            size_t plen = opened_len - protocol::PacketHeader::WIRE_SIZE;
             if (plen == 0 || plen != h.payload_len) continue;
             audio_receiver_->feed(h.seq_no,
-                                  buf + protocol::PacketHeader::WIRE_SIZE,
+                                  opened + protocol::PacketHeader::WIRE_SIZE,
                                   plen);
         }
         // Periodic diagnostic log — separates "socket silent" from parser issues.
@@ -267,13 +296,29 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
     if (len < protocol::PacketHeader::WIRE_SIZE) return;
 
     auto header = protocol::PacketHeader::deserialize(data);
-    const uint8_t* payload = data + protocol::PacketHeader::WIRE_SIZE;
-    size_t payload_len = len - protocol::PacketHeader::WIRE_SIZE;
 
-    switch (header.type) {
-        case protocol::PacketType::Control:
-            handle_control(payload, payload_len);
-            break;
+    // Control is Noise handshake traffic — always plaintext on the wire.
+    if (header.type == protocol::PacketType::Control) {
+        const uint8_t* payload = data + protocol::PacketHeader::WIRE_SIZE;
+        const size_t   payload_len = len - protocol::PacketHeader::WIRE_SIZE;
+        handle_control(payload, payload_len);
+        return;
+    }
+
+    // Every other type is expected to be sealed.  Pre-handshake traffic gets
+    // dropped: the host only starts sending Video/Ping/etc after we complete
+    // finalize(), so anything arriving earlier is stale or spoofed.
+    if (!handshake_complete_) return;
+
+    uint8_t opened[RECV_BUF_SIZE];
+    size_t  opened_len = crypto::open_packet(data, len, recv_cs_, opened);
+    if (opened_len == 0) return;  // AEAD rejected — drop silently.
+
+    auto h = protocol::PacketHeader::deserialize(opened);
+    const uint8_t* payload     = opened + protocol::PacketHeader::WIRE_SIZE;
+    const size_t   payload_len = opened_len - protocol::PacketHeader::WIRE_SIZE;
+
+    switch (h.type) {
         case protocol::PacketType::Ping:
             handle_ping(payload, payload_len);
             break;
@@ -290,21 +335,20 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             handle_stream_info(payload, payload_len);
             break;
         case protocol::PacketType::Video: {
-            // Feed raw wire bytes through FEC decoder → assembler.
-            // FEC packets (FLAG_FEC) are consumed by the decoder and
-            // don't reach the assembler; recovered packets are injected.
+            // Feed plaintext wire bytes through FEC decoder → assembler.
+            // FEC decoder consumes FLAG_FEC parity packets internally and
+            // emits recovered data wires for the assembler.
             if (receiver_) {
                 fec_recovered_scratch_.clear();
-                receiver_->fec_feed(data, len, fec_recovered_scratch_);
+                receiver_->fec_feed(opened, opened_len, fec_recovered_scratch_);
                 for (const auto& rec : fec_recovered_scratch_) {
                     if (rec.size() >= protocol::PacketHeader::WIRE_SIZE) {
                         auto pkt = protocol::Packet::deserialize(rec.data(), rec.size());
                         receiver_->feed(pkt);
                     }
                 }
-                // Feed original to assembler (skip FEC parity packets)
-                if (!(header.flags & protocol::FLAG_FEC)) {
-                    auto packet = protocol::Packet::deserialize(data, len);
+                if (!(h.flags & protocol::FLAG_FEC)) {
+                    auto packet = protocol::Packet::deserialize(opened, opened_len);
                     receiver_->feed(packet);
                 }
             }
@@ -315,24 +359,56 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
     }
 }
 
-void ClientSession::handle_control(const uint8_t* payload, size_t len) {
-    if (len < sizeof(HELLO_ACK)) return;
-    if (std::memcmp(payload, HELLO_ACK, sizeof(HELLO_ACK)) != 0) return;
+bool ClientSession::send_sealed(const std::vector<uint8_t>& wire) {
+    uint8_t sealed[RECV_BUF_SIZE];
+    size_t  sealed_len = crypto::seal_packet(wire.data(), wire.size(),
+                                             send_cs_, sealed);
+    if (sealed_len == 0) {
+        log::warn("ClientSession", "seal_packet failed (nonce exhausted?)");
+        return false;
+    }
+    int r = socket_->send_to(sealed, sealed_len, host_addr_);
+    return r >= 0;
+}
 
-    // Newer hosts append a codec byte after the legacy ACK: 0 = H.264, 1 = HEVC.
-    // Legacy hosts omit the byte — fall back to HEVC.
-    if (len >= sizeof(HELLO_ACK) + 1) {
-        uint8_t codec_byte = payload[sizeof(HELLO_ACK)];
+void ClientSession::handle_control(const uint8_t* payload, size_t len) {
+    // Already connected?  This is either a duplicate msg2 or a stale one from
+    // a prior handshake — ignore.  Rekey is not implemented yet.
+    if (handshake_complete_) return;
+
+    // Expected shape: Noise msg2 = ephemeral(32) + encrypted(HELLO_ACK+codec) + tag(16).
+    uint8_t inner[32] = {};
+    int inner_len = handshake_.read_message(payload, len, inner, sizeof(inner));
+    if (inner_len < 0) {
+        log::warn("ClientSession", "Noise msg2 rejected — wrong host key or tampered");
+        return;
+    }
+    if (inner_len < static_cast<int>(sizeof(HELLO_ACK))) return;
+    if (std::memcmp(inner, HELLO_ACK, sizeof(HELLO_ACK)) != 0) return;
+
+    if (inner_len >= static_cast<int>(sizeof(HELLO_ACK)) + 1) {
+        uint8_t codec_byte = inner[sizeof(HELLO_ACK)];
         host_codec_ = (codec_byte == static_cast<uint8_t>(VideoCodec::H264))
                           ? VideoCodec::H264
                           : VideoCodec::HEVC;
     }
 
+    // Transfer handshake keys into transport cipher states — main channel
+    // (video/control) and audio in the same finalize() call.  After this the
+    // handshake object is effectively spent.
+    if (!handshake_.finalize(send_cs_,       recv_cs_,
+                             audio_send_cs_, audio_recv_cs_)) {
+        log::error("ClientSession", "Noise finalize failed — transport not keyed");
+        return;
+    }
+    handshake_complete_ = true;
+
     if (state_ == SessionState::Connecting) {
         state_ = SessionState::Connected;
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - connect_start_).count();
-        log::info("ClientSession", "Connected (handshake took %lldms, host codec=%s)",
+        log::info("ClientSession",
+                  "Connected (handshake took %lldms, host codec=%s)",
                   elapsed, host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
     }
 }
@@ -438,20 +514,38 @@ void ClientSession::handle_ping(const uint8_t* payload, size_t len) {
     pong.header.payload_len = static_cast<uint16_t>(len);
 
     auto wire = pong.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 void ClientSession::send_hello() {
+    // Every retry builds a fresh handshake: we don't know which of our prior
+    // msg1s reached the host, and each carries its own ephemeral DH share.
+    // The host mirrors this — a new msg1 always resets its side.
+    if (!handshake_.init_initiator(host_static_pk_)) {
+        log::error("ClientSession", "Noise init_initiator failed on retry");
+        return;
+    }
+    handshake_complete_ = false;
+
+    // Inner payload: HELLO_MAGIC + audio port (unchanged semantics — this is
+    // just the plaintext the host needs to bootstrap its client record).
+    uint8_t inner[32];
+    std::memcpy(inner, HELLO_MAGIC, sizeof(HELLO_MAGIC));
+    inner[sizeof(HELLO_MAGIC)]     = static_cast<uint8_t>(audio_local_port_ & 0xFF);
+    inner[sizeof(HELLO_MAGIC) + 1] = static_cast<uint8_t>((audio_local_port_ >> 8) & 0xFF);
+    const size_t inner_len = sizeof(HELLO_MAGIC) + 2;
+
+    uint8_t msg1[128];
+    size_t msg1_len = handshake_.write_message(inner, inner_len,
+                                               msg1, sizeof(msg1));
+    if (msg1_len == 0) return;
+
     protocol::Packet hello;
     hello.header.type = protocol::PacketType::Control;
     hello.header.seq_no = 0;
     hello.header.timestamp = 0;
     hello.header.flags = 0;
-    hello.payload.assign(HELLO_MAGIC, HELLO_MAGIC + sizeof(HELLO_MAGIC));
-    // Extension: append our local audio port (u16 LE) so the host can target
-    // audio packets at it. Zero signals "no audio".
-    hello.payload.push_back(static_cast<uint8_t>(audio_local_port_ & 0xFF));
-    hello.payload.push_back(static_cast<uint8_t>((audio_local_port_ >> 8) & 0xFF));
+    hello.payload.assign(msg1, msg1 + msg1_len);
     hello.header.payload_len = static_cast<uint16_t>(hello.payload.size());
 
     auto wire = hello.serialize();
@@ -473,7 +567,7 @@ void ClientSession::send_input(const protocol::InputEvent& event) {
     pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
 
     auto wire = pkt.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 void ClientSession::send_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count) {
@@ -495,7 +589,7 @@ void ClientSession::send_nack(uint16_t seq_no, const uint16_t* frag_indices, siz
     pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
 
     auto wire = pkt.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 void ClientSession::request_idr() {
@@ -509,7 +603,7 @@ void ClientSession::request_idr() {
     pkt.header.payload_len = 0;
 
     auto wire = pkt.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 void ClientSession::reset_video_stream() {
@@ -570,7 +664,7 @@ void ClientSession::send_bw_probe_ack() {
     pkt.header.payload_len = 8;
 
     auto wire = pkt.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 void ClientSession::send_fec_report() {
@@ -588,7 +682,7 @@ void ClientSession::send_fec_report() {
     pkt.header.payload_len = 4;
 
     auto wire = pkt.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    send_sealed(wire);
 }
 
 uint64_t ClientSession::frames_dropped() const {

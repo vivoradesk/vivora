@@ -185,7 +185,22 @@
       "Bash(ctest --test-dir build -C Release --output-on-failure)",
       "Bash(./build/bin/Release/stun_test.exe *)",
       "Bash(ctest --test-dir build -C Release --output-on-failure -R \"stun_test|fragment_test|fec_test|audio_test|capture_test\")",
-      "Bash(./build/bin/Release/fec_test.exe)"
+      "Bash(./build/bin/Release/fec_test.exe)",
+      "Bash(curl -sL --max-time 30 -o /tmp/monocypher.zip https://monocypher.org/download/monocypher-4.0.2.zip)",
+      "Bash(curl -sL --max-time 30 -o /tmp/monocypher.tar.gz https://github.com/LoupVaillant/Monocypher/releases/download/4.0.2/monocypher-4.0.2.tar.gz)",
+      "Bash(mkdir -p /tmp/monocypher-extract)",
+      "Bash(tar -xzf /tmp/monocypher.tar.gz -C /tmp/monocypher-extract)",
+      "Bash(rm -rf /tmp/monocypher-extract)",
+      "Bash(tar -xzf /tmp/monocypher.tar.gz -C /tmp/monocypher-extract --exclude='monocypher-4.0.2/doc/*')",
+      "Bash(cp /tmp/monocypher-extract/monocypher-4.0.2/src/monocypher.c /tmp/monocypher-extract/monocypher-4.0.2/src/monocypher.h third_party/monocypher/)",
+      "Bash(cp /tmp/monocypher-extract/monocypher-4.0.2/LICENCE.md third_party/monocypher/LICENCE.md)",
+      "Bash(./build/bin/Release/noise_test.exe *)",
+      "Bash(C:/src/DeskBeam/build/bin/Release/noise_test.exe)",
+      "Bash(mkdir -p /tmp/claude)",
+      "Bash(rm -f /tmp/claude/host-crypto.log /tmp/claude/view-crypto.log)",
+      "Bash(C:/src/DeskBeam/build/bin/Release/deskbeam.exe *)",
+      "Bash(echo \"host pid $!\" sleep 3 grep -E \"host public key|HostSession\" host.log)",
+      "Bash(echo \"client pid $!\")"
     ]
   }
 }

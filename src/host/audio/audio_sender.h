@@ -2,6 +2,7 @@
 
 #include "common/audio/audio_codec.h"
 #include "common/audio/resampler.h"
+#include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
 
 #include <cstdint>
@@ -23,7 +24,13 @@ public:
 
     bool init(int bitrate_bps);
 
-    void add_destination(const net::SocketAddr& dest);
+    // Register a destination.  `send_cs` — if non-null — is used to AEAD-seal
+    // every outbound packet for that destination (one nonce counter per
+    // client).  Pointer lifetime must outlive the destination registration;
+    // in practice it lives inside the ClientInfo entry owned by HostSession.
+    // When send_cs is null the packet ships plaintext (test / future use).
+    void add_destination(const net::SocketAddr& dest,
+                         crypto::CipherState* send_cs = nullptr);
     void remove_destination(const net::SocketAddr& dest);
     size_t destination_count() const;
 
@@ -51,8 +58,12 @@ private:
     std::vector<float> resampled_;        // output of resampler
     std::vector<float> accum_;            // 48kHz stereo waiting to be framed
 
+    struct Dest {
+        net::SocketAddr      addr;
+        crypto::CipherState* send_cs;  // nullable — plaintext when null
+    };
     mutable std::mutex dests_mu_;
-    std::vector<net::SocketAddr> dests_;
+    std::vector<Dest>  dests_;
 
     uint16_t audio_seq_   = 0;
     uint32_t start_us_    = 0;

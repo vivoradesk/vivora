@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
 #include "client/net/video_receiver.h"
 #include "client/audio/audio_receiver.h"
@@ -22,6 +23,11 @@ public:
     static constexpr int64_t HELLO_RETRY_MS = 500;
     static constexpr int64_t CONNECT_TIMEOUT_MS = 5000;
     static constexpr int64_t DISCONNECT_TIMEOUT_MS = 5000;
+
+    // Pin the host's long-term Curve25519 public key. MUST be called before
+    // start() — Noise_NK refuses to run without a known responder static.
+    // Input is a raw 32-byte pubkey (hex-decoded at the CLI layer).
+    void set_host_key(const uint8_t host_pk[32]);
 
     // Connect to host at given IP:port. Non-blocking — call poll() to drive.
     bool start(const char* host_ip, uint16_t port);
@@ -83,6 +89,9 @@ public:
 private:
     void handle_packet(const uint8_t* data, size_t len);
     void handle_control(const uint8_t* payload, size_t len);
+    // Seal a plaintext wire with send_cs_ and push it to the host.  Returns
+    // true on success.  All post-handshake send paths funnel through this.
+    bool send_sealed(const std::vector<uint8_t>& wire);
     void handle_ping(const uint8_t* payload, size_t len);
     void handle_bw_probe(const uint8_t* payload, size_t len);
     void handle_cursor_shape(const uint8_t* payload, size_t len);
@@ -101,6 +110,22 @@ private:
     SessionState state_ = SessionState::Disconnected;
     VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};
+
+    // Pinned host static pubkey + handshake state.  The handshake object is
+    // live from start() until we process msg2, at which point finalize()
+    // transfers keys into send_cs_/recv_cs_ and handshake_complete_ latches.
+    uint8_t host_static_pk_[32] = {};
+    bool host_key_set_ = false;
+    crypto::HandshakeStateNK handshake_;
+    crypto::CipherState send_cs_;
+    crypto::CipherState recv_cs_;
+    // Audio-socket cipher pair derived in the same finalize() call — keeps
+    // the audio nonce counter independent from the main transport.  We
+    // only ever use `audio_recv_cs_` today (host->client audio); the send
+    // side is reserved for the future mic-direction channel.
+    crypto::CipherState audio_send_cs_;
+    crypto::CipherState audio_recv_cs_;
+    bool handshake_complete_ = false;
     net::SocketAddr stun_server_{};
     net::SocketAddr reflexive_addr_{};
     TimePoint connect_start_;

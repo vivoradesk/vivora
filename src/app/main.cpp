@@ -48,6 +48,8 @@ static void print_usage(const char* prog) {
     std::printf("  --stun-server HP  STUN \"host:port\" for reflexive-address discovery\n");
     std::printf("                    (default stun.l.google.com:19302 — use --no-stun to disable)\n");
     std::printf("  --no-stun         Disable STUN discovery (LAN-only)\n");
+    std::printf("  --host-key HEX    (view) Host's Curve25519 public key, 64 hex chars\n");
+    std::printf("                    — printed by the host on startup; required by Noise_NK\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -69,6 +71,7 @@ int main(int argc, char* argv[]) {
     // reliable enough to use out-of-the-box.  Users can override for privacy
     // or run their own (coturn) in production.
     const char* stun_server = "stun.l.google.com:19302";
+    const char* host_key_hex = nullptr;
 
     for (int i = 1; i < argc; ++i) {
         const char* v = nullptr;
@@ -109,6 +112,8 @@ int main(int argc, char* argv[]) {
             stun_server = v;
         } else if (std::strcmp(argv[i], "--no-stun") == 0) {
             stun_server = nullptr;
+        } else if ((v = flag_value("--host-key", argv, argc, i)) != nullptr) {
+            host_key_hex = v;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -165,6 +170,7 @@ int main(int argc, char* argv[]) {
         vcfg.host_ip = host_ip;
         vcfg.port = port;
         vcfg.stun_server = stun_server;
+        vcfg.host_key_hex = host_key_hex;
         return deskbeam::run_view_loop(platform, vcfg);
     }
 

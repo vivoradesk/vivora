@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
 #include "common/net/frame_fragmenter.h"
 #include "common/net/fec_codec.h"
@@ -35,18 +36,25 @@ public:
                        uint16_t frame_seq, uint32_t timestamp, bool keyframe);
 
     // Send the most recently prepared frame to |dest|.
-    // Returns number of packets sent, or -1 on error.
-    int send_prepared(const net::SocketAddr& dest);
+    // `send_cs` (optional, non-null only after Noise handshake completes)
+    // transport-encrypts each wire per-destination.  Passing nullptr keeps
+    // the old plaintext path — used by transport_test and any pre-handshake
+    // broadcast.  Returns number of packets sent, or -1 on error.
+    int send_prepared(const net::SocketAddr& dest,
+                      crypto::CipherState* send_cs = nullptr);
 
     // Convenience: prepare + send to a single destination (backwards compat).
     int send_frame(const uint8_t* data, size_t data_len,
                    uint16_t frame_seq, uint32_t timestamp,
-                   bool keyframe, const net::SocketAddr& dest);
+                   bool keyframe, const net::SocketAddr& dest,
+                   crypto::CipherState* send_cs = nullptr);
 
     // Retransmit previously-sent fragments. Missing fragments (aged out of
     // the ring buffer) are silently skipped. Returns number actually resent.
+    // `send_cs` follows the same rules as send_prepared().
     int handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count,
-                    const net::SocketAddr& dest);
+                    const net::SocketAddr& dest,
+                    crypto::CipherState* send_cs = nullptr);
 
     // Adaptive FEC: update M (parity count) based on client-reported loss rate.
     void update_fec_from_loss(float loss_rate);

@@ -1,4 +1,6 @@
 #include "host/session/host_session.h"
+#include "common/crypto/host_identity.h"
+#include "common/crypto/packet_crypto.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
@@ -15,6 +17,15 @@ static const uint8_t HELLO_MAGIC[] = { 'D','E','S','K','B','E','A','M', 0x01 };
 static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x00 };
 
 bool HostSession::start(uint16_t port) {
+    // Load or mint the host's long-term Curve25519 keypair BEFORE binding —
+    // if crypto setup fails we don't want a half-initialised session.
+    if (!crypto::load_or_create_host_identity(host_identity_, host_identity_path_)) {
+        log::error("HostSession", "Failed to load or create host identity");
+        return false;
+    }
+    log::info("HostSession", "Host public key: %s",
+              crypto::hex_encode(host_identity_.public_key, 32).c_str());
+
     socket_ = net::IUdpSocket::create();
     if (!socket_) return false;
 
@@ -180,12 +191,15 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     if (state_ != SessionState::Connected || !sender_ || clients_.empty())
         return -1;
 
-    // Fragment + FEC once, then multicast the prepared wire packets.
+    // Fragment + FEC once, then multicast the prepared wire packets.  Each
+    // client seals the same plaintext wires through its own send_cs, so the
+    // FEC plan is shared but the on-wire bytes differ per destination.
     sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe);
 
     int total = 0;
-    for (const auto& [addr, client] : clients_) {
-        int n = sender_->send_prepared(addr);
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        int n = sender_->send_prepared(addr, &client.send_cs);
         if (n > 0) total += n;
     }
     return total;
@@ -252,18 +266,39 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
     if (len < protocol::PacketHeader::WIRE_SIZE) return;
 
     auto header = protocol::PacketHeader::deserialize(data);
-    const uint8_t* payload = data + protocol::PacketHeader::WIRE_SIZE;
-    size_t payload_len = len - protocol::PacketHeader::WIRE_SIZE;
 
-    // Update last_recv for known clients.
-    if (auto* c = find_client(sender)) {
-        c->last_recv_time = Clock::now();
+    ClientInfo* client = find_client(sender);
+    if (client) client->last_recv_time = Clock::now();
+
+    // Control packets carry Noise handshake frames and travel in the clear.
+    // handle_hello() is responsible for validating / installing cipher state.
+    if (header.type == protocol::PacketType::Control) {
+        const uint8_t* payload = data + protocol::PacketHeader::WIRE_SIZE;
+        const size_t   payload_len = len - protocol::PacketHeader::WIRE_SIZE;
+        handle_hello(payload, payload_len, sender);
+        return;
     }
 
-    switch (header.type) {
-        case protocol::PacketType::Control:
-            handle_hello(payload, payload_len, sender);
-            break;
+    // Every other packet type MUST be sealed.  Drop anything from an unknown
+    // sender or a client whose handshake hasn't finished — there's nothing
+    // safe we can do with pre-handshake traffic.
+    if (!client || !client->handshake_complete) return;
+
+    uint8_t opened[RECV_BUF_SIZE];
+    size_t  opened_len = crypto::open_packet(data, len, client->recv_cs, opened);
+    if (opened_len == 0) {
+        // AEAD rejected the packet (wrong key, tamper, replay). UDP reordering
+        // can push a late original past a retx-with-newer-nonce and get it
+        // dropped here — that's harmless because the newer packet already
+        // filled the fragment slot.  Keep quiet to avoid flooding the log.
+        return;
+    }
+
+    auto h = protocol::PacketHeader::deserialize(opened);
+    const uint8_t* payload     = opened + protocol::PacketHeader::WIRE_SIZE;
+    const size_t   payload_len = opened_len - protocol::PacketHeader::WIRE_SIZE;
+
+    switch (h.type) {
         case protocol::PacketType::Pong:
             handle_pong(payload, payload_len, sender);
             break;
@@ -271,34 +306,29 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             handle_input(payload, payload_len);
             break;
         case protocol::PacketType::IdrRequest:
-            if (auto* c = find_client(sender)) {
-                c->idr_needed = true;
-                log::info("HostSession", "Client requested IDR (frame loss recovery)");
-            }
+            client->idr_needed = true;
+            log::info("HostSession", "Client requested IDR (frame loss recovery)");
             break;
         case protocol::PacketType::NackRequest:
             if (sender_ && payload_len >= 3) {
-                if (auto* c = find_client(sender)) {
-                    uint16_t seq = payload[0] | (payload[1] << 8);
-                    uint8_t count = payload[2];
-                    if (payload_len >= 3u + count * 2u) {
-                        std::vector<uint16_t> indices(count);
-                        for (uint8_t i = 0; i < count; ++i) {
-                            indices[i] = payload[3 + i * 2] | (payload[4 + i * 2] << 8);
-                        }
-                        sender_->handle_nack(seq, indices.data(), count, c->addr);
+                uint16_t seq = payload[0] | (payload[1] << 8);
+                uint8_t count = payload[2];
+                if (payload_len >= 3u + count * 2u) {
+                    std::vector<uint16_t> indices(count);
+                    for (uint8_t i = 0; i < count; ++i) {
+                        indices[i] = payload[3 + i * 2] | (payload[4 + i * 2] << 8);
                     }
+                    sender_->handle_nack(seq, indices.data(), count,
+                                         client->addr, &client->send_cs);
                 }
             }
             break;
         case protocol::PacketType::FecReport:
             if (sender_ && payload_len >= 4) {
-                if (auto* c = find_client(sender)) {
-                    float loss_rate;
-                    std::memcpy(&loss_rate, payload, 4);
-                    c->loss_rate = loss_rate;
-                    sender_->update_fec_from_loss(loss_rate);
-                }
+                float loss_rate;
+                std::memcpy(&loss_rate, payload, 4);
+                client->loss_rate = loss_rate;
+                sender_->update_fec_from_loss(loss_rate);
             }
             break;
         case protocol::PacketType::BwProbeAck:
@@ -309,29 +339,67 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
     }
 }
 
+bool HostSession::send_sealed(ClientInfo& client, const std::vector<uint8_t>& wire) {
+    uint8_t sealed[RECV_BUF_SIZE];
+    size_t  sealed_len = crypto::seal_packet(wire.data(), wire.size(),
+                                             client.send_cs, sealed);
+    if (sealed_len == 0) {
+        log::warn("HostSession", "seal_packet failed (nonce exhausted?)");
+        return false;
+    }
+    int r = socket_->send_to(sealed, sealed_len, client.addr);
+    return r >= 0;
+}
+
 void HostSession::handle_hello(const uint8_t* payload, size_t len,
                                const net::SocketAddr& sender) {
-    if (len < sizeof(HELLO_MAGIC)) return;
-    if (std::memcmp(payload, HELLO_MAGIC, sizeof(HELLO_MAGIC)) != 0) return;
+    // The payload is a full Noise_NK msg1: 32 ephemeral pubkey + encrypted
+    // payload + 16 tag.  The encrypted payload carries the same info the
+    // legacy plaintext HELLO did: HELLO_MAGIC + optional client audio port.
+    //
+    // If the client retries HELLO (because msg2 was dropped), we always
+    // build a fresh HandshakeStateNK — the client will have picked a new
+    // ephemeral too, so the old handshake's state is worthless.
+    auto handshake = std::make_unique<crypto::HandshakeStateNK>();
+    if (!handshake->init_responder(host_identity_)) return;
 
-    // Optional extension: hello payload may carry client audio port (u16 LE)
-    // right after the magic. Older clients without audio omit these bytes.
+    uint8_t inner[128] = {};
+    int inner_len = handshake->read_message(payload, len, inner, sizeof(inner));
+    if (inner_len < 0) {
+        log::warn("HostSession", "Noise msg1 rejected from %u.%u.%u.%u:%u",
+                  (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
+                  (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
+        return;
+    }
+    if (inner_len < static_cast<int>(sizeof(HELLO_MAGIC))) return;
+    if (std::memcmp(inner, HELLO_MAGIC, sizeof(HELLO_MAGIC)) != 0) return;
+
     uint16_t client_audio_port = 0;
-    if (len >= sizeof(HELLO_MAGIC) + 2) {
-        client_audio_port = static_cast<uint16_t>(payload[sizeof(HELLO_MAGIC)])
-            | (static_cast<uint16_t>(payload[sizeof(HELLO_MAGIC) + 1]) << 8);
+    if (inner_len >= static_cast<int>(sizeof(HELLO_MAGIC)) + 2) {
+        client_audio_port = static_cast<uint16_t>(inner[sizeof(HELLO_MAGIC)])
+            | (static_cast<uint16_t>(inner[sizeof(HELLO_MAGIC) + 1]) << 8);
     }
 
-    // Send ACK.  Legacy ACK is 10 bytes (magic + 0x01 + 0x00).  We append a
-    // codec byte (0=H.264, 1=HEVC) so the client can initialise the correct
-    // decoder.  Older clients ignore trailing bytes, so this stays wire-compat.
+    // Build msg2: HELLO_ACK || codec byte, encrypted inside the Noise frame.
+    uint8_t ack_inner[32];
+    std::memcpy(ack_inner, HELLO_ACK, sizeof(HELLO_ACK));
+    ack_inner[sizeof(HELLO_ACK)] = static_cast<uint8_t>(codec_);
+    const size_t ack_inner_len = sizeof(HELLO_ACK) + 1;
+
+    uint8_t msg2_wire[128];
+    size_t msg2_len = handshake->write_message(ack_inner, ack_inner_len,
+                                               msg2_wire, sizeof(msg2_wire));
+    if (msg2_len == 0) {
+        log::warn("HostSession", "Noise msg2 write failed");
+        return;
+    }
+
     protocol::Packet ack;
     ack.header.type = protocol::PacketType::Control;
     ack.header.seq_no = 0;
     ack.header.timestamp = 0;
     ack.header.flags = 0;
-    ack.payload.assign(HELLO_ACK, HELLO_ACK + sizeof(HELLO_ACK));
-    ack.payload.push_back(static_cast<uint8_t>(codec_));
+    ack.payload.assign(msg2_wire, msg2_wire + msg2_len);
     ack.header.payload_len = static_cast<uint16_t>(ack.payload.size());
 
     auto wire = ack.serialize();
@@ -348,6 +416,18 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client.probe_bw_bps   = 0;
     client.probe_pending  = false;
 
+    // Derive transport cipher pairs — main (video/control) and audio — from
+    // the same Noise HKDF.  The handshake object can go away now; keys are
+    // committed to CipherStates.
+    if (!handshake->finalize(client.send_cs,       client.recv_cs,
+                             client.audio_send_cs, client.audio_recv_cs)) {
+        log::error("HostSession", "Noise finalize failed — transport not keyed");
+        clients_.erase(sender);
+        return;
+    }
+    client.handshake.reset();  // not needed anymore
+    client.handshake_complete = true;
+
     state_ = SessionState::Connected;
     new_client_flag_ = true;
 
@@ -356,7 +436,7 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
         net::SocketAddr audio_dest{};
         audio_dest.ip   = sender.ip;
         audio_dest.port = client_audio_port;
-        audio_sender_->add_destination(audio_dest);
+        audio_sender_->add_destination(audio_dest, &client.audio_send_cs);
         log::info("HostSession", "Audio destination registered: %u.%u.%u.%u:%u",
                   (audio_dest.ip >> 0) & 0xFF, (audio_dest.ip >> 8) & 0xFF,
                   (audio_dest.ip >> 16) & 0xFF, (audio_dest.ip >> 24) & 0xFF,
@@ -408,7 +488,7 @@ void HostSession::send_ping(ClientInfo& client) {
     ping.header.payload_len = 8;
 
     auto wire = ping.serialize();
-    socket_->send_to(wire.data(), wire.size(), client.addr);
+    send_sealed(client, wire);
 }
 
 void HostSession::send_cursor_position(const protocol::CursorPositionMessage& msg) {
@@ -422,7 +502,8 @@ void HostSession::send_cursor_position(const protocol::CursorPositionMessage& ms
     pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
     auto wire = pkt.serialize();
     for (auto& [addr, client] : clients_) {
-        socket_->send_to(wire.data(), wire.size(), client.addr);
+        if (!client.handshake_complete) continue;
+        send_sealed(client, wire);
     }
 }
 
@@ -441,7 +522,8 @@ void HostSession::send_stream_info(uint16_t width, uint16_t height) {
     pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
     auto wire = pkt.serialize();
     for (auto& [addr, client] : clients_) {
-        socket_->send_to(wire.data(), wire.size(), client.addr);
+        if (!client.handshake_complete) continue;
+        send_sealed(client, wire);
     }
     log::info("HostSession", "Sent StreamInfo %ux%u to %zu client(s)",
               width, height, clients_.size());
@@ -489,7 +571,8 @@ void HostSession::send_cursor_shape(const protocol::CursorShapeMessage& msg) {
 
         auto wire = pkt.serialize();
         for (auto& [addr, client] : clients_) {
-            socket_->send_to(wire.data(), wire.size(), client.addr);
+            if (!client.handshake_complete) continue;
+            send_sealed(client, wire);
         }
     }
 }
@@ -517,7 +600,7 @@ void HostSession::send_bw_probe(ClientInfo& client) {
         pkt.header.payload_len = BW_PROBE_SIZE;
 
         auto wire = pkt.serialize();
-        socket_->send_to(wire.data(), wire.size(), client.addr);
+        send_sealed(client, wire);
     }
     log::info("HostSession", "Sent BW probe (%d x %dB), id=%u",
               BW_PROBE_COUNT, BW_PROBE_SIZE, client.probe_id);
@@ -549,6 +632,10 @@ void HostSession::handle_input(const uint8_t* payload, size_t len) {
     if (protocol::InputEvent::deserialize(payload, len, event)) {
         if (input_injector_) input_injector_->inject(event);
     }
+}
+
+std::string HostSession::host_public_key_hex() const {
+    return crypto::hex_encode(host_identity_.public_key, 32);
 }
 
 } // namespace deskbeam::host

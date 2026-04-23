@@ -1,4 +1,5 @@
 #include "host/session/video_sender.h"
+#include "common/crypto/packet_crypto.h"
 #include "common/utils/log.h"
 #include <algorithm>
 
@@ -72,10 +73,27 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
     packets_sent_ += static_cast<uint64_t>(frag_idx);
 }
 
-int VideoSender::send_prepared(const net::SocketAddr& dest) {
+int VideoSender::send_prepared(const net::SocketAddr& dest,
+                               crypto::CipherState* send_cs) {
+    // Max sealed wire: ~1460B (FEC parity + 24B AEAD).  2048 is plenty and
+    // lives on the stack so there's no allocation on the hot path.
+    uint8_t sealed[2048];
     int sent = 0;
     for (const auto& wire : prepared_wires_) {
-        int r = socket_.send_to(wire.data(), wire.size(), dest);
+        const uint8_t* out_data;
+        size_t         out_len;
+        if (send_cs) {
+            out_len = crypto::seal_packet(wire.data(), wire.size(), *send_cs, sealed);
+            if (out_len == 0) {
+                log::error("VideoSender", "seal_packet failed (nonce exhausted?)");
+                return -1;
+            }
+            out_data = sealed;
+        } else {
+            out_data = wire.data();
+            out_len  = wire.size();
+        }
+        int r = socket_.send_to(out_data, out_len, dest);
         if (r < 0) {
             log::error("VideoSender", "send_to failed at packet %d/%zu", sent, prepared_wires_.size());
             return -1;
@@ -88,15 +106,18 @@ int VideoSender::send_prepared(const net::SocketAddr& dest) {
 
 int VideoSender::send_frame(const uint8_t* data, size_t data_len,
                             uint16_t frame_seq, uint32_t timestamp,
-                            bool keyframe, const net::SocketAddr& dest)
+                            bool keyframe, const net::SocketAddr& dest,
+                            crypto::CipherState* send_cs)
 {
     prepare_frame(data, data_len, frame_seq, timestamp, keyframe);
-    return send_prepared(dest);
+    return send_prepared(dest, send_cs);
 }
 
 int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count,
-                             const net::SocketAddr& dest)
+                             const net::SocketAddr& dest,
+                             crypto::CipherState* send_cs)
 {
+    uint8_t sealed[2048];
     int resent = 0;
     for (size_t i = 0; i < count; ++i) {
         if (retx_budget_ <= 0) break;
@@ -114,7 +135,18 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
             nack_send_buf_[7] |= protocol::FLAG_RETX;
         }
 
-        int r = socket_.send_to(nack_send_buf_.data(), nack_send_buf_.size(), dest);
+        const uint8_t* out_data;
+        size_t         out_len;
+        if (send_cs) {
+            out_len = crypto::seal_packet(nack_send_buf_.data(), nack_send_buf_.size(),
+                                          *send_cs, sealed);
+            if (out_len == 0) continue;
+            out_data = sealed;
+        } else {
+            out_data = nack_send_buf_.data();
+            out_len  = nack_send_buf_.size();
+        }
+        int r = socket_.send_to(out_data, out_len, dest);
         if (r < 0) continue;
         bytes_sent_ += r;
         packets_sent_++;
