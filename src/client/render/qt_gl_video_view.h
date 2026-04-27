@@ -2,6 +2,9 @@
 
 #include "common/protocol/input_event.h"
 
+#include "app/view_platform.h"
+
+#include <QLabel>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
@@ -49,6 +52,10 @@ public:
     // Set after the decoder identifies the stream's colorspace.
     void set_hdr(bool hdr) { is_hdr_ = hdr; }
 
+    // Update (or hide) the diagnostics overlay.  Hidden by default —
+    // toggled by the F9 keypress handled inside this widget.
+    void update_stats(const StatsView& stats);
+
 protected:
     void initializeGL() override;
     void resizeGL(int w, int h) override;
@@ -86,6 +93,15 @@ private:
     bool dirty_ = false;     // true → re-upload textures next paint
     bool has_frame_ = false;
     bool is_hdr_   = false;  // true → BT.2020 + PQ + tonemap path
+
+    // Diagnostics overlay — child QLabel positioned top-right, repositioned
+    // on resize.  Shown / hidden by F9, last-pushed stats kept so that a
+    // toggle while no fresh stats arrive still shows something reasonable.
+    QLabel* hud_label_ = nullptr;
+    bool    hud_visible_ = false;
+    StatsView last_stats_{};
+    void rebuild_hud_text();
+    void position_hud();
 
     // Pre-padding stream size from the host.  Mouse mapping uses these.
     uint32_t stream_w_ = 0;

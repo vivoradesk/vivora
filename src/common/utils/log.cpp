@@ -30,6 +30,10 @@ static void log_impl(Level level, const char* tag, const char* fmt, va_list args
     std::fprintf(stderr, "[%lld][%s][%s] ", static_cast<long long>(ms), level_str(level), tag);
     std::vfprintf(stderr, fmt, args);
     std::fputc('\n', stderr);
+    // Flush per-line so a crash doesn't lose the last few seconds of
+    // logs sitting in libc's block buffer.  The cost is one extra
+    // write() per log line — negligible against the ~kHz log volume.
+    std::fflush(stderr);
 }
 
 void debug(const char* tag, const char* fmt, ...) {

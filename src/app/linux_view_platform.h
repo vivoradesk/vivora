@@ -23,6 +23,7 @@ public:
     int  render() override;
     void flush_decoder() override;
     void set_stream_size(uint32_t width, uint32_t height) override;
+    void update_stats(const deskbeam::StatsView& stats) override;
     void shutdown() override;
 
 private:

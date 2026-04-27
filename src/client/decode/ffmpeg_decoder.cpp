@@ -36,17 +36,15 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
 
-    // Frame + slice threading.  3440x1440 SW HEVC at 60 fps is a real
-    // CPU job; single-threaded a Tiger Lake / Alder Lake laptop runs
-    // ~30 fps, half the source rate, and `avcodec_send_packet` starts
-    // returning EAGAIN on every other packet — those packets are silently
-    // dropped, their dependent P-frames can no longer find references,
-    // and the picture visibly disintegrates.  Frame threading roughly
-    // N×s the throughput at the cost of one extra frame of latency per
-    // thread (auto-capped to min(cores, 16)).  Slice threading is mostly
-    // ineffective with single-slice encoder output but cheap to leave on.
+    // Slice-only threading.  FF_THREAD_FRAME buffers N frames before
+    // emitting, adding (thread_count - 1) frames of decode latency —
+    // 4-8 frames at auto count, i.e. 67-133 ms at 60 fps, very visible
+    // in interactive use.  Slice threading parallelises within a frame
+    // when the encoder produces multi-slice output and is a no-op
+    // otherwise, so no harm leaving it on.  Throughput suffers vs frame
+    // threading; the right long-term answer is L4 VAAPI HW decode.
     ctx_->thread_count = 0;
-    ctx_->thread_type  = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    ctx_->thread_type  = FF_THREAD_SLICE;
     // No flags — earlier experiments with AV_CODEC_FLAG_LOW_DELAY shrank
     // the DPB to a single reference, which caused legitimate forward
     // refs to be evicted and produced "Could not find ref with POC X"
@@ -149,7 +147,7 @@ bool FfmpegDecoder::reinit() {
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
     ctx_->thread_count = 0;
-    ctx_->thread_type  = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    ctx_->thread_type  = FF_THREAD_SLICE;
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "reinit: avcodec_open2 failed");
         avcodec_free_context(&ctx_);

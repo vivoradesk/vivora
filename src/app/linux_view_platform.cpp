@@ -95,6 +95,10 @@ void LinuxViewPlatform::flush_decoder() {
     if (decoder_) decoder_->reinit();
 }
 
+void LinuxViewPlatform::update_stats(const deskbeam::StatsView& stats) {
+    if (view_) view_->update_stats(stats);
+}
+
 void LinuxViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     if (view_) view_->set_stream_size(width, height);
     else {

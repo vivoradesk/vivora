@@ -255,6 +255,16 @@ bool HostSession::probe_pending() const {
     return false;
 }
 
+uint16_t HostSession::min_perf_target_fps() const {
+    if (clients_.empty()) return 60;
+    uint16_t lowest = 60;
+    for (const auto& [addr, client] : clients_) {
+        if (client.perf_target_fps < lowest) lowest = client.perf_target_fps;
+    }
+    if (lowest < 15) lowest = 15;
+    return lowest;
+}
+
 // ── Packet handling ──────────────────────────────────────────────────
 
 ClientInfo* HostSession::find_client(const net::SocketAddr& addr) {
@@ -329,6 +339,23 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
                 std::memcpy(&loss_rate, payload, 4);
                 client->loss_rate = loss_rate;
                 sender_->update_fec_from_loss(loss_rate);
+            }
+            break;
+        case protocol::PacketType::PerfReport:
+            // Phase B: just absorb the report and log.  Adaptive-fps
+            // application (Phase C) will route into the encoder via
+            // a HostPlatform method.
+            if (payload_len >= 4) {
+                uint16_t target_fps = static_cast<uint16_t>(payload[0])
+                                    | (static_cast<uint16_t>(payload[1]) << 8);
+                uint8_t  reject_pct = payload[2];
+                uint8_t  drop_pct   = payload[3];
+                client->perf_target_fps = target_fps;
+                client->perf_reject_pct = reject_pct;
+                client->perf_drop_pct   = drop_pct;
+                log::info("HostSession",
+                          "PerfReport: target_fps=%u reject=%u%% drop=%u%%",
+                          target_fps, reject_pct, drop_pct);
             }
             break;
         case protocol::PacketType::BwProbeAck:

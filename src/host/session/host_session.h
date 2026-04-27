@@ -38,6 +38,12 @@ struct ClientInfo {
     bool      probe_pending  = false;
     TimePoint probe_sent_time;
 
+    // Adaptive framerate feedback from this client (Phase A/B: stored
+    // and logged; Phase C will feed it into the encoder).
+    uint16_t  perf_target_fps = 60;
+    uint8_t   perf_reject_pct = 0;
+    uint8_t   perf_drop_pct   = 0;
+
     // Noise_NK handshake state.  `handshake` is created on msg1 arrival and
     // destroyed once finalize() has populated `send_cs` / `recv_cs`.
     // `handshake_complete` gates any transport-level decrypt/encrypt.
@@ -113,6 +119,11 @@ public:
     // Best probe result (lowest ceiling wins for conservative adaptation).
     uint32_t probe_bw_bps() const;
     bool probe_pending() const;
+
+    // Worst-case target_fps across all connected clients (the host has
+    // to throttle to the slowest viewer).  Defaults to 60 when there are
+    // no clients yet; floors at 15 to keep interactivity from collapsing.
+    uint16_t min_perf_target_fps() const;
 
     VideoSender* sender() { return sender_.get(); }
     AudioSender* audio_sender() { return audio_sender_.get(); }

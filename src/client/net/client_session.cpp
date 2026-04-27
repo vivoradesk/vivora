@@ -145,6 +145,7 @@ void ClientSession::poll() {
         int n = socket_->recv_from(buf, sizeof(buf), sender);
         if (n <= 0) break;
         last_recv_time_ = Clock::now();
+        bytes_received_ += static_cast<uint64_t>(n);
         handle_packet(buf, static_cast<size_t>(n));
     }
 
@@ -204,6 +205,18 @@ void ClientSession::poll() {
             Clock::now() - last_audio_stat_log_).count();
         if (last_audio_stat_log_.time_since_epoch().count() == 0 || since_log >= 5000) {
             uint64_t recv = audio_receiver_ ? audio_receiver_->packets_received() : 0;
+            uint64_t plc  = audio_receiver_ ? audio_receiver_->plc_frames()      : 0;
+            // Per-second rates for the HUD — averaged across this 5 s
+            // log window.  Audio runs at ~100 pps when healthy.
+            const double window_s = since_log > 0 ? since_log / 1000.0 : 5.0;
+            const uint64_t d_recv = recv - last_audio_recv_;
+            const uint64_t d_plc  = plc  - last_audio_plc_;
+            last_audio_pps_ = static_cast<uint32_t>(d_recv / window_s);
+            last_plc_pct_   = d_recv > 0
+                ? static_cast<uint32_t>((d_plc * 100) / d_recv)
+                : 0;
+            last_audio_recv_ = recv;
+            last_audio_plc_  = plc;
             log::info("ClientSession",
                       "Audio socket stats: raw_pkts=%llu raw_bytes=%llu parsed=%llu",
                       (unsigned long long)audio_raw_packets_,
@@ -269,6 +282,23 @@ void ClientSession::poll() {
             if (since_report >= FEC_REPORT_INTERVAL_MS) {
                 send_fec_report();
                 last_fec_report_time_ = now;
+            }
+        }
+
+        // Periodic perf report — drives adaptive framerate on the host
+        // side.  Sent every 1 s with the client's current sustainable-
+        // fps estimate based on this interval's reject + drop counters.
+        // Initialise the timer at the first poll so we don't fire a
+        // bogus "huge interval" report before the very first second.
+        if (last_perf_report_time_.time_since_epoch().count() == 0) {
+            last_perf_report_time_ = now;
+            perf_drops_baseline_   = receiver_ ? receiver_->frames_dropped() : 0;
+        } else {
+            auto since_perf = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_perf_report_time_).count();
+            if (since_perf >= PERF_REPORT_INTERVAL_MS) {
+                send_perf_report();
+                last_perf_report_time_ = now;
             }
         }
 
@@ -665,6 +695,107 @@ void ClientSession::send_bw_probe_ack() {
 
     auto wire = pkt.serialize();
     send_sealed(wire);
+}
+
+void ClientSession::note_decoder_accepted() { ++perf_accepted_; }
+void ClientSession::note_decoder_rejected() {
+    ++perf_rejected_;
+    ++total_rejected_;
+}
+
+void ClientSession::send_perf_report() {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    // Compute reject + drop ratios for this 1 s window.
+    const uint32_t total        = perf_accepted_ + perf_rejected_;
+    const uint64_t drops_now    = receiver_ ? receiver_->frames_dropped() : 0;
+    const uint64_t drops_window = drops_now - perf_drops_baseline_;
+    perf_drops_baseline_ = drops_now;
+    total_dropped_ = drops_now;  // assembler counter is already cumulative
+    // Denominator includes drops so "0 decoded + many drops" reads as
+    // 100% loss — the earlier `total > 0 ? ... : 0` guard masked startup
+    // overload as a clean interval and let the up-step logic bump fps
+    // back to 60 too aggressively.
+    const uint32_t denom = total + static_cast<uint32_t>(drops_window);
+    const float reject_ratio = denom > 0
+        ? static_cast<float>(perf_rejected_) / static_cast<float>(denom)
+        : 0.0f;
+    const float drop_ratio = denom > 0
+        ? static_cast<float>(drops_window) / static_cast<float>(denom)
+        : 0.0f;
+
+    // If the interval had almost no activity (e.g. waiting for an IDR),
+    // there's no signal to act on — hold target_fps_ steady and keep
+    // the clean-streak counter at zero so we don't drift down on
+    // silence or up on pure absence-of-evidence.
+    constexpr uint32_t MIN_ACTIVITY = 10;
+    const bool low_activity = denom < MIN_ACTIVITY;
+
+    // Adaptation: ratchet down quickly when we're overloaded, ratchet up
+    // slowly after sustained clean intervals so we don't oscillate.
+    if (low_activity) {
+        perf_clean_streak_ = 0;
+    } else if (reject_ratio > PERF_REJECT_DOWN || drop_ratio > PERF_REJECT_DOWN) {
+        // Step ~25% down, snap to a coarse ladder to avoid jitter — 60,
+        // 45, 30, 22, 15.  Floor at PERF_TARGET_FPS_MIN.
+        uint16_t next = static_cast<uint16_t>(perf_target_fps_ * 3 / 4);
+        if (next < PERF_TARGET_FPS_MIN) next = PERF_TARGET_FPS_MIN;
+        perf_target_fps_     = next;
+        perf_clean_streak_   = 0;
+    } else if (reject_ratio < PERF_REJECT_UP && drop_ratio < PERF_REJECT_UP) {
+        if (++perf_clean_streak_ >= PERF_UP_STREAK) {
+            uint16_t next = static_cast<uint16_t>(perf_target_fps_ * 5 / 4);
+            if (next > PERF_TARGET_FPS_MAX) next = PERF_TARGET_FPS_MAX;
+            // Hold at 60 unless caller has explicitly opted into 120 — for
+            // now everything tops out at 60 as a safety; the 120 ceiling
+            // becomes meaningful when the host gains a `--target-fps 120`
+            // CLI flag and signals the cap to the client.
+            if (next > 60) next = 60;
+            perf_target_fps_   = next;
+            perf_clean_streak_ = 0;
+        }
+    } else {
+        perf_clean_streak_ = 0;  // marginal interval — neither up nor down
+    }
+
+    // Build wire payload (8 bytes).
+    protocol::Packet pkt;
+    pkt.header.type      = protocol::PacketType::PerfReport;
+    pkt.header.seq_no    = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags     = 0;
+    pkt.payload.resize(8, 0);
+    pkt.payload[0] = static_cast<uint8_t>(perf_target_fps_ & 0xFF);
+    pkt.payload[1] = static_cast<uint8_t>((perf_target_fps_ >> 8) & 0xFF);
+    pkt.payload[2] = static_cast<uint8_t>(reject_ratio * 100.0f + 0.5f);
+    pkt.payload[3] = static_cast<uint8_t>(drop_ratio   * 100.0f + 0.5f);
+    // [4..8) reserved for future fields (decode_us / render_us avg).
+    pkt.header.payload_len = 8;
+
+    // Cache for HUD before resetting the counters below.
+    last_reject_pct_ = reject_ratio * 100.0f;
+    last_drop_pct_   = drop_ratio   * 100.0f;
+    // Bitrate over this 1 s window — bytes received on the main socket
+    // (video + control + retx).  Audio socket bytes are reported
+    // separately via the audio-stat block.
+    const uint64_t bytes_window = bytes_received_ - bytes_baseline_;
+    bytes_baseline_   = bytes_received_;
+    last_bitrate_bps_ = static_cast<uint32_t>(bytes_window * 8u);
+
+    auto wire = pkt.serialize();
+    send_sealed(wire);
+
+    log::info("ClientSession",
+              "PerfReport: target=%u accepted=%u rejected=%u drops=%llu "
+              "reject=%.1f%% drop=%.1f%% streak=%d",
+              perf_target_fps_, perf_accepted_, perf_rejected_,
+              (unsigned long long)drops_window,
+              reject_ratio * 100.0f, drop_ratio * 100.0f,
+              perf_clean_streak_);
+
+    // Reset window counters for the next interval.
+    perf_accepted_ = 0;
+    perf_rejected_ = 0;
 }
 
 void ClientSession::send_fec_report() {

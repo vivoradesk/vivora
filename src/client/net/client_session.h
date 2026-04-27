@@ -43,6 +43,14 @@ public:
     // Drive the session: send hellos, receive packets, respond to pings.
     void poll();
 
+    // Decode-feedback hooks called by the view loop after each frame is
+    // submitted to the platform decoder.  Drives the client's sustainable
+    // framerate estimate that's reported back to the host once per second
+    // via PerfReport so the host can lower the capture/encode rate when
+    // the client can't keep up (and raise it again when it can).
+    void note_decoder_accepted();
+    void note_decoder_rejected();
+
     // Pop next complete video frame. Returns false if none available.
     bool pop_frame(net::AssembledFrame& frame);
 
@@ -62,6 +70,21 @@ public:
 
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }
+
+    // HUD accessors — populated each PerfReport tick / audio stat tick.
+    uint16_t perf_target_fps()  const { return perf_target_fps_; }
+    float    last_reject_pct()  const { return last_reject_pct_; }
+    float    last_drop_pct()    const { return last_drop_pct_; }
+    uint32_t last_audio_pps()   const { return last_audio_pps_; }
+    uint32_t last_plc_pct()     const { return last_plc_pct_; }
+    uint32_t last_bitrate_bps() const { return last_bitrate_bps_; }
+    uint16_t stream_width()     const { return stream_info_.width; }
+    uint16_t stream_height()    const { return stream_info_.height; }
+    // Cumulative event counts — useful in the HUD next to the
+    // (small) per-second percentages, since visible artefacts are
+    // typically rare events whose ratios round to 0.0%.
+    uint64_t total_rejected()   const { return total_rejected_; }
+    uint64_t total_dropped()    const { return total_dropped_; }
 
     // Codec advertised by the host in HELLO_ACK.  Defaults to HEVC for
     // legacy hosts that don't carry the codec byte.
@@ -101,6 +124,7 @@ private:
     void send_bw_probe_ack();
 
     void send_fec_report();
+    void send_perf_report();
 
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<net::IUdpSocket> audio_socket_;
@@ -173,6 +197,42 @@ private:
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
     static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;
+    static constexpr int64_t PERF_REPORT_INTERVAL_MS = 1000;
+    // Bounds for the auto-tuned target framerate.  120 is the wire/spec
+    // max; 15 is the floor below which interactivity feels broken.
+    static constexpr uint16_t PERF_TARGET_FPS_MAX = 120;
+    static constexpr uint16_t PERF_TARGET_FPS_MIN = 15;
+    // Reject ratio thresholds over the last 1 s window.
+    static constexpr float    PERF_REJECT_DOWN = 0.05f;  // > 5% → step down
+    static constexpr float    PERF_REJECT_UP   = 0.01f;  // < 1% → eligible for step up
+    // Step-up requires this many consecutive clean intervals.
+    static constexpr int      PERF_UP_STREAK   = 3;
+
+    // Per-interval counters reset each PerfReport tick.
+    uint32_t perf_accepted_      = 0;
+    uint32_t perf_rejected_      = 0;
+    uint64_t perf_drops_baseline_ = 0;  // frames_dropped at last tick
+    int      perf_clean_streak_  = 0;
+    uint16_t perf_target_fps_    = 60;
+    TimePoint last_perf_report_time_;
+
+    // Cached snapshots for the HUD overlay — last-known rates updated
+    // whenever the corresponding periodic computation runs.
+    float    last_reject_pct_    = 0.0f;
+    float    last_drop_pct_      = 0.0f;
+    uint32_t last_audio_pps_     = 0;
+    uint32_t last_plc_pct_       = 0;
+    uint64_t last_audio_recv_    = 0;
+    uint64_t last_audio_plc_     = 0;
+    // Inbound bitrate counter (main socket only — audio socket has its
+    // own raw_bytes counter we already track).  Sampled at PerfReport
+    // cadence to expose `last_bitrate_bps_` to the HUD.
+    uint64_t bytes_received_     = 0;
+    uint64_t bytes_baseline_     = 0;
+    uint32_t last_bitrate_bps_   = 0;
+    // Cumulative — never reset between intervals, only grow.
+    uint64_t total_rejected_     = 0;
+    uint64_t total_dropped_      = 0;
 
     // Scratch buffers reused across handle_packet() / poll() calls so we
     // don't allocate a fresh std::vector<std::vector<uint8_t>> per UDP

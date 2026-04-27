@@ -162,6 +162,24 @@ uint16_t qt_key_to_vk(int qt_key) {
 QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    // Diagnostics overlay.  Child QLabel renders on top of the GL widget;
+    // semi-transparent dark background, monospace, top-right corner.
+    // Default hidden — F9 toggles.
+    hud_label_ = new QLabel(this);
+    hud_label_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    hud_label_->setStyleSheet(
+        "QLabel {"
+        "  background: rgba(0, 0, 0, 160);"
+        "  color: rgb(220, 220, 220);"
+        "  font-family: 'DejaVu Sans Mono', 'Consolas', monospace;"
+        "  font-size: 12px;"
+        "  padding: 8px;"
+        "  border-radius: 4px;"
+        "}");
+    hud_label_->setText("HUD ready (F9)");
+    hud_label_->adjustSize();
+    hud_label_->hide();
 }
 
 QtGlVideoView::~QtGlVideoView() {
@@ -289,6 +307,7 @@ void QtGlVideoView::initializeGL() {
 
 void QtGlVideoView::resizeGL(int /*w*/, int /*h*/) {
     recompute_viewport();
+    position_hud();
 }
 
 void QtGlVideoView::paintGL() {
@@ -402,7 +421,58 @@ void QtGlVideoView::wheelEvent(QWheelEvent* e) {
 
 void QtGlVideoView::keyPressEvent(QKeyEvent* e)   {
     if (e->isAutoRepeat()) return;  // host handles repeat itself
+    // F9: toggle diagnostics HUD.  Don't forward the key to the host —
+    // it's a client-local debug control.
+    if (e->key() == Qt::Key_F9) {
+        hud_visible_ = !hud_visible_;
+        if (hud_visible_) {
+            rebuild_hud_text();
+            position_hud();
+            hud_label_->show();
+            hud_label_->raise();
+        } else {
+            hud_label_->hide();
+        }
+        return;
+    }
     emit_key(e->key(), true);
+}
+
+void QtGlVideoView::update_stats(const StatsView& stats) {
+    last_stats_ = stats;
+    if (hud_visible_) {
+        rebuild_hud_text();
+        position_hud();
+    }
+}
+
+void QtGlVideoView::rebuild_hud_text() {
+    if (!hud_label_) return;
+    QString txt;
+    txt += QString::asprintf("FPS:    %5.1f decoded / %5.1f arrived / target %u\n",
+                             last_stats_.fps, last_stats_.arrived_fps,
+                             last_stats_.target_fps);
+    txt += QString::asprintf("RTT:    %5.1f ms   Bitrate: %u kbps\n",
+                             last_stats_.rtt_ms, last_stats_.bitrate_kbps);
+    txt += QString::asprintf("Reject: %5.2f%% (%llu)   Drop: %5.2f%% (%llu)\n",
+                             last_stats_.reject_pct,
+                             (unsigned long long)last_stats_.total_rejected,
+                             last_stats_.drop_pct,
+                             (unsigned long long)last_stats_.total_dropped);
+    txt += QString::asprintf("Audio:  %u pps   PLC %u%%\n",
+                             last_stats_.audio_pps, last_stats_.plc_pct);
+    txt += QString::asprintf("Stream: %ux%u%s\n",
+                             last_stats_.width, last_stats_.height,
+                             last_stats_.hdr ? " HDR" : "");
+    txt += QString::asprintf("Decoder: %s", last_stats_.decoder);
+    hud_label_->setText(txt);
+    hud_label_->adjustSize();
+}
+
+void QtGlVideoView::position_hud() {
+    if (!hud_label_) return;
+    const int pad = 12;
+    hud_label_->move(width() - hud_label_->width() - pad, pad);
 }
 
 void QtGlVideoView::keyReleaseEvent(QKeyEvent* e) {

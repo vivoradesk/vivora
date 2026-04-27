@@ -71,6 +71,8 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     auto last_idr_request = TimePoint{};
     auto last_log_time = Clock::now();
     uint64_t last_log_frames = 0;
+    uint64_t last_arrived_count = 0;
+    float    last_arrived_fps   = 0.0f;
 
     while (true) {
         // Platform event pump (Qt processEvents / Cocoa pump / etc.).
@@ -173,25 +175,35 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                                net_frame.timestamp, net_frame.keyframe,
                                net_frame.seq_no)) {
                 frames_fed++;
+                session.note_decoder_accepted();
             } else {
+                session.note_decoder_rejected();
                 // Decoder rejected the frame — same recovery path as a
                 // network-level drop: dump everything buffered and wait
                 // for the next IDR.  Project rule: any sign of corruption
                 // means we drop to a clean restart rather than risk
                 // displaying half-decoded artifacts.
+                //
+                // Always switch to "waiting for IDR" mode and stop the
+                // batch, even if the IDR request itself is rate-limited.
+                // Otherwise the next pop_frame of the same batch would
+                // re-enter decode() (which is still corrupt-latched),
+                // count another false rejection, and the perf-report
+                // metric would treat one corruption event as a sustained
+                // overload — driving target_fps down for nothing.
+                got_keyframe = false;
+                platform.flush_decoder();
                 auto now = Clock::now();
                 auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - last_idr_request).count();
-                if (got_keyframe && since_idr_req > MIN_IDR_INTERVAL_MS) {
+                if (since_idr_req > MIN_IDR_INTERVAL_MS) {
                     session.reset_video_stream();
                     session.request_idr();
                     last_idr_request = now;
-                    got_keyframe = false;
-                    platform.flush_decoder();
                     log::warn("VIEW", "Decoder rejected frame seq=%u, dropped buffered + requested IDR + flush",
                               net_frame.seq_no);
-                    break;  // stop feeding this batch — we just trashed state
                 }
+                break;  // stop feeding this batch — we just trashed state
             }
         }
 
@@ -218,7 +230,9 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         int rendered = platform.render();
         frames_decoded += rendered > 0 ? rendered : frames_fed;
 
-        // FPS logging.
+        // FPS logging + HUD stats update.  Runs once per ~60 decoded
+        // frames so the HUD refresh rate matches the FPS-log cadence
+        // (≤ 1 Hz at low decode rates, slightly higher when we sail).
         if (frames_decoded > 0 && frames_decoded - last_log_frames >= 60) {
             auto now = Clock::now();
             double window_sec = std::chrono::duration<double>(now - last_log_time).count();
@@ -229,6 +243,48 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             last_log_frames = frames_decoded;
             log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms",
                 (unsigned long long)frames_decoded, inst_fps, session.rtt_ms());
+
+            // Network arrival rate (assembled frames since last sample).
+            // Useful next to decode-fps to spot decoder-vs-network bottleneck:
+            // if arrived ≈ source but decode lags, the client CPU is the
+            // bottleneck; if arrived itself drops, the issue is upstream.
+            uint64_t arrived_now = session.receiver()
+                                   ? session.receiver()->frames_completed()
+                                   : 0;
+            last_arrived_fps = window_sec > 0
+                ? static_cast<float>((arrived_now - last_arrived_count) / window_sec)
+                : 0.0f;
+            last_arrived_count = arrived_now;
+
+            // Push HUD snapshot.  Many fields are quick to read; the
+            // ones we don't have (audio PPS, decoder name) are filled
+            // with best-effort placeholders for now.
+            StatsView v{};
+            v.fps          = static_cast<float>(inst_fps);
+            v.arrived_fps  = last_arrived_fps;
+            v.rtt_ms       = static_cast<float>(session.rtt_ms());
+            v.bitrate_kbps   = session.last_bitrate_bps() / 1000;
+            v.width          = session.stream_width();
+            v.height         = session.stream_height();
+            v.total_rejected = session.total_rejected();
+            v.total_dropped  = session.total_dropped();
+            v.target_fps = session.perf_target_fps();
+            v.reject_pct = session.last_reject_pct();
+            v.drop_pct   = session.last_drop_pct();
+            v.audio_pps  = session.last_audio_pps();
+            v.plc_pct    = session.last_plc_pct();
+            std::snprintf(v.decoder, sizeof(v.decoder), "%s",
+#if defined(DESKBEAM_LINUX)
+                          "SW HEVC"
+#elif defined(DESKBEAM_WINDOWS)
+                          "MF HW"
+#elif defined(DESKBEAM_MACOS)
+                          "VTB HW"
+#else
+                          "?"
+#endif
+            );
+            platform.update_stats(v);
         }
 
         // Adaptive sleep: if we did real work this tick (fed a frame or

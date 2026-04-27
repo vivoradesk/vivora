@@ -124,6 +124,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     uint32_t last_applied_br = bitrate_ctl.current();
     bool had_clients = false;
 
+    // Adaptive framerate throttle.  Clients send PerfReport once per second
+    // with their sustainable target_fps; the host paces capture+encode to
+    // the slowest client.  EWMA over the last few samples avoids reacting
+    // to single-interval spikes, and we log every applied change so we can
+    // see the throttle live in the host log alongside bitrate adjustments.
+    auto     last_capture_time   = TimePoint{};
+    uint16_t applied_target_fps  = 60;
+    float    target_fps_ewma     = 60.0f;
+    int64_t  min_frame_interval_us = 16667;  // 60 fps default
+
     while (true) {
         session.poll();
 
@@ -224,10 +234,38 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             log::info("HOST", "IDR requested for new client");
         }
 
+        // Adaptive framerate gate: skip this iteration's capture if it
+        // would arrive sooner than the negotiated min frame interval.
+        // Update the smoothed target every iteration but only re-arm
+        // the interval when EWMA crosses ±2 fps from the applied value
+        // (prevents single-spike whiplash).
+        {
+            uint16_t want = session.min_perf_target_fps();
+            target_fps_ewma = 0.7f * target_fps_ewma + 0.3f * static_cast<float>(want);
+            uint16_t smoothed = static_cast<uint16_t>(target_fps_ewma + 0.5f);
+            int diff = static_cast<int>(smoothed) - static_cast<int>(applied_target_fps);
+            if (diff >= 2 || diff <= -2) {
+                applied_target_fps = smoothed;
+                min_frame_interval_us = 1'000'000 / std::max<uint16_t>(smoothed, 1);
+                log::info("HOST", "Adaptive framerate -> %u fps (interval %lld us)",
+                          applied_target_fps,
+                          static_cast<long long>(min_frame_interval_us));
+            }
+        }
+        if (last_capture_time.time_since_epoch().count() != 0 && !force_encode) {
+            auto since_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                Clock::now() - last_capture_time).count();
+            if (since_us < min_frame_interval_us) {
+                platform.on_idle();
+                continue;
+            }
+        }
+
         // Capture + encode.
         uint64_t pts_us = 0;
         bool content_changed = false;
         bool got_frame = platform.capture_and_encode(pts_us, content_changed, force_encode);
+        if (got_frame) last_capture_time = Clock::now();
 
         // Cursor sync runs regardless of whether we produced an encoded
         // frame — the cursor can move over static content.

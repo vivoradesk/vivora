@@ -14,6 +14,28 @@ namespace deskbeam {
 // One implementation per platform.
 // The common view loop (run_view_loop) drives session/IDR-recovery/keyframe
 // gating and calls into this interface for platform work.
+// Live diagnostics surfaced to the user through an optional HUD overlay.
+// Populated by the view loop once per second from session + decoder stats
+// and pushed to the platform via `update_stats`.  Toggled with F9; default
+// hidden so the typical user never sees it.
+struct StatsView {
+    float    fps        = 0.0f;   // decoded frames per second
+    float    arrived_fps= 0.0f;   // network-assembled frames per second
+    float    rtt_ms     = 0.0f;   // round-trip time to host
+    uint32_t bitrate_kbps = 0;    // inbound bitrate from main socket
+    float    reject_pct = 0.0f;   // decoder reject rate over last 1s
+    float    drop_pct   = 0.0f;   // network frame drop rate over last 1s
+    uint16_t target_fps = 60;     // current adaptive framerate target
+    uint32_t plc_pct    = 0;      // audio PLC rate over last 1s (×100)
+    uint32_t audio_pps  = 0;      // audio packets per second
+    uint64_t total_rejected = 0;  // cumulative decoder rejections
+    uint64_t total_dropped  = 0;  // cumulative network drops
+    uint32_t width      = 0;      // decoded frame width
+    uint32_t height     = 0;      // decoded frame height
+    bool     hdr        = false;  // BT.2020 + PQ if true
+    char     decoder[16] = {0};   // backend name: "SW HEVC", "VAAPI HEVC", etc.
+};
+
 struct ViewPlatform {
     virtual ~ViewPlatform() = default;
 
@@ -51,6 +73,10 @@ struct ViewPlatform {
     // The decoded texture may be larger due to codec alignment (QSV rounds
     // to 16 pixels); these are the authoritative content dims.
     virtual void set_stream_size(uint32_t /*width*/, uint32_t /*height*/) {}
+
+    // Push a diagnostics snapshot to the HUD overlay (no-op if HUD off).
+    // Called by the view loop ~once per second.
+    virtual void update_stats(const StatsView& /*stats*/) {}
 
     // Cleanup.
     virtual void shutdown() {}
