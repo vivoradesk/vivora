@@ -1,4 +1,10 @@
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+if(UNIX AND NOT APPLE)
+    # Linux client uses QOpenGLWidget (lives in Qt6::OpenGLWidgets, separate
+    # from QtOpenGL which is the legacy QGLWidget module).
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+endif()
 # qt_standard_project_setup() landed in Qt 6.3.  Ubuntu 22.04 ships Qt 6.2,
 # so fall back to the equivalent CMake settings if the helper isn't there.
 if(COMMAND qt_standard_project_setup)
@@ -60,6 +66,28 @@ if(APPLE)
         "-framework QuartzCore"
         "-framework ScreenCaptureKit"
         "-framework ApplicationServices"
+    )
+endif()
+
+if(UNIX AND NOT APPLE)
+    # Linux platform — client only for L2.  Host (capture/encode/inject)
+    # is L3 and not wired up yet.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+        libavcodec libavutil libswscale)
+
+    target_sources(deskbeam PRIVATE
+        linux_view_platform.cpp
+        ${CMAKE_SOURCE_DIR}/src/client/decode/ffmpeg_decoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/client/render/qt_gl_video_view.cpp
+        # Stubs for host-side symbols pulled in by the cross-platform
+        # HostSession; real Linux host support is L3.
+        ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_stub.cpp
+    )
+    target_link_libraries(deskbeam PRIVATE
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
+        PkgConfig::LIBAV
     )
 endif()
 

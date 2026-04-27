@@ -1,7 +1,22 @@
-// Linux audio platform stubs. macOS and Windows have real implementations;
-// Linux (PulseAudio/PipeWire) TBD.
+// Audio platform stubs for environments without a native implementation.
+// Linux now provides `create_default_audio_output()` from
+// `pulse_audio_output.cpp`, so this file only defines the loopback capture
+// stub on Linux (host-side capture is L3 territory) and full stubs for any
+// other UNIX-like target that may appear later.
 
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if defined(DESKBEAM_LINUX)
+
+#include "common/audio/audio_capture.h"
+
+namespace deskbeam::audio {
+
+std::unique_ptr<AudioCapture> create_default_loopback_capture() {
+    return nullptr;
+}
+
+} // namespace deskbeam::audio
+
+#elif !defined(_WIN32) && !defined(__APPLE__)
 
 #include "common/audio/audio_capture.h"
 #include "common/audio/audio_output.h"

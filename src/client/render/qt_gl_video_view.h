@@ -1,0 +1,104 @@
+#pragma once
+
+#include "common/protocol/input_event.h"
+
+#include <QOpenGLBuffer>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVertexArrayObject>
+#include <QOpenGLWidget>
+
+#include <cstdint>
+#include <functional>
+
+namespace deskbeam::client {
+
+// QOpenGLWidget that renders a single YUV420P frame to a fullscreen quad
+// via a fragment shader doing BT.709 YUV->RGB.  Mouse / keyboard / wheel
+// events are translated to `protocol::InputEvent` and forwarded through
+// the registered callback (which the session sends to the host).
+//
+// The widget is "pull"-driven: callers push raw YUV planes via
+// `update_yuv()` from the view loop thread; the next paint event uploads
+// them to GL textures and renders.  We don't try to do GL work outside
+// paintGL — Qt's GL context is only current there.
+class QtGlVideoView : public QOpenGLWidget, protected QOpenGLFunctions {
+    Q_OBJECT
+public:
+    using InputCallback = std::function<void(const protocol::InputEvent&)>;
+
+    explicit QtGlVideoView(QWidget* parent = nullptr);
+    ~QtGlVideoView() override;
+
+    void set_input_callback(InputCallback cb) { input_cb_ = std::move(cb); }
+
+    // Pre-encoder stream dimensions — used to map widget-local mouse
+    // coords to the host's input coord space.  Updated when the host's
+    // StreamInfo arrives or as a fallback from the first decoded frame.
+    void set_stream_size(uint32_t w, uint32_t h);
+
+    // Hand a freshly-decoded YUV420P frame to the widget.  Pointers must
+    // remain valid until this call returns (we copy into internal buffers
+    // because GL upload happens later in paintGL).
+    void update_yuv(const uint8_t* y, int y_stride,
+                    const uint8_t* u, int u_stride,
+                    const uint8_t* v, int v_stride,
+                    uint32_t w, uint32_t h);
+
+    // True → BT.2020 + PQ + tonemap; false → BT.709 limited-range linear.
+    // Set after the decoder identifies the stream's colorspace.
+    void set_hdr(bool hdr) { is_hdr_ = hdr; }
+
+protected:
+    void initializeGL() override;
+    void resizeGL(int w, int h) override;
+    void paintGL() override;
+
+    void mouseMoveEvent(QMouseEvent*) override;
+    void mousePressEvent(QMouseEvent*) override;
+    void mouseReleaseEvent(QMouseEvent*) override;
+    void wheelEvent(QWheelEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
+    void keyReleaseEvent(QKeyEvent*) override;
+
+private:
+    void emit_mouse_button(int qt_button, bool down);
+    void emit_mouse_pos();
+    void emit_key(int qt_key, bool down);
+
+    QOpenGLShaderProgram      program_;
+    QOpenGLVertexArrayObject  vao_;
+    QOpenGLBuffer             vbo_{QOpenGLBuffer::VertexBuffer};
+
+    // Three luminance textures (one per plane).  Keep the GLuint handles
+    // raw — Qt 6.2 doesn't have QOpenGLTexture overloads we want for
+    // R8 single-channel uploads at arbitrary stride.
+    unsigned int y_tex_ = 0;
+    unsigned int u_tex_ = 0;
+    unsigned int v_tex_ = 0;
+
+    // Last YUV frame contents — copied here on update_yuv, uploaded in
+    // paintGL.  Strides are stored separately so we can pass them as the
+    // PIXEL_UNPACK row length (decoder's stride may differ from width).
+    std::vector<uint8_t> y_buf_, u_buf_, v_buf_;
+    int  y_stride_ = 0, u_stride_ = 0, v_stride_ = 0;
+    uint32_t frame_w_ = 0, frame_h_ = 0;
+    bool dirty_ = false;     // true → re-upload textures next paint
+    bool has_frame_ = false;
+    bool is_hdr_   = false;  // true → BT.2020 + PQ + tonemap path
+
+    // Pre-padding stream size from the host.  Mouse mapping uses these.
+    uint32_t stream_w_ = 0;
+    uint32_t stream_h_ = 0;
+
+    // Aspect-preserving viewport inside the widget (pillarbox / letterbox).
+    // Recomputed in resizeGL and whenever stream_size changes.  Mouse coord
+    // mapping uses these so clicks outside the image clamp cleanly.
+    int viewport_x_ = 0, viewport_y_ = 0;
+    int viewport_w_ = 0, viewport_h_ = 0;
+    void recompute_viewport();
+
+    InputCallback input_cb_;
+};
+
+} // namespace deskbeam::client

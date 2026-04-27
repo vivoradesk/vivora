@@ -19,6 +19,10 @@
 #include "app/mac_view_platform.h"
 #endif
 
+#ifdef DESKBEAM_LINUX
+#include "app/linux_view_platform.h"
+#endif
+
 // Match a long-form flag with an attached value: both "--flag VALUE" (next
 // argv) and "--flag=VALUE" (single argv with '=') are accepted.  Returns the
 // value pointer, or nullptr if the current argv doesn't match the flag.
@@ -139,6 +143,13 @@ int main(int argc, char* argv[]) {
         MacHostPlatform platform;
         if (!platform.init(display_index, prefer_hdr, manual_bitrate_bps, codec)) return 1;
 #endif
+#ifdef DESKBEAM_LINUX
+        std::fprintf(stderr,
+            "Error: --host is not yet implemented on Linux. "
+            "Linux client (--view) works against macOS/Windows hosts; "
+            "Linux host support is L3 on the roadmap.\n");
+        return 1;
+#else
         deskbeam::HostLoopConfig lcfg;
         lcfg.port = port;
         lcfg.manual_bitrate_bps = manual_bitrate_bps;
@@ -146,6 +157,7 @@ int main(int argc, char* argv[]) {
         lcfg.codec = codec;
         lcfg.stun_server = stun_server;
         return deskbeam::run_host_loop(platform, lcfg);
+#endif
     }
 
     if (mode_view) {
@@ -165,6 +177,10 @@ int main(int argc, char* argv[]) {
 #ifdef DESKBEAM_MACOS
         MacViewPlatform platform;
         if (!platform.init(host_ip, port)) return 1;
+#endif
+#ifdef DESKBEAM_LINUX
+        LinuxViewPlatform platform;
+        if (!platform.init(argc, argv, host_ip, port)) return 1;
 #endif
         deskbeam::ViewLoopConfig vcfg;
         vcfg.host_ip = host_ip;

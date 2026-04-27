@@ -155,6 +155,13 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             if (!got_keyframe) {
                 if (net_frame.keyframe) {
                     got_keyframe = true;
+                    // Flush decoder DPB before feeding the keyframe.  macOS
+                    // VideoToolbox can emit CRA+RASL with non-resetting POC,
+                    // which leaves stale references in libavcodec's DPB and
+                    // produces "Could not find ref with POC X" warnings on
+                    // every subsequent P-frame, manifesting as flicker.
+                    // Flushing forces a clean restart from the keyframe.
+                    platform.flush_decoder();
                     log::info("VIEW", "Got keyframe seq=%u (%zu bytes), starting decode",
                               net_frame.seq_no, net_frame.data.size());
                 } else {
@@ -164,8 +171,28 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             }
             if (platform.decode(net_frame.data.data(), net_frame.data.size(),
                                net_frame.timestamp, net_frame.keyframe,
-                               net_frame.seq_no))
+                               net_frame.seq_no)) {
                 frames_fed++;
+            } else {
+                // Decoder rejected the frame — same recovery path as a
+                // network-level drop: dump everything buffered and wait
+                // for the next IDR.  Project rule: any sign of corruption
+                // means we drop to a clean restart rather than risk
+                // displaying half-decoded artifacts.
+                auto now = Clock::now();
+                auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_idr_request).count();
+                if (got_keyframe && since_idr_req > MIN_IDR_INTERVAL_MS) {
+                    session.reset_video_stream();
+                    session.request_idr();
+                    last_idr_request = now;
+                    got_keyframe = false;
+                    platform.flush_decoder();
+                    log::warn("VIEW", "Decoder rejected frame seq=%u, dropped buffered + requested IDR + flush",
+                              net_frame.seq_no);
+                    break;  // stop feeding this batch — we just trashed state
+                }
+            }
         }
 
         // Cursor sync: pull any fresh shape, then push current position

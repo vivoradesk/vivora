@@ -120,7 +120,7 @@ bool ClientSession::start_audio() {
     // 60ms = 6 frames of prebuffer. Wide enough to absorb typical WiFi
     // bursts of 3–5 dropped packets without dropping to PLC, while still
     // cheap in end-to-end audio latency terms.
-    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/60)) {
+    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/120)) {
         audio_receiver_.reset();
         return false;
     }
