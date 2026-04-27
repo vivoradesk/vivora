@@ -1,5 +1,14 @@
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
-qt_standard_project_setup()
+# qt_standard_project_setup() landed in Qt 6.3.  Ubuntu 22.04 ships Qt 6.2,
+# so fall back to the equivalent CMake settings if the helper isn't there.
+if(COMMAND qt_standard_project_setup)
+    qt_standard_project_setup()
+else()
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTOUIC ON)
+    set(CMAKE_AUTORCC ON)
+    set(CMAKE_INCLUDE_CURRENT_DIR ON)
+endif()
 
 add_executable(deskbeam
     main.cpp

@@ -1,3 +1,40 @@
+# Tests are split into two groups:
+#   1. Cross-platform unit tests — exercise only `deskbeam_common` (protocol,
+#      codec, FEC, crypto, jitter, STUN client).  Build and run on every
+#      target.
+#   2. Windows-only integration tests — pull in DXGI capture, AMF encoder,
+#      Media Foundation decoder, etc.  Gated on WIN32 until equivalent
+#      Linux/macOS backends ship.
+
+# --- Cross-platform unit tests -----------------------------------------------
+
+add_executable(fragment_test fragment_test.cpp)
+target_link_libraries(fragment_test PRIVATE deskbeam_common)
+target_include_directories(fragment_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME fragment_test COMMAND fragment_test)
+
+add_executable(fec_test fec_test.cpp)
+target_link_libraries(fec_test PRIVATE deskbeam_common)
+target_include_directories(fec_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME fec_test COMMAND fec_test)
+
+add_executable(audio_test audio_test.cpp)
+target_link_libraries(audio_test PRIVATE deskbeam_common)
+target_include_directories(audio_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME audio_test COMMAND audio_test)
+
+add_executable(stun_test stun_test.cpp)
+target_link_libraries(stun_test PRIVATE deskbeam_common)
+target_include_directories(stun_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME stun_test COMMAND stun_test)
+
+add_executable(noise_test noise_test.cpp)
+target_link_libraries(noise_test PRIVATE deskbeam_common)
+target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME noise_test COMMAND noise_test)
+
+# --- Windows-only integration tests ------------------------------------------
+
 if(WIN32)
     add_executable(capture_test
         capture_test.cpp
@@ -28,30 +65,6 @@ if(WIN32)
     )
     target_link_libraries(capture_diag PRIVATE deskbeam_common d3d11 dxgi)
     target_include_directories(capture_diag PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_executable(fragment_test fragment_test.cpp)
-    target_link_libraries(fragment_test PRIVATE deskbeam_common)
-    target_include_directories(fragment_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME fragment_test COMMAND fragment_test)
-
-    add_executable(fec_test fec_test.cpp)
-    target_link_libraries(fec_test PRIVATE deskbeam_common)
-    target_include_directories(fec_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME fec_test COMMAND fec_test)
-
-    add_executable(audio_test audio_test.cpp)
-    target_link_libraries(audio_test PRIVATE deskbeam_common)
-    target_include_directories(audio_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME audio_test COMMAND audio_test)
-
-    add_executable(stun_test stun_test.cpp)
-    target_link_libraries(stun_test PRIVATE deskbeam_common)
-    target_include_directories(stun_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME stun_test COMMAND stun_test)
-
-    add_executable(noise_test noise_test.cpp)
-    target_link_libraries(noise_test PRIVATE deskbeam_common)
-    target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    add_test(NAME noise_test COMMAND noise_test)
 
     add_executable(transport_test
         transport_test.cpp

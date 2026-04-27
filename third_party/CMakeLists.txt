@@ -34,6 +34,11 @@ add_library(speex_resampler STATIC
 target_include_directories(speex_resampler PUBLIC
     ${SPEEXDSP_SRC_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/speex_generated
+    # Inner path so `#include "speexdsp_config_types.h"` (no prefix) from
+    # speexdsp_types.h resolves on GCC.  MSVC happens to find it via the
+    # outer path due to its `"foo.h"` search heuristics, but GCC needs it
+    # explicitly listed.
+    ${CMAKE_CURRENT_BINARY_DIR}/speex_generated/speex
 )
 target_include_directories(speex_resampler PRIVATE
     ${SPEEXDSP_SRC_DIR}/libspeexdsp

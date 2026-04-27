@@ -200,7 +200,10 @@
       "Bash(rm -f /tmp/claude/host-crypto.log /tmp/claude/view-crypto.log)",
       "Bash(C:/src/DeskBeam/build/bin/Release/deskbeam.exe *)",
       "Bash(echo \"host pid $!\" sleep 3 grep -E \"host public key|HostSession\" host.log)",
-      "Bash(echo \"client pid $!\")"
+      "Bash(echo \"client pid $!\")",
+      "Bash(wsl --status)",
+      "Bash(wsl -l -v)",
+      "Bash(wsl bash *)"
     ]
   }
 }
