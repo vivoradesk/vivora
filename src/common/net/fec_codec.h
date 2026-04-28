@@ -85,7 +85,12 @@ public:
     // deferred recoveries after the reordering grace period expires.
     void tick(std::vector<std::vector<uint8_t>>& recovered);
 
-    float loss_rate() const { return ewma_loss_; }
+    float    loss_rate()       const { return ewma_loss_; }
+    // Cumulative counters for the HUD.  recovered = data packets that FEC
+    // reconstructed for us; failed = groups whose missing-packet count
+    // exceeded the parity budget (M) and could not be reconstructed.
+    uint64_t total_recovered() const { return total_recovered_; }
+    uint64_t total_failed()    const { return total_failed_; }
 
     // Drop all state — call after an IDR / stream reset so stale groups
     // and old ring entries don't match against the fresh packet stream.
@@ -148,6 +153,8 @@ private:
 
     float ewma_loss_ = 0.0f;
     static constexpr float  EWMA_ALPHA = 0.15f;
+    uint64_t total_recovered_ = 0;
+    uint64_t total_failed_    = 0;
     static constexpr size_t MAX_GROUPS = 64;
 };
 

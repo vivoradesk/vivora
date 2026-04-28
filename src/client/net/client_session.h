@@ -233,6 +233,7 @@ private:
     // Cumulative — never reset between intervals, only grow.
     uint64_t total_rejected_     = 0;
     uint64_t total_dropped_      = 0;
+    uint64_t last_fec_failed_reported_ = 0;
 
     // Scratch buffers reused across handle_packet() / poll() calls so we
     // don't allocate a fresh std::vector<std::vector<uint8_t>> per UDP

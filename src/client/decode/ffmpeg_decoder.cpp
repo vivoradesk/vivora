@@ -3,6 +3,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/log.h>
 #include <libswscale/swscale.h>
@@ -13,11 +14,24 @@ extern "C" {
 namespace deskbeam::client {
 
 FfmpegDecoder::~FfmpegDecoder() {
-    if (sws_)       sws_freeContext(sws_);
-    if (out_frame_) av_frame_free(&out_frame_);
-    if (in_frame_)  av_frame_free(&in_frame_);
-    if (pkt_)       av_packet_free(&pkt_);
-    if (ctx_)       avcodec_free_context(&ctx_);
+    if (sws_)            sws_freeContext(sws_);
+    if (out_frame_)      av_frame_free(&out_frame_);
+    if (sw_frame_)       av_frame_free(&sw_frame_);
+    if (in_frame_)       av_frame_free(&in_frame_);
+    if (pkt_)            av_packet_free(&pkt_);
+    if (ctx_)            avcodec_free_context(&ctx_);
+    if (hw_device_ctx_)  av_buffer_unref(&hw_device_ctx_);
+}
+
+// libavcodec calls this with the list of pixel formats it can output.
+// We pin VAAPI when present so the decoder produces GPU surfaces; the
+// fallback to AV_PIX_FMT_NONE forces libav back to its default selection
+// if the HW path didn't initialise (defensive — usually doesn't trigger).
+static AVPixelFormat get_hw_format_cb(AVCodecContext* /*ctx*/, const AVPixelFormat* fmts) {
+    for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == AV_PIX_FMT_VAAPI) return *p;
+    }
+    return AV_PIX_FMT_NONE;
 }
 
 bool FfmpegDecoder::init(VideoCodec codec) {
@@ -36,34 +50,43 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
 
-    // Slice-only threading.  FF_THREAD_FRAME buffers N frames before
-    // emitting, adding (thread_count - 1) frames of decode latency —
-    // 4-8 frames at auto count, i.e. 67-133 ms at 60 fps, very visible
-    // in interactive use.  Slice threading parallelises within a frame
-    // when the encoder produces multi-slice output and is a no-op
-    // otherwise, so no harm leaving it on.  Throughput suffers vs frame
-    // threading; the right long-term answer is L4 VAAPI HW decode.
+    // Try VAAPI HW decode first.  Falls through to SW on any failure —
+    // missing GPU, no driver, missing kernel module, lack of permission
+    // on /dev/dri/renderD*, etc.  Logged at info either way so it's
+    // obvious which path is active in the field.
+    int hw_rc = av_hwdevice_ctx_create(&hw_device_ctx_, AV_HWDEVICE_TYPE_VAAPI,
+                                       nullptr, nullptr, 0);
+    if (hw_rc == 0 && hw_device_ctx_) {
+        ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
+        ctx_->get_format    = get_hw_format_cb;
+        hw_decode_          = true;
+    } else {
+        log::warn("FFDec", "VAAPI device init failed (rc=%d) — using SW decode", hw_rc);
+        if (hw_device_ctx_) av_buffer_unref(&hw_device_ctx_);
+    }
+
+    // Slice-only threading on the SW fallback.  Frame threading buffers
+    // N frames before emit (visible 67-133 ms latency at 60 fps); slice
+    // threading is zero-latency and parallelises within a frame when
+    // the encoder produces multi-slice output.  HW decode ignores both.
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
-    // No flags — earlier experiments with AV_CODEC_FLAG_LOW_DELAY shrank
-    // the DPB to a single reference, which caused legitimate forward
-    // refs to be evicted and produced "Could not find ref with POC X"
-    // for frames that DeskBeam's encoder still wanted to use.  Modern
-    // libav low-delay behavior is good enough by default for streams
-    // without B-frames.
 
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "avcodec_open2 failed");
         avcodec_free_context(&ctx_);
+        if (hw_device_ctx_) av_buffer_unref(&hw_device_ctx_);
         return false;
     }
 
     pkt_       = av_packet_alloc();
     in_frame_  = av_frame_alloc();
+    sw_frame_  = av_frame_alloc();
     out_frame_ = av_frame_alloc();
-    if (!pkt_ || !in_frame_ || !out_frame_) return false;
+    if (!pkt_ || !in_frame_ || !sw_frame_ || !out_frame_) return false;
 
-    log::info("FFDec", "Opened SW %s decoder",
+    log::info("FFDec", "Opened %s %s decoder",
+              hw_decode_ ? "VAAPI HW" : "SW",
               codec == VideoCodec::HEVC ? "HEVC" : "H.264");
     return true;
 }
@@ -137,8 +160,20 @@ void FfmpegDecoder::flush() {
     if (ctx_) avcodec_flush_buffers(ctx_);
 }
 
+const char* FfmpegDecoder::backend_name() const {
+    if (hw_decode_) return codec_ == VideoCodec::HEVC ? "VAAPI HEVC" : "VAAPI H.264";
+    return codec_ == VideoCodec::HEVC ? "SW HEVC" : "SW H.264";
+}
+
 bool FfmpegDecoder::reinit() {
     corrupt_ = false;
+    // We tried `avcodec_flush_buffers` for the HW path — it's ~100×
+    // cheaper but caused a hard crash a couple of seconds into a
+    // recovery cycle (no trace, segfault).  Suspected cause: stale
+    // VAAPI surface refs in in_frame_ that flush_buffers doesn't
+    // fully release.  Reverted to the full free+open rebuild — it
+    // costs ~100ms but is stable, and the perceived recovery jitter
+    // mostly comes from waiting for FEC parity, not the reinit itself.
     if (ctx_) avcodec_free_context(&ctx_);
     AVCodecID codec_id = (codec_ == VideoCodec::H264)
                            ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC;
@@ -146,6 +181,10 @@ bool FfmpegDecoder::reinit() {
     if (!dec) return false;
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
+    if (hw_device_ctx_) {
+        ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
+        ctx_->get_format    = get_hw_format_cb;
+    }
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
@@ -205,59 +244,91 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
         return false;
     }
 
+    // VAAPI path: surface lives on the GPU.  Readback to a separate
+    // sw_frame_ so the canonical receive target (in_frame_) keeps the
+    // shape libavcodec expects and we don't fight its frame lifecycle.
+    // After this branch `picked_frame` points either at in_frame_ (SW
+    // path) or sw_frame_ (HW path).  Both are valid until the next
+    // get_frame() call.  L4b will replace the readback with DMA-BUF +
+    // EGLImage zero-copy and skip this branch entirely.
+    AVFrame* picked_frame = in_frame_;
+    if (in_frame_->format == AV_PIX_FMT_VAAPI) {
+        av_frame_unref(sw_frame_);
+        if (av_hwframe_transfer_data(sw_frame_, in_frame_, 0) < 0) {
+            log::error("FFDec", "hwframe transfer failed");
+            av_frame_unref(in_frame_);
+            corrupt_ = true;
+            return false;
+        }
+        sw_frame_->color_primaries = in_frame_->color_primaries;
+        sw_frame_->color_trc       = in_frame_->color_trc;
+        sw_frame_->colorspace      = in_frame_->colorspace;
+        sw_frame_->color_range     = in_frame_->color_range;
+        sw_frame_->pts             = in_frame_->pts;
+        av_frame_unref(in_frame_);  // release GPU surface ref now
+        picked_frame = sw_frame_;
+    }
+
     // Log colorspace metadata once per stream — tells us if host is
     // sending HDR (BT.2020 + PQ) which our BT.709 shader can't handle
     // correctly without tonemapping.
     static bool logged_color = false;
     if (!logged_color) {
         logged_color = true;
+        // VAAPI commonly leaves AVFrame's color_* at UNSPECIFIED (2),
+        // even when the bitstream carries the right VUI params — the
+        // driver just doesn't propagate them.  Fall back to ctx_, which
+        // libav parses out of the SPS at codec-open time.
+        AVColorPrimaries pri = in_frame_->color_primaries;
+        AVColorTransferCharacteristic trc = in_frame_->color_trc;
+        AVColorSpace cs = in_frame_->colorspace;
+        AVColorRange rng = in_frame_->color_range;
+        if (pri == AVCOL_PRI_UNSPECIFIED) pri = ctx_->color_primaries;
+        if (trc == AVCOL_TRC_UNSPECIFIED) trc = ctx_->color_trc;
+        if (cs  == AVCOL_SPC_UNSPECIFIED) cs  = ctx_->colorspace;
+        if (rng == AVCOL_RANGE_UNSPECIFIED) rng = ctx_->color_range;
         log::info("FFDec",
-                  "Decoded fmt=%d colorspace=%d range=%d primaries=%d trc=%d",
-                  in_frame_->format,
-                  in_frame_->colorspace,
-                  in_frame_->color_range,
-                  in_frame_->color_primaries,
-                  in_frame_->color_trc);
-        // HDR detection: BT.2020 primaries (9) or non-linear-luma (10), or
-        // SMPTE 2084 PQ transfer (16), or HLG transfer (18).  Either flag
-        // is enough to switch the renderer to the HDR shader path.
+                  "Decoded fmt=%d colorspace=%d range=%d primaries=%d trc=%d "
+                  "(ctx primaries=%d trc=%d)",
+                  in_frame_->format, cs, rng, pri, trc,
+                  ctx_->color_primaries, ctx_->color_trc);
         is_hdr_ =
-            (in_frame_->color_primaries == AVCOL_PRI_BT2020) ||
-            (in_frame_->color_trc == AVCOL_TRC_SMPTE2084)    ||
-            (in_frame_->color_trc == AVCOL_TRC_ARIB_STD_B67);
+            (pri == AVCOL_PRI_BT2020)        ||
+            (trc == AVCOL_TRC_SMPTE2084)     ||
+            (trc == AVCOL_TRC_ARIB_STD_B67);
         if (is_hdr_) log::info("FFDec", "HDR stream detected — using BT.2020+PQ shader path");
     }
 
-    AVFrame* picked = in_frame_;
-    if (in_frame_->format != AV_PIX_FMT_YUV420P) {
-        // 10-bit HDR HEVC, NV12, YUV422P, etc. — convert to plain YUV420P
-        // 8-bit so the renderer's three-plane shader is the only shape it
-        // ever has to handle.  L4 (VAAPI) will skip this entirely.
-        if (!ensure_sws(in_frame_->format, in_frame_->width, in_frame_->height)) {
-            av_frame_unref(in_frame_);
+    // picked_frame from the HW branch above (or in_frame_ on SW path).
+    if (picked_frame->format != AV_PIX_FMT_YUV420P) {
+        // 10-bit HDR HEVC (sw), NV12 (vaapi readback), YUV422P, etc. —
+        // convert to plain YUV420P 8-bit so the renderer only has to
+        // handle one shape.  L4b will skip this for HW-decoded content.
+        if (!ensure_sws(picked_frame->format,
+                        picked_frame->width, picked_frame->height)) {
             return false;
         }
         sws_scale(sws_,
-                  in_frame_->data, in_frame_->linesize,
-                  0, in_frame_->height,
+                  picked_frame->data, picked_frame->linesize,
+                  0, picked_frame->height,
                   out_frame_->data, out_frame_->linesize);
-        out_frame_->pts = in_frame_->pts;
-        picked = out_frame_;
+        out_frame_->pts = picked_frame->pts;
+        picked_frame = out_frame_;
     }
 
-    out.width  = static_cast<uint32_t>(picked->width);
-    out.height = static_cast<uint32_t>(picked->height);
-    out.stride[0] = picked->linesize[0];
-    out.stride[1] = picked->linesize[1];
-    out.stride[2] = picked->linesize[2];
-    out.plane[0] = picked->data[0];
-    out.plane[1] = picked->data[1];
-    out.plane[2] = picked->data[2];
-    out.pts = static_cast<uint64_t>(picked->pts);
+    out.width     = static_cast<uint32_t>(picked_frame->width);
+    out.height    = static_cast<uint32_t>(picked_frame->height);
+    out.stride[0] = picked_frame->linesize[0];
+    out.stride[1] = picked_frame->linesize[1];
+    out.stride[2] = picked_frame->linesize[2];
+    out.plane[0]  = picked_frame->data[0];
+    out.plane[1]  = picked_frame->data[1];
+    out.plane[2]  = picked_frame->data[2];
+    out.pts       = static_cast<uint64_t>(picked_frame->pts);
 
-    // Note: in_frame_ keeps the ref until next receive_frame; out_frame_
-    // is preallocated.  Either way the planes stay valid until the next
-    // `decode` / `get_frame` — caller MUST upload before then.
+    // The plane buffers stay valid until the next decode()/get_frame() —
+    // caller MUST upload before then.  in_frame_, sw_frame_, out_frame_
+    // are all preallocated and reused across iterations.
     return true;
 }
 

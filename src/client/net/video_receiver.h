@@ -44,7 +44,9 @@ public:
     }
 
     // Packet loss rate from FEC decoder (EWMA, 0.0–1.0).
-    float loss_rate() const { return fec_decoder_.loss_rate(); }
+    float    loss_rate()     const { return fec_decoder_.loss_rate(); }
+    uint64_t fec_recovered() const { return fec_decoder_.total_recovered(); }
+    uint64_t fec_failed()    const { return fec_decoder_.total_failed(); }
 
     uint64_t packets_received() const { return packets_received_; }
     uint64_t bytes_received() const { return bytes_received_; }

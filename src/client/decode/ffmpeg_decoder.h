@@ -10,6 +10,7 @@ struct AVCodecContext;
 struct AVPacket;
 struct AVFrame;
 struct SwsContext;
+struct AVBufferRef;
 }
 
 namespace deskbeam::client {
@@ -70,14 +71,21 @@ public:
     // Renderer branches on this to apply the right colorspace + EOTF.
     bool is_hdr() const { return is_hdr_; }
 
+    // Human-readable backend label for the HUD.  "VAAPI HEVC" / "SW HEVC".
+    const char* backend_name() const;
+
 private:
     bool ensure_sws(int src_format, int width, int height);
 
     AVCodecContext* ctx_       = nullptr;
     AVPacket*       pkt_       = nullptr;
-    AVFrame*        in_frame_  = nullptr;  // raw decoder output
+    AVFrame*        in_frame_  = nullptr;  // raw decoder output (HW or SW)
+    AVFrame*        sw_frame_  = nullptr;  // CPU copy when in_frame_ is on GPU
     AVFrame*        out_frame_ = nullptr;  // sws_scale destination (YUV420P)
     SwsContext*     sws_       = nullptr;
+    // VAAPI device — non-null when HW decode succeeded at init.
+    AVBufferRef*    hw_device_ctx_ = nullptr;
+    bool            hw_decode_ = false;
     int             sws_src_format_ = -1;
     int             sws_width_      = 0;
     int             sws_height_     = 0;

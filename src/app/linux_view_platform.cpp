@@ -96,7 +96,15 @@ void LinuxViewPlatform::flush_decoder() {
 }
 
 void LinuxViewPlatform::update_stats(const deskbeam::StatsView& stats) {
-    if (view_) view_->update_stats(stats);
+    // Override decoder label and HDR flag — both are decoder-side facts
+    // not visible to the cross-platform view loop.
+    deskbeam::StatsView local = stats;
+    if (decoder_) {
+        std::snprintf(local.decoder, sizeof(local.decoder), "%s",
+                      decoder_->backend_name());
+        local.hdr = decoder_->is_hdr();
+    }
+    if (view_) view_->update_stats(local);
 }
 
 void LinuxViewPlatform::set_stream_size(uint32_t width, uint32_t height) {

@@ -63,7 +63,12 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     // over 4s dumps ~1MB of keyframe traffic into an already-congested
     // channel and finishes the job loss started. 1500ms caps that at
     // ~3 requests per 4s worst case.
-    constexpr int MIN_IDR_INTERVAL_MS = 1500;
+    // 600ms cooldown — enough to let the requested IDR make a round trip
+    // (RTT + encode time ≈ 50-200ms typically, leaving headroom) and
+    // prevent runaway storms, but ~2.5× faster recovery than the old
+    // 1500ms.  When the IDR itself is lost in a burst, the second retry
+    // fires while the original 1500ms-window freeze would still be on.
+    constexpr int MIN_IDR_INTERVAL_MS = 600;
 
     bool got_keyframe = false;
     uint64_t frames_decoded = 0;
@@ -268,6 +273,10 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             v.height         = session.stream_height();
             v.total_rejected = session.total_rejected();
             v.total_dropped  = session.total_dropped();
+            if (auto* r = session.receiver()) {
+                v.fec_recovered     = r->fec_recovered();
+                v.fec_groups_failed = r->fec_failed();
+            }
             v.target_fps = session.perf_target_fps();
             v.reject_pct = session.last_reject_pct();
             v.drop_pct   = session.last_drop_pct();

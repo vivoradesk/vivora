@@ -544,6 +544,15 @@ void FecDecoder::try_recover(FecGroup& group,
     if (total_present < k) {
         // Not enough — give up on RS but keep group marked resolved so
         // we don't retry.  Frame assembler will handle the gap.
+        ++total_failed_;
+        // Diagnostic: tells us whether failures cluster at the M cap
+        // (need a stronger response than parity) or below it (the
+        // adaptation logic was too slow / decayed too far).
+        log::warn("FEC", "Group %d FAILED: K=%d M=%d, missing %d data + %d parity (need %d more)",
+                  static_cast<int>(group.pkt_keys[0] >> 16),
+                  k, m, missing_data,
+                  m - group.received_parity,
+                  k - total_present);
         group.resolved = true;
         return;
     }
@@ -570,6 +579,7 @@ void FecDecoder::try_recover(FecGroup& group,
     }
 
     if (!rs_decode(data_pad, parity_pad, k, m, shard_len)) {
+        ++total_failed_;
         group.resolved = true;
         return;
     }
@@ -586,6 +596,7 @@ void FecDecoder::try_recover(FecGroup& group,
     }
 
     if (recovered_count > 0) {
+        total_recovered_ += static_cast<uint64_t>(recovered_count);
         log::info("FEC", "Recovered %d pkts in group %d (K=%d, M=%d)",
                   recovered_count,
                   static_cast<int>(group.pkt_keys[0] >> 16),

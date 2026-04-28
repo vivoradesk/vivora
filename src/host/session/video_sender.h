@@ -56,8 +56,12 @@ public:
                     const net::SocketAddr& dest,
                     crypto::CipherState* send_cs = nullptr);
 
-    // Adaptive FEC: update M (parity count) based on client-reported loss rate.
-    void update_fec_from_loss(float loss_rate);
+    // Adaptive FEC: update M from two complementary client signals.
+    //   loss_rate    — slow EWMA, drives a baseline ladder (M=2..4).
+    //   delta_failed — fast event signal (FEC groups exceeded M since
+    //                  last report).  Any positive value immediately
+    //                  bumps M; sustained zeros taper it back down.
+    void update_fec_from_loss(float loss_rate, uint32_t delta_failed = 0);
     uint8_t fec_group_size()   const { return fec_encoder_.group_size(); }
     uint8_t fec_parity_count() const { return fec_encoder_.parity_count(); }
     float last_loss_rate() const { return last_loss_rate_; }
@@ -90,6 +94,35 @@ private:
     net::IUdpSocket& socket_;
     net::FrameFragmenter fragmenter_;
     net::FecEncoder fec_encoder_;
+
+    // Failure-driven adaptive M.  Climbs immediately on FEC failures;
+    // decays slowly so it stays elevated through WiFi-instability
+    // windows that arrive in clusters with multi-second clean lulls.
+    // Combined as max() with the loss-EWMA ladder so we can never run
+    // BELOW what the slow signal recommends.  Capped at
+    // FAILURE_DRIVEN_M_MAX so wire overhead doesn't explode (the
+    // bitrate controller carves M out of the wire budget — encoder
+    // shrinks instead, total wire stays constant).
+    uint8_t failure_driven_m_  = 0;
+    int     clean_streak_      = 0;
+    // Sticky session floor — once we've ever seen a failure, this latches
+    // to 1 so failure_driven_m_ never decays back below it.  Smoke logs
+    // showed 9/11 failures still happening at M=2 because the link has
+    // bursty quiet periods longer than the 15 s decay window — letting M
+    // fall back to baseline gets caught flat-footed by the next cluster.
+    bool     ever_failed_       = false;
+    // 30 ticks × 500 ms = 15 s of *uninterrupted* clean before we step
+    // M down by one.  Was 2.5 s — too short, M decayed back to baseline
+    // between WiFi loss clusters and got caught flat-footed by the next
+    // burst.  15 s correlates with how WiFi RF environments cycle.
+    static constexpr int     CLEAN_DECAY_TICKS    = 30;
+    // Cap raised from 6 to 7 after smoke logs showed 4 of 16 failures
+    // happening at M=6 with "need 1 more" — exactly one more parity
+    // would have saved them.  Cost is modest (M=7 means 30% encoder
+    // bitrate carved for FEC vs 25% at M=6).  Higher than 7 buys
+    // sharply diminishing returns and bursts that big are NACK
+    // territory rather than FEC.
+    static constexpr uint8_t FAILURE_DRIVEN_M_MAX = 7;
     uint64_t packets_sent_ = 0;
     uint64_t bytes_sent_ = 0;
     uint64_t retransmits_ = 0;
@@ -109,8 +142,13 @@ private:
     // a keyframe is ~40 fragments and losing one group kills the whole
     // frame.  Add extra parity just for the keyframe's groups, capped
     // at KEYFRAME_M_MAX to keep recovery math bounded.
-    static constexpr uint8_t KEYFRAME_M_BOOST = 2;
-    static constexpr uint8_t KEYFRAME_M_MAX   = 8;
+    // Keyframes are big (40+ fragments, ~250-500 KB) and lossing one
+    // means a freeze visible to the user — so we splurge on parity.
+    // Boost +4: at steady-state M=4 the keyframe groups run at M=8,
+    // covering bursts up to 8 packets.  Cost is negligible because
+    // keyframes fire only on IDR (every few seconds at most).
+    static constexpr uint8_t KEYFRAME_M_BOOST = 4;
+    static constexpr uint8_t KEYFRAME_M_MAX   = 10;
 
     // RTT-based proactive M raise: spike detection.
     // 50ms threshold — tight enough to catch early WiFi congestion, while

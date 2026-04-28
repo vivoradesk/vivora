@@ -213,15 +213,32 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 last_retx_sample = session.sender()->retransmits();
                 last_pkts_sample = session.sender()->packets_sent();
             }
-            if (changed) {
-                uint32_t delta = br > last_applied_br
-                                 ? br - last_applied_br
-                                 : last_applied_br - br;
-                if (delta * 20 >= last_applied_br) {
-                    platform.set_bitrate(br);
-                    last_applied_br = br;
-                    log::info("HOST", "Bitrate changed -> %u kbps", br / 1000);
-                }
+            // Convert "total wire budget" → "encoder bitrate" by carving
+            // out room for FEC parity.  When M grows (loss adaptation in
+            // VideoSender), the encoder shrinks instead of the wire load
+            // ballooning — keeping total channel utilisation constant.
+            // Without this, M=4 → 40% extra wire on top of `br`, which
+            // saturates WiFi and causes the loss-spirals we observed.
+            uint32_t encoder_bps = br;
+            if (auto* s = session.sender()) {
+                uint8_t k = s->fec_group_size();
+                uint8_t m = s->fec_parity_count();
+                if (k > 0) encoder_bps = static_cast<uint32_t>(
+                    static_cast<uint64_t>(br) * k / (k + m));
+            }
+            // Apply whenever encoder_bps moves by more than the 5%
+            // deadband — this catches both wire-budget changes (`changed`
+            // from `tick()`) and FEC-parity-count changes (M growing
+            // shrinks encoder_bps without `changed` firing).
+            (void)changed;  // signal absorbed into encoder_bps now
+            uint32_t delta = encoder_bps > last_applied_br
+                             ? encoder_bps - last_applied_br
+                             : last_applied_br - encoder_bps;
+            if (delta * 20 >= last_applied_br) {
+                platform.set_bitrate(encoder_bps);
+                last_applied_br = encoder_bps;
+                log::info("HOST", "Encoder bitrate -> %u kbps (wire %u, FEC overhead carved)",
+                          encoder_bps / 1000, br / 1000);
             }
         }
 

@@ -30,6 +30,8 @@ struct StatsView {
     uint32_t audio_pps  = 0;      // audio packets per second
     uint64_t total_rejected = 0;  // cumulative decoder rejections
     uint64_t total_dropped  = 0;  // cumulative network drops
+    uint64_t fec_recovered  = 0;  // cumulative FEC-recovered packets
+    uint64_t fec_groups_failed = 0;  // FEC groups that exceeded M parity
     uint32_t width      = 0;      // decoded frame width
     uint32_t height     = 0;      // decoded frame height
     bool     hdr        = false;  // BT.2020 + PQ if true

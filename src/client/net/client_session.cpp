@@ -266,6 +266,10 @@ void ClientSession::poll() {
             }
 
             // NACK processing: retransmit only what FEC couldn't recover.
+            // We tried gap=2 / rl=RTT for tail-loss recovery — it caused
+            // a hang/crash within a couple of seconds (suspected NACK
+            // storm).  Reverted to the conservative 4 ms / 1.5×RTT
+            // values that have been stable across the project.
             int64_t gap_ms = 4;
             int64_t rl_ms = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_ * 1.5) : 8;
             if (rl_ms < 8) rl_ms = 8;
@@ -802,15 +806,23 @@ void ClientSession::send_fec_report() {
     if (state_ != SessionState::Connected || !socket_ || !receiver_) return;
 
     float loss = receiver_->loss_rate();
+    // Delta of FEC group failures since the last report — direct evidence
+    // that M was undersized.  Host uses this as a fast event-driven signal
+    // alongside the slower loss-rate EWMA: any delta > 0 immediately bumps
+    // M, sustained zeros taper it back down.
+    uint64_t failed_now    = receiver_->fec_failed();
+    uint32_t delta_failed  = static_cast<uint32_t>(failed_now - last_fec_failed_reported_);
+    last_fec_failed_reported_ = failed_now;
 
     protocol::Packet pkt;
     pkt.header.type = protocol::PacketType::FecReport;
     pkt.header.seq_no = 0;
     pkt.header.timestamp = 0;
     pkt.header.flags = 0;
-    pkt.payload.resize(4);
-    std::memcpy(pkt.payload.data(), &loss, 4);  // float32 LE
-    pkt.header.payload_len = 4;
+    pkt.payload.resize(8, 0);
+    std::memcpy(pkt.payload.data(),     &loss,         4);  // float32 LE
+    std::memcpy(pkt.payload.data() + 4, &delta_failed, 4);  // u32 LE
+    pkt.header.payload_len = 8;
 
     auto wire = pkt.serialize();
     send_sealed(wire);

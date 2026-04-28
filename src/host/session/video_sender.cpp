@@ -173,7 +173,7 @@ void VideoSender::set_force_m(uint8_t m) {
     }
 }
 
-void VideoSender::update_fec_from_loss(float loss_rate) {
+void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
     last_loss_rate_ = loss_rate;
 
     if (force_m_ > 0) return;
@@ -187,10 +187,47 @@ void VideoSender::update_fec_from_loss(float loss_rate) {
     // each extra parity shard covers one additional burst-loss per K-group.
     // M floor = 2 on WiFi — even at 0% EWMA, burst-loss micro-events
     // cost more than the 20% parity overhead.
-    uint8_t target_m;
-    if      (loss_rate < 0.03f) target_m = 2;
-    else if (loss_rate < 0.05f) target_m = 3;
-    else                        target_m = 4;
+    // Baseline loss-rate ladder.  Stays modest (cap 4) because the
+    // EWMA signal is too slow to react to bursts.  failure_driven_m_
+    // below provides the fast event-driven response.
+    uint8_t loss_m;
+    if      (loss_rate < 0.03f) loss_m = 2;
+    else if (loss_rate < 0.05f) loss_m = 3;
+    else                        loss_m = 4;
+
+    // Failure-driven: any reported FEC failure since last report bumps
+    // M by 1 immediately.  CLEAN_DECAY_TICKS clean reports lower it.
+    // The bitrate controller carves FEC overhead out of the wire
+    // budget (host_loop applies `encoder_bps = wire * K/(K+M)`), so
+    // raising M no longer increases total wire — encoder simply
+    // shrinks proportionally.  This unblocks aggressive M growth on
+    // bursty links.
+    if (delta_failed > 0) {
+        // Heavier bumps for severe bursts (3+ fails in one 500ms window
+        // typically means the link is degrading, not a stray drop).  A
+        // single fail still bumps by 1; 3+ bumps by 2 to react faster.
+        uint8_t bump = (delta_failed >= 3) ? 2 : 1;
+        if (failure_driven_m_ + bump > FAILURE_DRIVEN_M_MAX)
+            failure_driven_m_ = FAILURE_DRIVEN_M_MAX;
+        else
+            failure_driven_m_ += bump;
+        clean_streak_ = 0;
+        ever_failed_   = true;
+    } else {
+        if (++clean_streak_ >= CLEAN_DECAY_TICKS) {
+            // Sticky floor: never decay below 1 once any failure has
+            // ever occurred.  The link has demonstrated it can burst —
+            // keeping a permanent +1 over the loss-EWMA baseline (so
+            // effective M >= 3 instead of 2) is cheap (10% extra wire)
+            // and stops the "flat-footed at M=2" failure pattern.
+            uint8_t floor = ever_failed_ ? 1 : 0;
+            if (failure_driven_m_ > floor) --failure_driven_m_;
+            clean_streak_ = 0;
+        }
+    }
+
+    uint8_t target_m = std::max(loss_m, failure_driven_m_);
+    if (target_m > FAILURE_DRIVEN_M_MAX) target_m = FAILURE_DRIVEN_M_MAX;
 
     // Use the tracked steady-state M rather than whatever the encoder
     // currently has — keyframe boost temporarily raises the encoder's M

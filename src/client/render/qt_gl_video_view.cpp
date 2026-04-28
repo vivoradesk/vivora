@@ -461,6 +461,9 @@ void QtGlVideoView::rebuild_hud_text() {
                              (unsigned long long)last_stats_.total_dropped);
     txt += QString::asprintf("Audio:  %u pps   PLC %u%%\n",
                              last_stats_.audio_pps, last_stats_.plc_pct);
+    txt += QString::asprintf("FEC:    %llu recovered / %llu failed\n",
+                             (unsigned long long)last_stats_.fec_recovered,
+                             (unsigned long long)last_stats_.fec_groups_failed);
     txt += QString::asprintf("Stream: %ux%u%s\n",
                              last_stats_.width, last_stats_.height,
                              last_stats_.hdr ? " HDR" : "");

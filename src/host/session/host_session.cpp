@@ -335,10 +335,14 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             break;
         case protocol::PacketType::FecReport:
             if (sender_ && payload_len >= 4) {
-                float loss_rate;
+                float    loss_rate;
+                uint32_t delta_failed = 0;
                 std::memcpy(&loss_rate, payload, 4);
+                if (payload_len >= 8) {
+                    std::memcpy(&delta_failed, payload + 4, 4);
+                }
                 client->loss_rate = loss_rate;
-                sender_->update_fec_from_loss(loss_rate);
+                sender_->update_fec_from_loss(loss_rate, delta_failed);
             }
             break;
         case protocol::PacketType::PerfReport:
