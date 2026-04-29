@@ -33,8 +33,10 @@ size_t open_packet(const uint8_t* wire, size_t wire_len,
     out[8] = static_cast<uint8_t>(new_plen & 0xFF);
     out[9] = static_cast<uint8_t>((new_plen >> 8) & 0xFF);
 
+    // decrypt() returns SIZE_MAX on failure — zero plaintext (IdrRequest)
+    // is a legitimate success, do not treat written == 0 as an error.
     const size_t written = cs.decrypt(wire + HDR, plen, out + HDR);
-    if (written == 0) return 0;
+    if (written == SIZE_MAX) return 0;
     return HDR + written;
 }
 

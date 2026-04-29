@@ -16,6 +16,7 @@
 #include "components/ColorSpace.h"
 
 #include <windows.h>
+#include <algorithm>
 
 using namespace amf;
 
@@ -133,9 +134,25 @@ bool AmfEncoder::create_encoder() {
 
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD, (amf_int64)AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_METHOD_CBR);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, (amf_int64)config_.bitrate_bps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, (amf_int64)config_.bitrate_bps);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate(config_.fps, 1));
-        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_NUM_GOPS_PER_IDR, (amf_int64)1);
+        // VBV = 1s of bitrate (matches NVENC/QSV) — smooths burstiness so
+        // CBR can't dump a 300KB IDR onto the wire in one packet train.
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, (amf_int64)config_.bitrate_bps);
+        // Hard cap on a single frame ~1.5× avg-frame budget. At
+        // 35Mbps@60fps that's ~110KB — keeps IDRs from spiralling FEC on
+        // WiFi where 300KB IDRs lose at least one fragment per group.
+        const amf_int64 avg_frame_bits = (amf_int64)config_.bitrate_bps / std::max<uint32_t>(1, config_.fps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_MAX_AU_SIZE, (avg_frame_bits * 3) / 2);
 
+        // AMF intra-refresh attempt was reverted: in our config the
+        // first P-frame after init still ballooned to 100KB+, header
+        // insertion didn't fire (no GOP boundaries), and recovery
+        // IDRs were never tagged correctly in the bitstream.  Stick
+        // with a classical short GOP / periodic IDR — combined with
+        // MAX_AU_SIZE caps above the IDRs stay small enough to traverse
+        // a lossy WiFi link.  See project_amf_hdr_broken / project_intra_refresh.
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_NUM_GOPS_PER_IDR, (amf_int64)1);
         if (config_.idr_period > 0) {
             encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_GOP_SIZE, (amf_int64)config_.idr_period);
         }
@@ -254,6 +271,14 @@ void AmfEncoder::drain_output() {
                 data->GetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE, &pic_type);
                 pkt.keyframe = (pic_type == AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_IDR ||
                                 pic_type == AMF_VIDEO_ENCODER_HEVC_OUTPUT_DATA_TYPE_I);
+                // Diagnostic: log every distinct pic_type seen so we can tell
+                // if AMF in intra-refresh mode tags forced IDRs as IDR/I/P.
+                static amf_int64 last_logged = -1;
+                if (pic_type != last_logged) {
+                    last_logged = pic_type;
+                    log::info(TAG, "HEVC pic_type=%lld size=%zu keyframe=%d",
+                              (long long)pic_type, pkt.data.size(), (int)pkt.keyframe);
+                }
             } else {
                 data->GetProperty(AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE, &pic_type);
                 pkt.keyframe = (pic_type == AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE_IDR ||

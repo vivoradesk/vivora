@@ -208,7 +208,14 @@
       "Bash(ssh-keygen -t ed25519 -N \"\" -f ~/.ssh/id_ed25519 -C \"deskbeam-dev@windows\")",
       "Bash(ssh-keygen -R 192.168.3.243)",
       "Bash(tar cf *)",
-      "Bash(ssh-keygen -R 192.168.3.251)"
+      "Bash(ssh-keygen -R 192.168.3.251)",
+      "Bash(tar -cf - --exclude='*.obj' --exclude='*.o' src CMakeLists.txt tests)",
+      "Bash(tasklist /v)",
+      "Bash(tar -cf - src/client/decode/ffmpeg_decoder.cpp)",
+      "Bash(tar -cf - src/client/net/client_session.cpp)",
+      "Bash(/c/src/DeskBeam/build/bin/Release/noise_test.exe)",
+      "Bash(git -C /c/src/DeskBeam checkout HEAD -- tests/noise_test.cpp)",
+      "Bash(tar -cf - src/common/crypto/noise_nk.cpp src/common/crypto/packet_crypto.cpp src/host/session/host_session.cpp src/client/net/client_session.cpp tests/noise_test.cpp)"
     ]
   }
 }

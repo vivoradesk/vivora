@@ -502,7 +502,10 @@ size_t CipherState::encrypt(const uint8_t* plaintext, size_t len, uint8_t* out) 
 }
 
 size_t CipherState::decrypt(const uint8_t* wire, size_t wire_len, uint8_t* out) {
-    if (wire_len < OVERHEAD) return 0;
+    // Returns SIZE_MAX on failure (too-short input, replay, AEAD reject).
+    // Zero-byte plaintext is a valid success — packets like IdrRequest carry
+    // no payload, and confusing 0 with failure was a real bug.
+    if (wire_len < OVERHEAD) return SIZE_MAX;
     const size_t ct_len = wire_len - OVERHEAD;
 
     uint64_t nonce_val = 0;
@@ -511,7 +514,7 @@ size_t CipherState::decrypt(const uint8_t* wire, size_t wire_len, uint8_t* out) 
     }
     // Replay protection: sliding window of the last 64 nonces.
     // Cheap check first — no AEAD call for replays / too-old nonces.
-    if (!window_accept(nonce_val)) return 0;
+    if (!window_accept(nonce_val)) return SIZE_MAX;
 
     uint8_t aead_nonce[12];
     build_aead_nonce(aead_nonce, nonce_val);
@@ -521,7 +524,7 @@ size_t CipherState::decrypt(const uint8_t* wire, size_t wire_len, uint8_t* out) 
     crypto_aead_init_ietf(&ctx, key_, aead_nonce);
     int rc = crypto_aead_read(&ctx, out, tag, nullptr, 0, ct, ct_len);
     crypto_wipe(&ctx, sizeof(ctx));
-    if (rc != 0) return 0;
+    if (rc != 0) return SIZE_MAX;
     // AEAD succeeded — only now is it safe to mark this nonce as used.
     window_commit(nonce_val);
     return ct_len;

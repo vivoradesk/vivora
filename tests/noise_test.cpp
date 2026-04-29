@@ -167,7 +167,7 @@ void test_replay_rejected() {
     // Second decrypt of the *same* wire buffer — nonce hasn't advanced past
     // max_recv_nonce_, so it must be rejected.
     size_t second = r_recv.decrypt(wire, wl, recovered);
-    CHECK(second == 0);
+    CHECK(second == SIZE_MAX);
 }
 
 void test_tamper_rejected() {
@@ -196,7 +196,7 @@ void test_tamper_rejected() {
 
     uint8_t recovered[128] = {};
     size_t got = r_recv.decrypt(wire, wl, recovered);
-    CHECK(got == 0);
+    CHECK(got == SIZE_MAX);
 }
 
 void test_hex_roundtrip() {
@@ -310,13 +310,13 @@ void test_sliding_replay_window() {
     }
 
     // Replay any of them — must now be rejected (bit set in window).
-    CHECK(r_recv.decrypt(wires[5].data(), wires[5].size(), plain) == 0);
-    CHECK(r_recv.decrypt(wires[10].data(), wires[10].size(), plain) == 0);
+    CHECK(r_recv.decrypt(wires[5].data(), wires[5].size(), plain) == SIZE_MAX);
+    CHECK(r_recv.decrypt(wires[10].data(), wires[10].size(), plain) == SIZE_MAX);
 
     // Jump far forward — nonces within [max-63..max] still work.
     CHECK(r_recv.decrypt(wires[69].data(), wires[69].size(), plain) == sizeof(pt));
     // max = 69, so nonce 6 is exactly at age 63 (edge of window) — still OK.
-    CHECK(r_recv.decrypt(wires[6].data(), wires[6].size(), plain) == 0);  // replay of 6
+    CHECK(r_recv.decrypt(wires[6].data(), wires[6].size(), plain) == SIZE_MAX);  // replay of 6
     // nonce 69-63 = 6 already consumed; try an unused one at the edge: 68.
     CHECK(r_recv.decrypt(wires[68].data(), wires[68].size(), plain) == sizeof(pt));
 
@@ -340,7 +340,7 @@ void test_sliding_replay_window() {
         CHECK(r_recv.decrypt(w.data(), w.size(), plain) == sizeof(pt));
     }
     // Now window covers roughly nonces [71..134]; wires[10] is way behind.
-    CHECK(r_recv.decrypt(wires[10].data(), wires[10].size(), plain) == 0);
+    CHECK(r_recv.decrypt(wires[10].data(), wires[10].size(), plain) == SIZE_MAX);
 }
 
 // 4-key finalize: one Noise session keys both the main transport and an
@@ -406,7 +406,7 @@ void test_finalize_4key_main_and_aux() {
         // Reset recv nonce state so replay guard isn't what rejects it — we
         // want AEAD auth to be the gate.  Fresh aux_recv has never seen a
         // packet, so strict-greater nonce accepts 0; auth must still fail.
-        CHECK(r_aux_r.decrypt(wire, wl, plain) == 0);
+        CHECK(r_aux_r.decrypt(wire, wl, plain) == SIZE_MAX);
     }
 }
 

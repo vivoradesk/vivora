@@ -243,6 +243,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         }
 
         // IDR on client (re)connect or client-requested recovery.
+        // No host-side cooldown: view_loop already gates IDR retries to
+        // 600ms; adding another cooldown here only creates a window where
+        // a lost recovery IDR can't be re-requested. Tried 2026-04-29,
+        // saw 48 client retries result in 0 host IDR fires post-cold-start.
         bool force_encode = false;
         if (session.idr_needed()) {
             platform.request_idr();

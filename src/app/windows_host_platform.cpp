@@ -33,7 +33,15 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     cfg.height = res.height;
     cfg.fps = 60;
     cfg.bitrate_bps = bitrate;
-    cfg.idr_period = 60;
+    // idr_period serves as AMF GOP_SIZE — auto-IDR cadence when no client
+    // request comes in. NVENC/QSV ignore it (intra refresh). With the
+    // crypto-decrypt zero-payload bug fixed (2026-04-29), client IdrRequest
+    // packets actually reach the host now, so recovery latency is ~50-100ms
+    // via request_idr() instead of having to wait for the next GOP boundary.
+    // Auto-IDR is now just a deep safety net for the worst case of total
+    // bidirectional loss — keep it long to minimise the steady-state
+    // 100KB-IDR trickle on the wire. 1800 = 30s @ 60fps.
+    cfg.idr_period = 1800;
     cfg.codec = codec;
     if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
 
