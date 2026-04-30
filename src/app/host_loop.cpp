@@ -134,6 +134,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     float    target_fps_ewma     = 60.0f;
     int64_t  min_frame_interval_us = 16667;  // 60 fps default
 
+    // FEC group tail-flush: when capture stays silent on a static screen,
+    // any in-progress FEC group (P-frame fragments not yet K-aligned) sits
+    // unparityied. The client can't recover the last partial frame, so e.g.
+    // a mouse-drag selection that disappears on host stays visible on the
+    // client. Periodic flush keeps this window short.
+    auto last_send_time          = TimePoint{};
+    uint16_t last_sent_seq       = 0;
+    uint32_t last_sent_ts        = 0;
+    auto last_fec_flush_time     = TimePoint{};
+
     while (true) {
         session.poll();
 
@@ -288,6 +298,59 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         bool got_frame = platform.capture_and_encode(pts_us, content_changed, force_encode);
         if (got_frame) last_capture_time = Clock::now();
 
+        // Constant-rate heartbeat: when capture stays silent on a static
+        // screen, re-feed the last texture so the wire keeps the same
+        // packet cadence as active streaming. Keeps WiFi / routers from
+        // dropping the link into low-power state, keeps FEC groups filling
+        // at the normal rate, and means a release-and-stop event (mouse
+        // drag end, last keystroke) doesn't strand the final partial frame.
+        // Triggers ~one frame interval past the expected real frame, so
+        // active flows never see it; static idle gets full frame rate.
+        if (!got_frame && session.state() == host::SessionState::Connected
+            && last_send_time.time_since_epoch().count() != 0) {
+            const auto now = Clock::now();
+            const auto since_send_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                now - last_send_time).count();
+            // Honour adaptive frame interval: if client ratched target down
+            // (e.g. target=30 → interval=33ms), heartbeat fires at the same
+            // cadence so we don't overshoot client's stated capacity.
+            if (since_send_us >= min_frame_interval_us + 2000) {
+                pts_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    now.time_since_epoch()).count();
+                if (platform.re_encode_last(pts_us)) {
+                    got_frame = true;
+                    last_capture_time = now;
+                }
+            }
+        }
+
+        // Tail-flush in-progress FEC group when the wire's been silent for
+        // a while. Sender feeds P-frame fragments into FEC groups; if a
+        // group hasn't reached K shards by the time capture stops (e.g.
+        // user releases a mouse drag), no parity is sent and the client
+        // can't reconstruct the last partial frame on any loss. Forcing a
+        // partial-group flush emits parity (K_eff < K, M parity packets)
+        // so the client closes the group and recovers the tail frame.
+        // 150ms is one ping past human reaction time — long enough that
+        // active flows don't trigger it, short enough that a release-and-
+        // wait scenario doesn't visibly stick.
+        if (!got_frame && session.state() == host::SessionState::Connected
+            && last_send_time.time_since_epoch().count() != 0) {
+            const auto now = Clock::now();
+            const auto since_send = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_send_time).count();
+            const auto since_flush = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_fec_flush_time).count();
+            if (since_send >= 150 && since_flush >= 150) {
+                int n = session.flush_video_fec(last_sent_seq, last_sent_ts);
+                if (n > 0) {
+                    log::info("HOST", "FEC tail-flush: %d parity packets after %lldms idle",
+                              n, (long long)since_send);
+                }
+                last_fec_flush_time = now;
+            }
+        }
+
         // Cursor sync runs regardless of whether we produced an encoded
         // frame — the cursor can move over static content.
         if (session.state() == host::SessionState::Connected) {
@@ -347,7 +410,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                                              static_cast<uint16_t>(cap_h));
                 }
                 session.send_frame(pkt.data, pkt.len,
-                                   frame_seq, timestamp, pkt.keyframe);
+                                   frame_seq, timestamp, pkt.keyframe,
+                                   /*fec_enabled=*/!pkt.heartbeat);
+                last_send_time = Clock::now();
+                last_sent_seq  = frame_seq;
+                last_sent_ts   = timestamp;
             }
 
             frame_seq++;

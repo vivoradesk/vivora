@@ -14,6 +14,7 @@ struct AssembledFrame {
     uint16_t seq_no = 0;
     uint32_t timestamp = 0;
     bool keyframe = false;
+    bool heartbeat = false;     // host marked frame as keep-alive (FLAG_HEARTBEAT)
 };
 
 // A batch of fragments to request retransmission of for one frame.
@@ -53,6 +54,7 @@ private:
         uint16_t received = 0;
         uint32_t timestamp = 0;
         bool keyframe = false;
+        bool heartbeat = false;
         bool complete = false;
         // Zero double-copy: fragments are written directly into `assembled`
         // at slot offsets of DATA_PER_FRAGMENT.  `arrived` replaces the

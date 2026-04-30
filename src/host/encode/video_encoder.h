@@ -42,6 +42,7 @@ struct EncodedPacket {
     std::vector<uint8_t> data;          // H.264 NAL units
     uint64_t pts = 0;                   // presentation timestamp (microseconds)
     bool keyframe = false;
+    bool heartbeat = false;             // emitted by encode_skip (no FEC needed)
     double encode_time_ms = 0.0;        // how long encoding took
 };
 
@@ -56,6 +57,14 @@ public:
     // Encode a GPU texture. Returns false if encoder couldn't accept input.
     // The texture must remain valid until the next encode() call.
     virtual bool encode(ID3D11Texture2D* texture, uint64_t pts_us) = 0;
+
+    // Encode a GPU texture with a hint that this is a static-screen
+    // heartbeat: backends that support it (AMF) emit a tiny skip-type
+    // frame instead of a full intra-refresh slice. Default falls back
+    // to encode().
+    virtual bool encode_skip(ID3D11Texture2D* texture, uint64_t pts_us) {
+        return encode(texture, pts_us);
+    }
 
     // Retrieve encoded packets. May return 0 or more packets per encode() call.
     // Returns false when no more packets are available.

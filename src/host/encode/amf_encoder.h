@@ -26,6 +26,7 @@ public:
 
     bool init(const EncoderConfig& config, ID3D11Device* device) override;
     bool encode(ID3D11Texture2D* texture, uint64_t pts_us) override;
+    bool encode_skip(ID3D11Texture2D* texture, uint64_t pts_us) override;
     bool get_packet(EncodedPacket& packet) override;
     void request_idr() override;
     void set_bitrate(uint32_t bitrate_bps) override;
@@ -54,6 +55,11 @@ private:
 
     // Output queue
     std::queue<EncodedPacket> output_packets_;
+    // Counter of skip-encoded inputs that haven't been drained yet — the
+    // next `pending_skip_inputs_` outputs from drain_output() are tagged
+    // as heartbeat. AMF processes inputs in order so this stays in sync
+    // even when SubmitInput → QueryOutput aren't 1:1 within a single call.
+    int pending_skip_inputs_ = 0;
 };
 
 } // namespace deskbeam

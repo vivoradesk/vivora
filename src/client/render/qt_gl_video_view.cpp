@@ -411,11 +411,17 @@ void QtGlVideoView::mouseReleaseEvent(QMouseEvent* e){ emit_mouse_button(e->butt
 
 void QtGlVideoView::wheelEvent(QWheelEvent* e) {
     if (!input_cb_) return;
-    QPoint d = e->angleDelta();  // 1/8 degree units
+    // Send raw angleDelta in 1/8-degree units (= Windows WHEEL_DELTA scale,
+    // 120 per notch). Earlier we pre-divided by 120 to "notches" but that
+    // truncated touchpad two-finger scrolls (deltas of 16-40 units) to 0
+    // — wheel mice still sent enough events to feel OK, but trackpads
+    // ended up scrolling glacially. Host injectors expect WHEEL_DELTA
+    // units (Windows uses the value as-is, Mac divides by 40 → lines).
+    QPoint d = e->angleDelta();
     protocol::InputEvent ev{};
     ev.type      = protocol::InputEventType::MouseScroll;
-    ev.scroll_dx = static_cast<int16_t>(d.x() / 120);  // 120 = one notch
-    ev.scroll_dy = static_cast<int16_t>(d.y() / 120);
+    ev.scroll_dx = static_cast<int16_t>(d.x());
+    ev.scroll_dy = static_cast<int16_t>(d.y());
     input_cb_(ev);
 }
 

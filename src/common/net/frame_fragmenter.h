@@ -18,10 +18,12 @@ public:
 
     // Fragment encoded frame data into packets ready for sending.
     // All fragments share the same seq_no (frame sequence number).
+    // heartbeat=true tags every fragment with FLAG_HEARTBEAT so the client
+    // can skip adaptive-framerate accounting for these frames.
     std::vector<protocol::Packet> fragment(
         const uint8_t* data, size_t data_len,
         uint16_t frame_seq_no, uint32_t timestamp,
-        bool keyframe);
+        bool keyframe, bool heartbeat = false);
 };
 
 } // namespace deskbeam::net

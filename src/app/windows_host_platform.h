@@ -7,6 +7,8 @@
 #include "host/capture/screen_capture.h"
 #include "host/capture/dxgi_capture.h"
 #include "host/encode/video_encoder.h"
+#include <d3d11.h>
+#include <wrl/client.h>
 #include <memory>
 #include <vector>
 
@@ -26,6 +28,7 @@ public:
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;
+    bool re_encode_last(uint64_t pts_us) override;
     bool get_encoded_packet(EncodedPacketView& out) override;
 
     bool get_cursor_state(CursorState& out) override;
@@ -36,6 +39,12 @@ private:
     deskbeam::DxgiCapture* dxgi_ = nullptr;
     std::unique_ptr<deskbeam::IVideoEncoder> encoder_;
     std::vector<uint8_t> pkt_buf_;
+
+    // Owned mirror of the most recently captured DXGI texture, fed to the
+    // encoder by re_encode_last() when the screen is static and capture
+    // emits nothing. Lazily allocated on the first successful capture.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> staging_tex_;
+    bool staging_valid_ = false;
 
     // Latest cursor position observed from DXGI (raw host pixels).
     int32_t last_cursor_x_ = 0;

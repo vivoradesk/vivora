@@ -32,8 +32,13 @@ public:
 
     // Prepare a frame for sending: fragment, generate FEC, store in retx buffer.
     // Call once per frame, then send_prepared() for each destination.
+    // fec_enabled=false skips FEC group accumulation/parity for this frame —
+    // used by static-screen heartbeat where lost packets don't need recovery
+    // (next heartbeat replaces) and putting them through FEC just inflates
+    // the failure counter under WiFi loss without buying anything useful.
     void prepare_frame(const uint8_t* data, size_t data_len,
-                       uint16_t frame_seq, uint32_t timestamp, bool keyframe);
+                       uint16_t frame_seq, uint32_t timestamp, bool keyframe,
+                       bool fec_enabled = true);
 
     // Send the most recently prepared frame to |dest|.
     // `send_cs` (optional, non-null only after Noise handshake completes)
@@ -42,6 +47,16 @@ public:
     // broadcast.  Returns number of packets sent, or -1 on error.
     int send_prepared(const net::SocketAddr& dest,
                       crypto::CipherState* send_cs = nullptr);
+
+    // Force-emit parity for the in-progress FEC group, even if it hasn't
+    // reached K data shards yet.  Replaces prepared_wires_ with parity-only
+    // packets, which the caller then ships via send_prepared().  Used on
+    // host idle ticks: when capture stops mid-group (e.g. user releases
+    // a mouse drag and the desktop goes static with 4/10 P-frame
+    // fragments queued), the client never gets parity to recover the
+    // last frame, and the unrelated bits of UI state stay stuck.
+    // Returns true if any parity packets were prepared.
+    bool flush_pending_fec(uint16_t frame_seq, uint32_t timestamp);
 
     // Convenience: prepare + send to a single destination (backwards compat).
     int send_frame(const uint8_t* data, size_t data_len,
@@ -140,15 +155,13 @@ private:
 
     // Keyframe parity boost: steady-state M is tuned for P-frame size;
     // a keyframe is ~40 fragments and losing one group kills the whole
-    // frame.  Add extra parity just for the keyframe's groups, capped
-    // at KEYFRAME_M_MAX to keep recovery math bounded.
-    // Keyframes are big (40+ fragments, ~250-500 KB) and lossing one
-    // means a freeze visible to the user — so we splurge on parity.
-    // Boost +4: at steady-state M=4 the keyframe groups run at M=8,
-    // covering bursts up to 8 packets.  Cost is negligible because
-    // keyframes fire only on IDR (every few seconds at most).
-    static constexpr uint8_t KEYFRAME_M_BOOST = 4;
-    static constexpr uint8_t KEYFRAME_M_MAX   = 10;
+    // frame, triggering a decoder-reject cascade that lasts until the
+    // next IDR arrives. Boost+6 with cap=12 covers WiFi bursts up to
+    // 8 packets even when steady-state M=2, while ratched-up M=7 reaches
+    // the cap. Keyframes fire ~once per recovery so the extra parity
+    // is essentially free on average bandwidth.
+    static constexpr uint8_t KEYFRAME_M_BOOST = 6;
+    static constexpr uint8_t KEYFRAME_M_MAX   = 12;
 
     // RTT-based proactive M raise: spike detection.
     // 50ms threshold — tight enough to catch early WiFi congestion, while

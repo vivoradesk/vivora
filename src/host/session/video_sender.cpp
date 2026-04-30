@@ -21,7 +21,7 @@ const std::vector<uint8_t>* VideoSender::find_retx(uint32_t key) const {
 
 void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
                                 uint16_t frame_seq, uint32_t timestamp,
-                                bool keyframe)
+                                bool keyframe, bool fec_enabled)
 {
     prepared_wires_.clear();
 
@@ -32,7 +32,7 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
     // keyframe costs almost nothing on average bitrate but buys real
     // burst-loss resilience when it matters most.
     uint8_t saved_m = 0;
-    if (keyframe) {
+    if (keyframe && fec_enabled) {
         auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
         for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
         saved_m = fec_encoder_.parity_count();
@@ -41,36 +41,52 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
         fec_encoder_.set_parity_count(kf_m);
     }
 
-    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp, keyframe);
+    // fec_enabled=false marks this frame as heartbeat — propagate to
+    // fragmenter so each wire packet carries FLAG_HEARTBEAT and the
+    // client can ignore them for adaptive-framerate metrics.
+    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp,
+                                         keyframe, /*heartbeat=*/!fec_enabled);
 
     uint16_t frag_idx = 0;
     for (auto& pkt : packets) {
         auto wire = pkt.serialize();
 
-        // Feed FEC directly from the local wire — no need to bounce through
-        // the retx ring and re-lookup just to get the same bytes back.
-        uint32_t key = retx_key(frame_seq, frag_idx);
-        auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
-                                           frame_seq, timestamp);
-
-        // Copy into the retx ring for future NACK service, then move the
-        // original into prepared_wires_ to avoid a third copy.
-        store_retx(key, wire);
-        prepared_wires_.push_back(std::move(wire));
-        for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+        if (fec_enabled) {
+            // Feed FEC directly from the local wire — no need to bounce through
+            // the retx ring and re-lookup just to get the same bytes back.
+            auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
+                                               frame_seq, timestamp);
+            uint32_t key = retx_key(frame_seq, frag_idx);
+            store_retx(key, wire);
+            prepared_wires_.push_back(std::move(wire));
+            for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+        } else {
+            // No-FEC path (heartbeat): no parity, no retx ring write.
+            // A lost heartbeat packet is replaced by the next one ~16ms
+            // later, no recovery needed.
+            prepared_wires_.push_back(std::move(wire));
+        }
 
         frag_idx++;
     }
 
     // Flush FEC group at end of keyframe for tighter protection, then
     // restore the steady-state M so P-frames don't pay boosted overhead.
-    if (keyframe) {
+    if (keyframe && fec_enabled) {
         auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
         for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
         fec_encoder_.set_parity_count(saved_m);
     }
 
     packets_sent_ += static_cast<uint64_t>(frag_idx);
+}
+
+bool VideoSender::flush_pending_fec(uint16_t frame_seq, uint32_t timestamp) {
+    auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
+    if (fec_wires.empty()) return false;
+    prepared_wires_.clear();
+    for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+    return true;
 }
 
 int VideoSender::send_prepared(const net::SocketAddr& dest,

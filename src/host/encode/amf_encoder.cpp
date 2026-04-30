@@ -136,6 +136,11 @@ bool AmfEncoder::create_encoder() {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, (amf_int64)config_.bitrate_bps);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE, (amf_int64)config_.bitrate_bps);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_FRAMERATE, AMFConstructRate(config_.fps, 1));
+        // Force one output per input. Default for ULTRA_LOW_LATENCY is true,
+        // which lets AMF coalesce identical inputs into fewer outputs and
+        // halves the wire packet rate on a static screen — which is
+        // exactly what we don't want for the keep-alive heartbeat.
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_RATE_CONTROL_SKIP_FRAME_ENABLE, false);
         // VBV = 1s of bitrate (matches NVENC/QSV) — smooths burstiness so
         // CBR can't dump a 300KB IDR onto the wire in one packet train.
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, (amf_int64)config_.bitrate_bps);
@@ -249,6 +254,74 @@ bool AmfEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
     return true;
 }
 
+bool AmfEncoder::encode_skip(ID3D11Texture2D* texture, uint64_t pts_us) {
+    ScopedTimer timer(TAG, "encode_heartbeat");
+    if (!encoder_) return false;
+
+    AMFSurface* surface = nullptr;
+    AMF_RESULT res = context_->AllocSurface(AMF_MEMORY_DX11,
+        config_.input_format == DXGI_FORMAT_R16G16B16A16_FLOAT ? AMF_SURFACE_RGBA_F16 : AMF_SURFACE_BGRA,
+        config_.width, config_.height, &surface);
+    if (res != AMF_OK) {
+        log::error(TAG, "AllocSurface (heartbeat) failed: %d", res);
+        return false;
+    }
+
+    ID3D11Texture2D* amf_texture = (ID3D11Texture2D*)surface->GetPlaneAt(0)->GetNative();
+    d3d_context_->CopyResource(amf_texture, texture);
+    surface->SetPts(pts_us);
+
+    // If a client recovery IDR is pending and we're on a static screen,
+    // real captures aren't going to fire — so the heartbeat tick must
+    // service the IDR itself, otherwise the client sits in pre-keyframe
+    // forever and decoded FPS hits zero.
+    const bool service_idr = idr_requested_;
+    const bool tag_as_heartbeat = !service_idr;
+
+    if (config_.codec == VideoCodec::HEVC) {
+        if (service_idr) {
+            surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_FORCE_PICTURE_TYPE,
+                                 (amf_int64)AMF_VIDEO_ENCODER_HEVC_PICTURE_TYPE_IDR);
+            surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_INSERT_HEADER, true);
+        } else {
+            // Force P-frame to stop AMF coalescing identical-content
+            // inputs into AMF_REPEAT no-output (halves wire rate).
+            surface->SetProperty(AMF_VIDEO_ENCODER_HEVC_FORCE_PICTURE_TYPE,
+                                 (amf_int64)AMF_VIDEO_ENCODER_HEVC_PICTURE_TYPE_P);
+        }
+    } else {
+        if (service_idr) {
+            surface->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE,
+                                 (amf_int64)AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR);
+            surface->SetProperty(AMF_VIDEO_ENCODER_INSERT_SPS, true);
+            surface->SetProperty(AMF_VIDEO_ENCODER_INSERT_PPS, true);
+        } else {
+            surface->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE,
+                                 (amf_int64)AMF_VIDEO_ENCODER_PICTURE_TYPE_P);
+        }
+    }
+    if (service_idr) idr_requested_ = false;
+
+    // Drain stale outputs FIRST so the heartbeat-tag counter only applies
+    // to outputs from the submit below.
+    drain_output();
+    if (tag_as_heartbeat) ++pending_skip_inputs_;
+
+    res = encoder_->SubmitInput(surface);
+    if (res == AMF_INPUT_FULL) {
+        drain_output();
+        res = encoder_->SubmitInput(surface);
+    }
+    surface->Release();
+    if (res != AMF_OK) {
+        log::error(TAG, "SubmitInput (heartbeat) failed: %d", res);
+        if (tag_as_heartbeat) --pending_skip_inputs_;  // unwind
+        return false;
+    }
+    drain_output();
+    return true;
+}
+
 void AmfEncoder::drain_output() {
     AMFData* data = nullptr;
     while (true) {
@@ -283,6 +356,13 @@ void AmfEncoder::drain_output() {
                 data->GetProperty(AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE, &pic_type);
                 pkt.keyframe = (pic_type == AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE_IDR ||
                                 pic_type == AMF_VIDEO_ENCODER_OUTPUT_DATA_TYPE_I);
+            }
+
+            // Tag heartbeats: pending_skip_inputs_ tracks how many skip
+            // submits haven't been drained yet (AMF processes in-order).
+            if (pending_skip_inputs_ > 0) {
+                pkt.heartbeat = true;
+                --pending_skip_inputs_;
             }
 
             output_packets_.push(std::move(pkt));

@@ -43,6 +43,15 @@ struct HostPlatform {
                                     bool& content_changed,
                                     bool force) = 0;
 
+    // Re-encode the last captured frame to keep wire/FEC alive on idle.
+    // Called when one frame interval has passed without a fresh capture
+    // (DXGI returns nothing on a truly static screen). The encoder gets
+    // the same texture again — should emit a SKIP-type frame (~200 B) so
+    // the wire stays warm without burdening FEC with kilobyte intra-refresh
+    // payloads on every heartbeat tick.
+    // Default no-op for platforms that haven't wired this up yet.
+    virtual bool re_encode_last(uint64_t /*pts_us*/) { return false; }
+
     // Pull the next encoded packet.  Returns false when no more packets
     // are available this iteration.
     struct EncodedPacketView {
@@ -50,6 +59,7 @@ struct HostPlatform {
         size_t         len  = 0;
         uint64_t       pts  = 0;
         bool           keyframe = false;
+        bool           heartbeat = false;  // skip-frame from re_encode_last
     };
     virtual bool get_encoded_packet(EncodedPacketView& pkt) = 0;
 

@@ -180,7 +180,20 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                                net_frame.timestamp, net_frame.keyframe,
                                net_frame.seq_no)) {
                 frames_fed++;
+                // Count heartbeat in accepted too: assembler can't tell a
+                // dropped heartbeat from a dropped real frame, so drops
+                // accumulate even on a quiet stream. If we excluded
+                // heartbeat from accepted, drop_pct = drops/(0+drops) =
+                // 100% on any single heartbeat loss → adaptive ratchets
+                // target_fps down hard. Including heartbeat in the
+                // denominator keeps the ratio honest.
                 session.note_decoder_accepted();
+            } else if (net_frame.heartbeat) {
+                // Decoder didn't like a heartbeat frame: harmless, the
+                // next heartbeat ~18ms later will replace it. Skip the
+                // IDR-cycle / metric pollution that a real-frame reject
+                // would trigger.
+                continue;
             } else {
                 session.note_decoder_rejected();
                 // Decoder rejected the frame — same recovery path as a
@@ -235,11 +248,15 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         int rendered = platform.render();
         frames_decoded += rendered > 0 ? rendered : frames_fed;
 
-        // FPS logging + HUD stats update.  Runs once per ~60 decoded
-        // frames so the HUD refresh rate matches the FPS-log cadence
-        // (≤ 1 Hz at low decode rates, slightly higher when we sail).
-        if (frames_decoded > 0 && frames_decoded - last_log_frames >= 60) {
-            auto now = Clock::now();
+        // FPS logging + HUD stats update.  Runs once per second by wall
+        // clock — earlier "every 60 decoded frames" version made the HUD
+        // appear frozen on static screens (low decode rate => long gaps
+        // between updates).  1 Hz keeps the displayed numbers fresh
+        // regardless of FPS.
+        auto now_check = Clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                now_check - last_log_time).count() >= 1000) {
+            auto now = now_check;
             double window_sec = std::chrono::duration<double>(now - last_log_time).count();
             double inst_fps = window_sec > 0
                 ? (frames_decoded - last_log_frames) / window_sec

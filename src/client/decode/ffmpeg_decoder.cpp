@@ -167,13 +167,16 @@ const char* FfmpegDecoder::backend_name() const {
 
 bool FfmpegDecoder::reinit() {
     corrupt_ = false;
-    // We tried `avcodec_flush_buffers` for the HW path — it's ~100×
-    // cheaper but caused a hard crash a couple of seconds into a
-    // recovery cycle (no trace, segfault).  Suspected cause: stale
-    // VAAPI surface refs in in_frame_ that flush_buffers doesn't
-    // fully release.  Reverted to the full free+open rebuild — it
-    // costs ~100ms but is stable, and the perceived recovery jitter
-    // mostly comes from waiting for FEC parity, not the reinit itself.
+    // Drop any buffer refs we still hold against the old codec / its
+    // hwframes context BEFORE freeing the context — otherwise the
+    // refcount-zero free of the underlying VAAPI surfaces races with
+    // their internal pool teardown and segfaults on the next
+    // avcodec_receive_frame against the freshly-opened ctx.
+    if (in_frame_) av_frame_unref(in_frame_);
+    if (sw_frame_) av_frame_unref(sw_frame_);
+    if (out_frame_) av_frame_unref(out_frame_);
+    // sws operates on the old src format; rebuild lazily on first frame.
+    if (sws_) { sws_freeContext(sws_); sws_ = nullptr; sws_src_format_ = -1; }
     if (ctx_) avcodec_free_context(&ctx_);
     AVCodecID codec_id = (codec_ == VideoCodec::H264)
                            ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC;

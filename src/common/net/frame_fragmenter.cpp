@@ -7,9 +7,10 @@ namespace deskbeam::net {
 std::vector<protocol::Packet> FrameFragmenter::fragment(
     const uint8_t* data, size_t data_len,
     uint16_t frame_seq_no, uint32_t timestamp,
-    bool keyframe)
+    bool keyframe, bool heartbeat)
 {
     std::vector<protocol::Packet> packets;
+    const uint8_t hb_flag = heartbeat ? protocol::FLAG_HEARTBEAT : 0;
 
     // Small frame: no fragmentation needed
     if (data_len <= MAX_PAYLOAD) {
@@ -17,7 +18,8 @@ std::vector<protocol::Packet> FrameFragmenter::fragment(
         pkt.header.type = protocol::PacketType::Video;
         pkt.header.seq_no = frame_seq_no;
         pkt.header.timestamp = timestamp;
-        pkt.header.flags = keyframe ? protocol::FLAG_KEYFRAME : protocol::FLAG_NONE;
+        pkt.header.flags = (keyframe ? protocol::FLAG_KEYFRAME : protocol::FLAG_NONE)
+                          | hb_flag;
         pkt.header.payload_len = static_cast<uint16_t>(data_len);
         pkt.payload.assign(data, data + data_len);
         packets.push_back(std::move(pkt));
@@ -38,7 +40,7 @@ std::vector<protocol::Packet> FrameFragmenter::fragment(
         pkt.header.seq_no = frame_seq_no;
         pkt.header.timestamp = timestamp;
 
-        uint8_t flags = protocol::FLAG_FRAGMENT;
+        uint8_t flags = protocol::FLAG_FRAGMENT | hb_flag;
         if (i == 0 && keyframe) flags |= protocol::FLAG_KEYFRAME;
         if (i == frag_count - 1) flags |= protocol::FLAG_LAST_FRAG;
         pkt.header.flags = flags;

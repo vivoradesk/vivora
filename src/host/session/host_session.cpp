@@ -187,15 +187,29 @@ void HostSession::poll() {
 }
 
 int HostSession::send_frame(const uint8_t* data, size_t data_len,
-                            uint16_t frame_seq, uint32_t timestamp, bool keyframe) {
+                            uint16_t frame_seq, uint32_t timestamp, bool keyframe,
+                            bool fec_enabled) {
     if (state_ != SessionState::Connected || !sender_ || clients_.empty())
         return -1;
 
     // Fragment + FEC once, then multicast the prepared wire packets.  Each
     // client seals the same plaintext wires through its own send_cs, so the
     // FEC plan is shared but the on-wire bytes differ per destination.
-    sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe);
+    sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe, fec_enabled);
 
+    int total = 0;
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        int n = sender_->send_prepared(addr, &client.send_cs);
+        if (n > 0) total += n;
+    }
+    return total;
+}
+
+int HostSession::flush_video_fec(uint16_t frame_seq, uint32_t timestamp) {
+    if (state_ != SessionState::Connected || !sender_ || clients_.empty())
+        return 0;
+    if (!sender_->flush_pending_fec(frame_seq, timestamp)) return 0;
     int total = 0;
     for (auto& [addr, client] : clients_) {
         if (!client.handshake_complete) continue;

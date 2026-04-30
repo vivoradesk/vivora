@@ -31,6 +31,10 @@ enum PacketFlags : uint8_t {
     FLAG_FRAGMENT   = 0x04,  // packet is a fragment of a larger frame
     FLAG_LAST_FRAG  = 0x08,  // last fragment of a frame
     FLAG_RETX       = 0x10,  // packet is a NACK retransmission (set on wire by sender)
+    FLAG_HEARTBEAT  = 0x20,  // host heartbeat re-encode of last frame; client
+                             // must not count it toward adaptive-framerate
+                             // reject/drop metrics or trigger an IDR cycle
+                             // on decode failure (next heartbeat replaces).
 };
 
 // Wire format: 10 bytes header

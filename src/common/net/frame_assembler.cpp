@@ -62,6 +62,7 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
             pf.first_arrival = Clock::now();
         }
         pf.keyframe = (packet.header.flags & protocol::FLAG_KEYFRAME) != 0;
+        pf.heartbeat = (packet.header.flags & protocol::FLAG_HEARTBEAT) != 0;
         pf.assembled = packet.payload;
         pf.complete = true;
         try_deliver();
@@ -96,6 +97,8 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
 
     if (packet.header.flags & protocol::FLAG_KEYFRAME)
         pf.keyframe = true;
+    if (packet.header.flags & protocol::FLAG_HEARTBEAT)
+        pf.heartbeat = true;
 
     // Store fragment data (skip 4-byte frag header).  Write once, directly
     // at the fragment's slot in the pre-allocated buffer — no intermediate
@@ -156,6 +159,7 @@ void FrameAssembler::try_deliver() {
         frame.seq_no = next_deliver_seq_;
         frame.timestamp = pf.timestamp;
         frame.keyframe = pf.keyframe;
+        frame.heartbeat = pf.heartbeat;
         frame.data = std::move(pf.assembled);
         completed_.push(std::move(frame));
         frames_completed_++;

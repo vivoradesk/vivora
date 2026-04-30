@@ -93,8 +93,19 @@ public:
 
     // Send an encoded frame to ALL connected clients.
     // Returns number of packets sent (sum), or -1 if no clients.
+    // fec_enabled=false bypasses FEC for this frame (used by heartbeat
+    // path on a static screen — losing a heartbeat is harmless and
+    // putting it through FEC just inflates the failure counter).
     int send_frame(const uint8_t* data, size_t data_len,
-                   uint16_t frame_seq, uint32_t timestamp, bool keyframe);
+                   uint16_t frame_seq, uint32_t timestamp, bool keyframe,
+                   bool fec_enabled = true);
+
+    // Force-emit parity for the in-flight FEC group and broadcast it to
+    // every client, for the case where capture stops mid-group on a
+    // static screen and the client never gets enough data to recover the
+    // last partial frame. Returns total packets sent (0 if no group was
+    // pending). See VideoSender::flush_pending_fec.
+    int flush_video_fec(uint16_t frame_seq, uint32_t timestamp);
 
     void set_screen_resolution(uint32_t w, uint32_t h) {
         pending_screen_w_ = w;

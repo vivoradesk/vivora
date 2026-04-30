@@ -73,7 +73,12 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                                               bool& content_changed,
                                               bool force) {
     deskbeam::CapturedFrame frame;
-    if (!capture_->capture_frame(frame, 16))
+    // Non-blocking capture: if DXGI doesn't have a fresh frame, return
+    // immediately so the host_loop can fire heartbeat / yield. A 16ms
+    // timeout here halved the loop's effective rate on a static screen
+    // (every iteration blocked the full frame interval), starving the
+    // heartbeat down to ~25fps.
+    if (!capture_->capture_frame(frame, 0))
         return false;
 
     // Stash cursor state before any early-return so get_cursor_state()
@@ -91,12 +96,42 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
         return false;
     }
 
+    // Mirror the DXGI texture into our own staging copy before letting
+    // DXGI release it. re_encode_last() reuses this on idle ticks so the
+    // wire stays at full frame-rate cadence even when the screen is static.
+    if (dxgi_) {
+        ID3D11Device* dev = dxgi_->get_device();
+        ID3D11DeviceContext* ctx = dxgi_->get_context();
+        if (dev && ctx && frame.texture) {
+            if (!staging_tex_) {
+                D3D11_TEXTURE2D_DESC desc = {};
+                frame.texture->GetDesc(&desc);
+                desc.Usage          = D3D11_USAGE_DEFAULT;
+                desc.BindFlags      = D3D11_BIND_SHADER_RESOURCE;
+                desc.CPUAccessFlags = 0;
+                desc.MiscFlags      = 0;
+                if (FAILED(dev->CreateTexture2D(&desc, nullptr, staging_tex_.GetAddressOf()))) {
+                    deskbeam::log::warn("HOST", "Heartbeat staging texture alloc failed");
+                }
+            }
+            if (staging_tex_) {
+                ctx->CopyResource(staging_tex_.Get(), frame.texture.Get());
+                staging_valid_ = true;
+            }
+        }
+    }
+
     if (!encoder_->encode(frame.texture.Get(), pts_us)) {
         capture_->release_frame(frame);
         return false;
     }
     capture_->release_frame(frame);
     return true;
+}
+
+bool WindowsHostPlatform::re_encode_last(uint64_t pts_us) {
+    if (!staging_valid_ || !staging_tex_ || !encoder_) return false;
+    return encoder_->encode_skip(staging_tex_.Get(), pts_us);
 }
 
 bool WindowsHostPlatform::get_cursor_state(CursorState& out) {
@@ -133,10 +168,11 @@ bool WindowsHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     if (!encoder_->get_packet(pkt))
         return false;
     pkt_buf_ = std::move(pkt.data);
-    out.data     = pkt_buf_.data();
-    out.len      = pkt_buf_.size();
-    out.pts      = pkt.pts;
-    out.keyframe = pkt.keyframe;
+    out.data      = pkt_buf_.data();
+    out.len       = pkt_buf_.size();
+    out.pts       = pkt.pts;
+    out.keyframe  = pkt.keyframe;
+    out.heartbeat = pkt.heartbeat;
     return true;
 }
 
