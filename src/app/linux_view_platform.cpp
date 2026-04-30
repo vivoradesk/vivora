@@ -27,8 +27,14 @@ bool LinuxViewPlatform::init(int argc, char* argv[],
     window_->setWindowTitle(QString("DeskBeam — %1:%2").arg(host_ip).arg(port));
     view_ = new deskbeam::client::QtGlVideoView(window_.get());
     window_->setCentralWidget(view_);
+    // Without an explicit focus proxy, QMainWindow keeps keyboard focus and
+    // the central widget's keyPressEvent never fires — so all key input
+    // got swallowed before reaching the host. Make the GL view the focus
+    // proxy so window-level activation routes keys straight to it.
+    window_->setFocusProxy(view_);
     window_->resize(1280, 720);
     window_->show();
+    view_->setFocus();
     return true;
 }
 
@@ -93,6 +99,14 @@ void LinuxViewPlatform::flush_decoder() {
     // "Could not find ref" cascades.  Recreating the AVCodecContext from
     // scratch every IDR (~once / 2s) is cheap and reliable.
     if (decoder_) decoder_->reinit();
+}
+
+void LinuxViewPlatform::upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) {
+    if (view_) view_->upload_cursor_shape(shape);
+}
+
+void LinuxViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) {
+    if (view_) view_->update_cursor_position(pos);
 }
 
 void LinuxViewPlatform::update_stats(const deskbeam::StatsView& stats) {

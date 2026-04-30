@@ -10,7 +10,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 
-bool MacHostPlatform::init(uint32_t display_index, bool prefer_hdr,
+bool MacHostPlatform::init(uint32_t display_index,
                             uint32_t manual_bitrate_bps,
                             deskbeam::VideoCodec codec) {
     // NSCursor / NSScreen need the AppKit shared app initialized. Host mode
@@ -39,7 +39,9 @@ bool MacHostPlatform::init(uint32_t display_index, bool prefer_hdr,
     ccfg.display_index = display_index;
     ccfg.fps = 60;
     ccfg.show_cursor = false;
-    ccfg.prefer_hdr = prefer_hdr;
+    // Auto-detect: capture HDR if the display reports HDR, otherwise SDR.
+    // MacScreenCapture honours prefer_hdr only when display_is_hdr() agrees.
+    ccfg.prefer_hdr = true;
     if (!capture_.init(ccfg)) {
         deskbeam::log::error("HOST", "Failed to init capture");
         return false;

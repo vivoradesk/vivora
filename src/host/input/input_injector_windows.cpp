@@ -112,13 +112,23 @@ public:
         case protocol::InputEventType::KeyDown:
         case protocol::InputEventType::KeyUp: {
             input.type = INPUT_KEYBOARD;
-            input.ki.wScan = event.scan_code;
+            // Linux/Mac clients can't produce a Windows scancode locally
+            // and send scan_code=0 with a valid vk_code — derive the
+            // scancode from VK on this host's active layout. Windows
+            // client sends both natively (matching the user's physical
+            // keyboard), so we keep that path identical.
+            uint16_t scan = event.scan_code;
+            if (scan == 0 && event.vk_code != 0) {
+                scan = static_cast<uint16_t>(
+                    MapVirtualKeyW(event.vk_code, MAPVK_VK_TO_VSC));
+            }
+            input.ki.wScan = scan;
             input.ki.wVk = event.vk_code;
             input.ki.dwFlags = KEYEVENTF_SCANCODE;
             if (event.type == protocol::InputEventType::KeyUp)
                 input.ki.dwFlags |= KEYEVENTF_KEYUP;
             // Extended key detection (right ctrl, right alt, arrows, etc.)
-            if (event.scan_code > 0xFF ||
+            if (scan > 0xFF ||
                 event.vk_code == VK_RIGHT || event.vk_code == VK_LEFT ||
                 event.vk_code == VK_UP || event.vk_code == VK_DOWN ||
                 event.vk_code == VK_INSERT || event.vk_code == VK_DELETE ||

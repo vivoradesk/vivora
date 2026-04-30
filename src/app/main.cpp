@@ -45,7 +45,6 @@ static void print_usage(const char* prog) {
     std::printf("\nOptions:\n");
     std::printf("  --port PORT       UDP port (default 9876)\n");
     std::printf("  --display N       Display index to capture (host, default 0)\n");
-    std::printf("  --hdr             Request HDR10 capture if the display supports it\n");
     std::printf("  --bitrate Mbps    Manual encoder bitrate; default is auto from resolution\n");
     std::printf("  --encoder NAME    Force encoder backend: auto|amf|nvenc|qsv (default auto)\n");
     std::printf("  --codec NAME      Video codec: h264|hevc (default hevc)\n");
@@ -67,7 +66,6 @@ int main(int argc, char* argv[]) {
     bool mode_host = false;
     bool mode_view = false;
     uint32_t display_index = 0;
-    bool prefer_hdr = false;
     uint32_t manual_bitrate_bps = 0;
     deskbeam::EncoderKind encoder_kind = deskbeam::EncoderKind::Auto;
     deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
@@ -83,8 +81,6 @@ int main(int argc, char* argv[]) {
             mode_host = true;
         } else if ((v = flag_value("--display", argv, argc, i)) != nullptr) {
             display_index = static_cast<uint32_t>(std::atoi(v));
-        } else if (std::strcmp(argv[i], "--hdr") == 0) {
-            prefer_hdr = true;
         } else if ((v = flag_value("--bitrate", argv, argc, i)) != nullptr) {
             manual_bitrate_bps = static_cast<uint32_t>(std::atoi(v)) * 1'000'000u;
         } else if ((v = flag_value("--encoder", argv, argc, i)) != nullptr) {
@@ -141,7 +137,7 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef DESKBEAM_MACOS
         MacHostPlatform platform;
-        if (!platform.init(display_index, prefer_hdr, manual_bitrate_bps, codec)) return 1;
+        if (!platform.init(display_index, manual_bitrate_bps, codec)) return 1;
 #endif
 #ifdef DESKBEAM_LINUX
         std::fprintf(stderr,

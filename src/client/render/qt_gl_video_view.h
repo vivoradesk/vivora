@@ -1,9 +1,11 @@
 #pragma once
 
 #include "common/protocol/input_event.h"
+#include "common/protocol/cursor_message.h"
 
 #include "app/view_platform.h"
 
+#include <QCursor>
 #include <QLabel>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
@@ -13,6 +15,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <unordered_map>
 
 namespace deskbeam::client {
 
@@ -55,6 +58,13 @@ public:
     // Update (or hide) the diagnostics overlay.  Hidden by default —
     // toggled by the F9 keypress handled inside this widget.
     void update_stats(const StatsView& stats);
+
+    // Cursor sync: cache shape bitmap by id; switch widget cursor when
+    // host signals an active shape change.  Position is intentionally
+    // ignored — the local OS already places the cursor where the user
+    // is pointing.
+    void upload_cursor_shape(const protocol::CursorShapeMessage& shape);
+    void update_cursor_position(const protocol::CursorPositionMessage& pos);
 
 protected:
     void initializeGL() override;
@@ -115,6 +125,12 @@ private:
     void recompute_viewport();
 
     InputCallback input_cb_;
+
+    // Cursor shape cache keyed by host's shape_id; the widget's QCursor
+    // is updated when active_shape_id_ changes.
+    std::unordered_map<uint32_t, QCursor> cursor_cache_;
+    uint32_t active_shape_id_ = 0;
+    bool     have_active_shape_ = false;
 };
 
 } // namespace deskbeam::client

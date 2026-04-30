@@ -489,4 +489,34 @@ void QtGlVideoView::keyReleaseEvent(QKeyEvent* e) {
     emit_key(e->key(), false);
 }
 
+void QtGlVideoView::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {
+    // Host BGRA matches Qt Format_ARGB32 byte order on little-endian.
+    const size_t expected = static_cast<size_t>(shape.width) * shape.height * 4u;
+    if (shape.width == 0 || shape.height == 0 || shape.bgra.size() < expected) return;
+
+    QImage img(shape.bgra.data(), shape.width, shape.height,
+               static_cast<int>(shape.width) * 4,
+               QImage::Format_ARGB32);
+    QPixmap pix = QPixmap::fromImage(img.copy());
+    QCursor cur(pix, static_cast<int>(shape.hotspot_x), static_cast<int>(shape.hotspot_y));
+    cursor_cache_[shape.shape_id] = std::move(cur);
+
+    if (have_active_shape_ && shape.shape_id == active_shape_id_) {
+        auto it = cursor_cache_.find(active_shape_id_);
+        if (it != cursor_cache_.end()) setCursor(it->second);
+    }
+}
+
+void QtGlVideoView::update_cursor_position(const protocol::CursorPositionMessage& pos) {
+    // Position is ignored — local OS already follows the user's mouse.
+    // Apply the shape if it changed and we have it cached; otherwise the
+    // next upload_cursor_shape with this id will pick it up.
+    if (!have_active_shape_ || pos.shape_id != active_shape_id_) {
+        active_shape_id_   = pos.shape_id;
+        have_active_shape_ = true;
+        auto it = cursor_cache_.find(active_shape_id_);
+        if (it != cursor_cache_.end()) setCursor(it->second);
+    }
+}
+
 } // namespace deskbeam::client
