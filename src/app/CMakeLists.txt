@@ -70,24 +70,32 @@ if(APPLE)
 endif()
 
 if(UNIX AND NOT APPLE)
-    # Linux platform — client only for L2.  Host (capture/encode/inject)
-    # is L3 and not wired up yet.
+    # Linux platform.  L2 = client; L3 (in progress) = PipeWire capture
+    # via xdg-desktop-portal + VAAPI HEVC encoder + uinput injection.
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
         libavcodec libavutil libswscale)
+    pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+    pkg_check_modules(DBUS     REQUIRED IMPORTED_TARGET dbus-1)
 
     target_sources(deskbeam PRIVATE
         linux_view_platform.cpp
+        linux_host_platform.cpp
         ${CMAKE_SOURCE_DIR}/src/client/decode/ffmpeg_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/qt_gl_video_view.cpp
-        # Stubs for host-side symbols pulled in by the cross-platform
-        # HostSession; real Linux host support is L3.
+        # Linux host: PipeWire capture + VAAPI encoder, wired into
+        # HostSession via LinuxHostPlatform.  uinput injector and audio
+        # capture are pending (L3 sub-tasks).
+        ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_stub.cpp
     )
     target_link_libraries(deskbeam PRIVATE
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         PkgConfig::LIBAV
+        PkgConfig::PIPEWIRE
+        PkgConfig::DBUS
     )
 endif()
 

@@ -21,6 +21,7 @@
 
 #ifdef DESKBEAM_LINUX
 #include "app/linux_view_platform.h"
+#include "app/linux_host_platform.h"
 #endif
 
 // Match a long-form flag with an attached value: both "--flag VALUE" (next
@@ -140,20 +141,32 @@ int main(int argc, char* argv[]) {
         if (!platform.init(display_index, manual_bitrate_bps, codec)) return 1;
 #endif
 #ifdef DESKBEAM_LINUX
-        std::fprintf(stderr,
-            "Error: --host is not yet implemented on Linux. "
-            "Linux client (--view) works against macOS/Windows hosts; "
-            "Linux host support is L3 on the roadmap.\n");
-        return 1;
-#else
+        // L3 Stage 3: PipeWire capture → VAAPI encode → HostSession network
+        // pipeline.  Defaults to H.264 because Intel iHD HEVC vaapi has a
+        // known assertion-fail path on some resolutions; user can pick
+        // hevc explicitly via --codec hevc on hardware where it works.
+        deskbeam::VideoCodec linux_codec = (codec == deskbeam::VideoCodec::HEVC)
+            ? deskbeam::VideoCodec::H264
+            : codec;
+        if (codec == deskbeam::VideoCodec::HEVC) {
+            deskbeam::log::warn("HOST",
+                "Defaulting to H.264 on Linux host — HEVC vaapi disabled by default. "
+                "Pass --codec hevc to force.");
+        }
+        LinuxHostPlatform platform;
+        if (!platform.init(manual_bitrate_bps, linux_codec)) return 1;
+#endif
         deskbeam::HostLoopConfig lcfg;
         lcfg.port = port;
         lcfg.manual_bitrate_bps = manual_bitrate_bps;
         lcfg.encoder_kind = encoder_kind;
+#ifdef DESKBEAM_LINUX
+        lcfg.codec = linux_codec;
+#else
         lcfg.codec = codec;
+#endif
         lcfg.stun_server = stun_server;
         return deskbeam::run_host_loop(platform, lcfg);
-#endif
     }
 
     if (mode_view) {

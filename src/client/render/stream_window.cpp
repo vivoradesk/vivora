@@ -25,10 +25,12 @@ StreamWindow::StreamWindow(QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(640, 360);
-    // Until the host sends us its cursor shape, hide the local system
-    // cursor over the stream — otherwise we'd flicker between the default
-    // Qt arrow and the host shape on first shape packet.
-    setCursor(Qt::BlankCursor);
+    // Default to system arrow cursor — switched to BlankCursor + custom
+    // drawn shape only after the host actually sends a CursorShape packet.
+    // Hosts that don't sync cursors (e.g. Linux PipeWire portal capture
+    // bakes the cursor into the video frame) keep the system cursor so
+    // the user can still see where they're pointing.
+    setCursor(Qt::ArrowCursor);
 }
 
 void StreamWindow::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {
