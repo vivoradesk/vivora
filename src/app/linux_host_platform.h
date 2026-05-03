@@ -5,6 +5,7 @@
 #include "host/capture/pipewire_capture.h"
 #include "host/encode/vaapi_encoder.h"
 
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <queue>
@@ -30,6 +31,9 @@ public:
     bool re_encode_last(uint64_t pts_us) override;
     bool get_encoded_packet(EncodedPacketView& out) override;
 
+    bool get_cursor_state(CursorState& out) override;
+    bool take_cursor_shape(CursorShapeView& out) override;
+
     void shutdown() override;
 
 private:
@@ -38,6 +42,11 @@ private:
     deskbeam::host::PipeWireCapture cap_;
     deskbeam::host::VaapiEncoder    enc_;
     deskbeam::VideoCodec codec_ = deskbeam::VideoCodec::H264;
+    // Set when first PipeWire frame arrives — init() blocks until then
+    // so host_loop sees real capture dimensions for bitrate sizing.
+    std::condition_variable first_frame_cv_;
+    std::mutex first_frame_mu_;
+    bool first_frame_seen_ = false;
 
     // Capture geometry — set on first frame after PipeWire negotiates.
     uint32_t cap_w_ = 0, cap_h_ = 0;

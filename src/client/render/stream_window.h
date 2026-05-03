@@ -2,10 +2,12 @@
 
 #ifdef DESKBEAM_WINDOWS
 
+#include "app/view_platform.h"
 #include "client/render/d3d_renderer.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
 #include <QCursor>
+#include <QLabel>
 #include <QTimer>
 #include <QWidget>
 #include <cstdint>
@@ -18,6 +20,7 @@ class StreamWindow : public QWidget {
     Q_OBJECT
 public:
     explicit StreamWindow(QWidget* parent = nullptr);
+    ~StreamWindow() override;
 
     bool init_renderer(ID3D11Device* device, uint32_t width, uint32_t height, DXGI_FORMAT format);
     bool render_frame(ID3D11Texture2D* texture, uint32_t subresource);
@@ -38,6 +41,9 @@ public:
     using InputCallback = std::function<void(const protocol::InputEvent&)>;
     void set_input_callback(InputCallback cb) { input_cb_ = std::move(cb); }
 
+    // Push diagnostics snapshot to the HUD overlay (drawn only when visible).
+    void update_stats(const StatsView& stats);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -48,6 +54,8 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusInEvent(QFocusEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void moveEvent(QMoveEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
     QPaintEngine* paintEngine() const override { return nullptr; }
 
@@ -102,6 +110,15 @@ private:
     QTimer* visibility_debounce_ = nullptr;
     bool    pending_visibility_ = true;
     bool    pending_visibility_valid_ = false;
+
+    // Diagnostics HUD — toggled by F9.  QLabel as native child so it sits
+    // on top of the WA_PaintOnScreen D3D surface (otherwise Qt's compositor
+    // is bypassed and a non-native child wouldn't be visible).
+    QLabel*   hud_label_   = nullptr;
+    bool      hud_visible_ = false;
+    StatsView last_stats_{};
+    void rebuild_hud_text();
+    void position_hud();
 };
 
 } // namespace deskbeam

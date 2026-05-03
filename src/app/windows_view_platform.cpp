@@ -99,6 +99,10 @@ void WindowsViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     if (window_) window_->set_stream_size(width, height);
 }
 
+void WindowsViewPlatform::update_stats(const deskbeam::StatsView& stats) {
+    if (window_) window_->update_stats(stats);
+}
+
 void WindowsViewPlatform::shutdown() {
     window_.reset();
     app_.reset();

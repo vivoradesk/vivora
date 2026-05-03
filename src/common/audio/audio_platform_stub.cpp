@@ -4,19 +4,7 @@
 // stub on Linux (host-side capture is L3 territory) and full stubs for any
 // other UNIX-like target that may appear later.
 
-#if defined(DESKBEAM_LINUX)
-
-#include "common/audio/audio_capture.h"
-
-namespace deskbeam::audio {
-
-std::unique_ptr<AudioCapture> create_default_loopback_capture() {
-    return nullptr;
-}
-
-} // namespace deskbeam::audio
-
-#elif !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(DESKBEAM_LINUX) && !defined(_WIN32) && !defined(__APPLE__)
 
 #include "common/audio/audio_capture.h"
 #include "common/audio/audio_output.h"

@@ -239,7 +239,13 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             if (session.take_new_cursor_shape(new_shape)) {
                 platform.upload_cursor_shape(new_shape);
             }
-            platform.update_cursor_position(session.cursor_position());
+            // Only push cursor state if the host actually sent at least
+            // one CursorPosition packet. Otherwise the default-constructed
+            // message (visible=false, shape_id=0) would hijack the system
+            // cursor on hosts that don't sync cursors (Linux PipeWire).
+            if (session.has_cursor_position()) {
+                platform.update_cursor_position(session.cursor_position());
+            }
         }
 
         // Render decoded output.  On platforms where decode() already

@@ -83,12 +83,12 @@ if(UNIX AND NOT APPLE)
         linux_host_platform.cpp
         ${CMAKE_SOURCE_DIR}/src/client/decode/ffmpeg_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/qt_gl_video_view.cpp
-        # Linux host: PipeWire capture + VAAPI encoder, wired into
-        # HostSession via LinuxHostPlatform.  uinput injector and audio
-        # capture are pending (L3 sub-tasks).
+        # Linux host: PipeWire capture + VAAPI encoder + uinput injector,
+        # wired into HostSession via LinuxHostPlatform.  Audio capture
+        # via PulseAudio monitor is pending (L3 sub-task).
         ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
-        ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_stub.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_linux.cpp
     )
     target_link_libraries(deskbeam PRIVATE
         Qt6::OpenGL

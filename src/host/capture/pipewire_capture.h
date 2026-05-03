@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace deskbeam::host {
 
@@ -44,6 +45,26 @@ public:
 
     using FrameCallback = std::function<void(const Frame&)>;
 
+    // Cursor metadata as parsed from PipeWire's SPA_META_Cursor on each
+    // process callback.  Position is normalised 0..1 in capture pixels.
+    // Bitmap is BGRA, present only when the host changes cursor shape.
+    struct CursorState {
+        float    x_norm = 0.0f;
+        float    y_norm = 0.0f;
+        bool     visible = false;
+        // Stable id assigned per unique shape (incremented when bitmap
+        // contents differ from the previous one).  0 = no shape yet.
+        uint32_t shape_id = 0;
+    };
+    struct CursorShape {
+        uint32_t id = 0;
+        uint16_t width = 0;
+        uint16_t height = 0;
+        uint16_t hotspot_x = 0;
+        uint16_t hotspot_y = 0;
+        std::vector<uint8_t> bgra;  // width*height*4
+    };
+
     PipeWireCapture();
     ~PipeWireCapture();
 
@@ -70,6 +91,20 @@ public:
 
     uint32_t width()  const;
     uint32_t height() const;
+
+    // True once at least one valid SPA_META_Cursor has been observed.
+    // Until that happens cursor_state() returns the default (visible=false)
+    // value, which the host_loop must NOT publish — clients would
+    // misinterpret it as "host hid the cursor" and switch to relative-input
+    // / cursor-grab mode.
+    bool has_cursor() const;
+    // Latest cursor position/visibility as observed in the most recent
+    // SPA_META_Cursor.  Cheap to call every frame.
+    CursorState cursor_state() const;
+    // If the host has changed cursor shape since the last call, fill
+    // `out` with the new bitmap and return true.  Same retry-on-loss
+    // semantics as the Windows / macOS take_new_cursor_shape methods.
+    bool take_new_cursor_shape(CursorShape& out);
 
 private:
     std::unique_ptr<Impl> impl_;

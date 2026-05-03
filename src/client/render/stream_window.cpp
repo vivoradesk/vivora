@@ -5,6 +5,8 @@
 #include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QScreen>
@@ -16,6 +18,27 @@
 
 namespace deskbeam {
 
+namespace {
+// QLabel subclass that paints a translucent rounded rect under the text.
+// stylesheet's rgba background isn't honoured on top-level QLabel windows
+// when WA_TranslucentBackground is set — we have to draw the background
+// ourselves before the text pass.
+class HudLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+protected:
+    void paintEvent(QPaintEvent* e) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 110));
+        p.drawRoundedRect(rect(), 6, 6);
+        p.end();
+        QLabel::paintEvent(e);
+    }
+};
+} // namespace
+
 StreamWindow::StreamWindow(QWidget* parent)
     : QWidget(parent)
 {
@@ -25,12 +48,43 @@ StreamWindow::StreamWindow(QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(640, 360);
-    // Default to system arrow cursor — switched to BlankCursor + custom
-    // drawn shape only after the host actually sends a CursorShape packet.
-    // Hosts that don't sync cursors (e.g. Linux PipeWire portal capture
-    // bakes the cursor into the video frame) keep the system cursor so
-    // the user can still see where they're pointing.
-    setCursor(Qt::ArrowCursor);
+    // Hide the local OS cursor over the stream — either the host's
+    // cursor packets paint a custom one (Windows / macOS hosts that
+    // sync cursors), or it's already baked into the frame by the
+    // capture API (Linux PipeWire with cursor_mode=embedded). Either
+    // way the user sees exactly one cursor. The view layer guards
+    // update_cursor_position() with session.has_cursor_position(), so
+    // this BlankCursor default no longer fights with the
+    // default-constructed (visible=false) message.
+    setCursor(Qt::BlankCursor);
+
+    // Diagnostics overlay — top-level frameless tool window with translucent
+    // background.  A child QLabel won't render here because the StreamWindow
+    // uses WA_PaintOnScreen (the D3D11 swap chain owns the HWND and Qt's
+    // compositor is bypassed).  An independent overlay window is the only
+    // approach that draws reliably on top of the D3D surface.
+    hud_label_ = new HudLabel(nullptr);
+    hud_label_->setWindowFlags(Qt::FramelessWindowHint
+                             | Qt::Tool
+                             | Qt::WindowStaysOnTopHint
+                             | Qt::WindowDoesNotAcceptFocus
+                             | Qt::WindowTransparentForInput);
+    hud_label_->setAttribute(Qt::WA_TranslucentBackground);
+    hud_label_->setAttribute(Qt::WA_ShowWithoutActivating);
+    hud_label_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    hud_label_->setStyleSheet(
+        "QLabel {"
+        "  color: rgb(230, 230, 230);"
+        "  font-family: 'Consolas', 'DejaVu Sans Mono', monospace;"
+        "  font-size: 12px;"
+        "  padding: 8px;"
+        "}");
+    hud_label_->setText("HUD ready (F9)");
+    hud_label_->adjustSize();
+}
+
+StreamWindow::~StreamWindow() {
+    if (hud_label_) { hud_label_->hide(); hud_label_->deleteLater(); hud_label_ = nullptr; }
 }
 
 void StreamWindow::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {
@@ -241,6 +295,7 @@ void StreamWindow::resizeEvent(QResizeEvent* event) {
         renderer_.re_present();
     }
     update_clip_rect();
+    if (hud_visible_) position_hud();
 }
 
 bool StreamWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
@@ -360,6 +415,19 @@ void StreamWindow::wheelEvent(QWheelEvent* event) {
 
 void StreamWindow::keyPressEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return; // skip auto-repeat, host handles it
+    // F9: toggle diagnostics HUD locally — never forward to the host.
+    if (event->key() == Qt::Key_F9) {
+        hud_visible_ = !hud_visible_;
+        if (hud_visible_) {
+            rebuild_hud_text();
+            position_hud();
+            hud_label_->show();
+            hud_label_->raise();
+        } else {
+            hud_label_->hide();
+        }
+        return;
+    }
     const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_[vk] = scan;
@@ -372,6 +440,7 @@ void StreamWindow::keyPressEvent(QKeyEvent* event) {
 
 void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return;
+    if (event->key() == Qt::Key_F9) return;  // local toggle, don't forward
     const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_.erase(vk);
@@ -380,6 +449,59 @@ void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
     ev.scan_code = scan;
     ev.vk_code = vk;
     send_event(ev);
+}
+
+void StreamWindow::update_stats(const StatsView& stats) {
+    last_stats_ = stats;
+    if (hud_visible_) {
+        rebuild_hud_text();
+        position_hud();
+    }
+}
+
+void StreamWindow::rebuild_hud_text() {
+    if (!hud_label_) return;
+    QString txt;
+    txt += QString::asprintf("FPS:    %5.1f decoded / %5.1f arrived / target %u\n",
+                             last_stats_.fps, last_stats_.arrived_fps,
+                             last_stats_.target_fps);
+    txt += QString::asprintf("RTT:    %5.1f ms   Bitrate: %u kbps\n",
+                             last_stats_.rtt_ms, last_stats_.bitrate_kbps);
+    txt += QString::asprintf("Reject: %5.2f%% (%llu)   Drop: %5.2f%% (%llu)\n",
+                             last_stats_.reject_pct,
+                             (unsigned long long)last_stats_.total_rejected,
+                             last_stats_.drop_pct,
+                             (unsigned long long)last_stats_.total_dropped);
+    txt += QString::asprintf("Audio:  %u pps   PLC %u%%\n",
+                             last_stats_.audio_pps, last_stats_.plc_pct);
+    txt += QString::asprintf("FEC:    %llu recovered / %llu failed\n",
+                             (unsigned long long)last_stats_.fec_recovered,
+                             (unsigned long long)last_stats_.fec_groups_failed);
+    txt += QString::asprintf("Stream: %ux%u%s\n",
+                             last_stats_.width, last_stats_.height,
+                             last_stats_.hdr ? " HDR" : "");
+    txt += QString::asprintf("Decoder: %s", last_stats_.decoder);
+    hud_label_->setText(txt);
+    hud_label_->adjustSize();
+}
+
+void StreamWindow::position_hud() {
+    if (!hud_label_) return;
+    const int pad = 12;
+    // Top-level overlay → translate the in-window pad to global screen coords
+    // and anchor to the right edge of the StreamWindow client area.
+    const QPoint origin = mapToGlobal(QPoint(width() - hud_label_->width() - pad, pad));
+    hud_label_->move(origin);
+}
+
+void StreamWindow::moveEvent(QMoveEvent* event) {
+    QWidget::moveEvent(event);
+    if (hud_visible_) position_hud();
+}
+
+void StreamWindow::hideEvent(QHideEvent* event) {
+    QWidget::hideEvent(event);
+    if (hud_label_) hud_label_->hide();
 }
 
 void StreamWindow::focusOutEvent(QFocusEvent* event) {

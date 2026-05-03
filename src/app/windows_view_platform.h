@@ -24,6 +24,7 @@ public:
     void upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) override;
     void update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) override;
     void set_stream_size(uint32_t width, uint32_t height) override;
+    void update_stats(const deskbeam::StatsView& stats) override;
     void shutdown() override;
 
 private:

@@ -2,6 +2,7 @@
 
 #include "app/linux_host_platform.h"
 #include "common/utils/log.h"
+#include <chrono>
 
 bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
                              deskbeam::VideoCodec codec) {
@@ -17,7 +18,20 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
         deskbeam::log::error("HOST", "PipeWire capture start failed");
         return false;
     }
+
+    // Block here until the first frame lands so capture_width()/height()
+    // return real values when host_loop reads them for bitrate sizing.
+    // Without this, the bitrate controller initialises with 0×0 → ~50 kbps
+    // ceiling and the stream falls apart on the first packet loss.
     deskbeam::log::info("HOST", "Linux host platform up — waiting for first capture frame");
+    std::unique_lock<std::mutex> lk(first_frame_mu_);
+    if (!first_frame_cv_.wait_for(lk, std::chrono::seconds(10),
+                                  [this] { return first_frame_seen_; })) {
+        deskbeam::log::error("HOST",
+            "Timed out waiting for first PipeWire frame (10s) — capture didn't start");
+        return false;
+    }
+    deskbeam::log::info("HOST", "Capture is %ux%u — host loop can start", cap_w_, cap_h_);
     return true;
 }
 
@@ -59,22 +73,21 @@ void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame
             return;
         }
         enc_ready_ = true;
+        // Wake init() blocked on first frame.
+        {
+            std::lock_guard<std::mutex> lk(first_frame_mu_);
+            first_frame_seen_ = true;
+        }
+        first_frame_cv_.notify_all();
     }
 
     if (f.dmabuf_fd >= 0 || !f.data || !f.size) return;  // SHM-only path right now.
 
-    // Snapshot the BGRx buffer for heartbeat re-encode under the same
-    // lock so re_encode_last sees a consistent copy.
-    {
-        std::lock_guard<std::mutex> lk(frame_mu_);
-        last_bgrx_.assign(f.data, f.data + f.size);
-        last_stride_ = static_cast<int>(f.stride);
-    }
-
-    // Encode + drain.  Encoder isn't internally thread-safe, so the
-    // PipeWire thread holds enc_mu_ for the whole submit/drain window;
-    // capture_and_encode / get_encoded_packet take the same lock from
-    // the host_loop thread.
+    // Skip the BGRx snapshot for heartbeat: copying ~9 MB per frame on
+    // the PipeWire thread starves encode (cuts 60fps → 38fps).  Linux
+    // heartbeat re-encode is deferred to Stage 4 (DMA-BUF zero-copy).
+    // Encoder isn't internally thread-safe so capture_and_encode /
+    // get_encoded_packet on the host_loop thread share enc_mu_.
     std::lock_guard<std::mutex> lk(enc_mu_);
     if (!enc_.encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
     deskbeam::host::VaapiEncoder::Packet pkt;
@@ -96,25 +109,32 @@ bool LinuxHostPlatform::capture_and_encode(uint64_t& pts_us,
     return true;
 }
 
-bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
-    if (!enc_ready_) return false;
+bool LinuxHostPlatform::re_encode_last(uint64_t /*pts_us*/) {
+    // Heartbeat re-encode disabled on Linux until Stage 4 wires the
+    // DMA-BUF zero-copy capture buffer through directly — the SHM path
+    // would cost a 9 MB/frame snapshot on the PipeWire thread.
+    return false;
+}
 
-    // Snapshot the latest BGRx buffer.
-    std::vector<uint8_t> snapshot;
-    int stride = 0;
-    {
-        std::lock_guard<std::mutex> lk(frame_mu_);
-        if (last_bgrx_.empty()) return false;
-        snapshot = last_bgrx_;
-        stride = last_stride_;
-    }
+bool LinuxHostPlatform::get_cursor_state(CursorState& out) {
+    if (!cap_.has_cursor()) return false;
+    auto s = cap_.cursor_state();
+    out.x_norm   = s.x_norm;
+    out.y_norm   = s.y_norm;
+    out.visible  = s.visible;
+    out.shape_id = s.shape_id;
+    return true;
+}
 
-    std::lock_guard<std::mutex> lk(enc_mu_);
-    if (!enc_.encode_bgrx(snapshot.data(), stride, pts_us)) return false;
-    deskbeam::host::VaapiEncoder::Packet pkt;
-    while (enc_.get_packet(pkt)) {
-        queued_pkts_.push(std::move(pkt));
-    }
+bool LinuxHostPlatform::take_cursor_shape(CursorShapeView& out) {
+    deskbeam::host::PipeWireCapture::CursorShape s;
+    if (!cap_.take_new_cursor_shape(s)) return false;
+    out.id        = s.id;
+    out.width     = s.width;
+    out.height    = s.height;
+    out.hotspot_x = s.hotspot_x;
+    out.hotspot_y = s.hotspot_y;
+    out.bgra      = std::move(s.bgra);
     return true;
 }
 

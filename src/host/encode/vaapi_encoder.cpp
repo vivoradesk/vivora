@@ -185,10 +185,14 @@ bool VaapiEncoder::encode_nv12(const uint8_t* y_data, int y_stride,
 
 bool VaapiEncoder::encode_bgrx(const uint8_t* bgrx_data, int stride, uint64_t pts_us) {
     if (!sws_bgrx_to_nv12_) {
+        // SWS_POINT (nearest neighbour) is the cheapest scaler and is
+        // visually indistinguishable for screen content vs SWS_BILINEAR
+        // on a no-resize colour-format conversion. SWS_BILINEAR cost
+        // BGRx→NV12 1920x1200 ~25ms on iGPU which capped wire to ~40fps.
         sws_bgrx_to_nv12_ = sws_getContext(
             cfg_.width, cfg_.height, AV_PIX_FMT_BGR0,
             cfg_.width, cfg_.height, AV_PIX_FMT_NV12,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
+            SWS_POINT, nullptr, nullptr, nullptr);
         if (!sws_bgrx_to_nv12_) {
             log::error(TAG, "sws_getContext BGRx→NV12 failed");
             return false;

@@ -496,6 +496,7 @@ void ClientSession::handle_cursor_position(const uint8_t* payload, size_t len) {
     protocol::CursorPositionMessage msg;
     if (!protocol::CursorPositionMessage::deserialize(payload, len, msg)) return;
     cursor_pos_ = msg;
+    cursor_pos_received_ = true;
 }
 
 void ClientSession::handle_stream_info(const uint8_t* payload, size_t len) {

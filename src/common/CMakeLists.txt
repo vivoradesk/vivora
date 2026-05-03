@@ -32,12 +32,13 @@ else()
 endif()
 
 if(UNIX AND NOT APPLE)
-    # Linux real audio output via PulseAudio (or PipeWire's PA shim).
-    # Audio loopback capture is L3 — left on the platform stub for now.
+    # Linux audio: PulseAudio output + loopback capture (PipeWire's
+    # pulse-shim resolves both transparently on PW-based distros).
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(PULSE REQUIRED libpulse-simple)
     target_sources(deskbeam_common PRIVATE
         audio/pulse_audio_output.cpp
+        audio/pulse_audio_capture.cpp
     )
     target_include_directories(deskbeam_common PUBLIC ${PULSE_INCLUDE_DIRS})
     target_link_libraries(deskbeam_common PUBLIC ${PULSE_LIBRARIES})

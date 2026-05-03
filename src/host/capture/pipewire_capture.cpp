@@ -9,13 +9,20 @@
 #include <spa/param/video/format-utils.h>
 #include <spa/debug/types.h>
 #include <spa/utils/result.h>
+#include <spa/pod/builder.h>
+#include <spa/param/format.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <mutex>
 #include <random>
 #include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace deskbeam::host {
@@ -44,6 +51,37 @@ std::string bus_name_to_path_suffix(const std::string& name) {
     return out;
 }
 
+// Path of the saved portal restore_token.  The portal returns this in
+// the Start response when persist_mode>=1 was requested in SelectSources;
+// passing it back in the next SelectSources call skips the user dialog.
+std::string restore_token_path() {
+    std::string base;
+    if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg) base = xdg;
+    else if (const char* home = std::getenv("HOME"); home && *home) base = std::string(home) + "/.local/state";
+    else return {};
+    std::string dir = base + "/deskbeam";
+    ::mkdir(base.c_str(), 0700);
+    ::mkdir(dir.c_str(),  0700);
+    return dir + "/portal_restore_token";
+}
+
+std::string load_restore_token() {
+    auto p = restore_token_path();
+    if (p.empty()) return {};
+    std::ifstream f(p);
+    if (!f) return {};
+    std::string token;
+    std::getline(f, token);
+    return token;
+}
+
+void save_restore_token(const std::string& token) {
+    auto p = restore_token_path();
+    if (p.empty() || token.empty()) return;
+    std::ofstream f(p, std::ios::trunc);
+    if (f) f << token;
+}
+
 } // namespace
 
 // ────────────────────────────────────────────────────────────────────
@@ -70,6 +108,17 @@ struct PipeWireCapture::Impl {
     // Stream geometry (filled when stream's param-changed fires).
     uint32_t neg_w = 0, neg_h = 0, neg_fmt = 0, neg_stride = 0;
 
+    // Cursor metadata (filled by on_pw_process from SPA_META_Cursor).
+    // Locked by cursor_mu so the host_loop main thread can read snapshots
+    // independently of the PipeWire callback thread.
+    mutable std::mutex            cursor_mu;
+    PipeWireCapture::CursorState  cursor_state{};
+    bool                          cursor_ever_seen = false;
+    PipeWireCapture::CursorShape  pending_cursor_shape{};
+    bool                          new_shape_pending = false;
+    uint32_t                      next_shape_id = 1;
+    uint64_t                      last_shape_hash = 0;
+
     ~Impl() {
         if (stream) {
             pw_stream_disconnect(stream);
@@ -91,6 +140,25 @@ PipeWireCapture::~PipeWireCapture() = default;
 
 uint32_t PipeWireCapture::width()  const { return impl_->neg_w; }
 uint32_t PipeWireCapture::height() const { return impl_->neg_h; }
+
+bool PipeWireCapture::has_cursor() const {
+    std::lock_guard<std::mutex> lk(impl_->cursor_mu);
+    return impl_->cursor_ever_seen;
+}
+
+PipeWireCapture::CursorState PipeWireCapture::cursor_state() const {
+    std::lock_guard<std::mutex> lk(impl_->cursor_mu);
+    return impl_->cursor_state;
+}
+
+bool PipeWireCapture::take_new_cursor_shape(CursorShape& out) {
+    std::lock_guard<std::mutex> lk(impl_->cursor_mu);
+    if (!impl_->new_shape_pending) return false;
+    out = std::move(impl_->pending_cursor_shape);
+    impl_->pending_cursor_shape = {};
+    impl_->new_shape_pending = false;
+    return true;
+}
 
 // ────────────────────────────────────────────────────────────────────
 // Portal request helper: dispatch one DBus method call, then pump the
@@ -304,6 +372,62 @@ static void on_pw_process(void* userdata)
         }
     }
 
+    // Cursor metadata (cursor_mode=METADATA path).  PipeWire packs the
+    // current cursor position + (when shape changed) bitmap into a
+    // SPA_META_Cursor block on each buffer.  Position+visibility is
+    // copied every frame; shape bitmap only when a new id arrives AND
+    // its content hash differs from the previous one.
+    spa_meta_cursor* cmeta = static_cast<spa_meta_cursor*>(
+        spa_buffer_find_meta_data(sb, SPA_META_Cursor, sizeof(*cmeta)));
+    if (cmeta && spa_meta_cursor_is_valid(cmeta)) {
+        std::lock_guard<std::mutex> lk(impl->cursor_mu);
+        const float cap_w = impl->neg_w > 0 ? float(impl->neg_w) : 1.0f;
+        const float cap_h = impl->neg_h > 0 ? float(impl->neg_h) : 1.0f;
+        impl->cursor_state.x_norm  = float(cmeta->position.x) / cap_w;
+        impl->cursor_state.y_norm  = float(cmeta->position.y) / cap_h;
+        impl->cursor_state.visible = true;
+        impl->cursor_ever_seen     = true;
+
+        spa_meta_bitmap* bmap = (cmeta->bitmap_offset > 0)
+            ? SPA_PTROFF(cmeta, cmeta->bitmap_offset, spa_meta_bitmap)
+            : nullptr;
+        if (bmap && bmap->size.width > 0 && bmap->size.height > 0
+            && bmap->offset > 0)
+        {
+            const uint8_t* pixels = SPA_PTROFF(bmap, bmap->offset, const uint8_t);
+            const size_t w = bmap->size.width;
+            const size_t h = bmap->size.height;
+            const size_t row_bytes = bmap->stride > 0 ? size_t(bmap->stride) : w * 4;
+            // FNV-1a over the first row + dims + hotspot — cheap dedup
+            // so we don't re-send the same arrow bitmap every frame.
+            uint64_t hash = 14695981039346656037ULL;
+            auto mix = [&hash](const void* p, size_t n) {
+                const uint8_t* b = static_cast<const uint8_t*>(p);
+                for (size_t i = 0; i < n; ++i) { hash ^= b[i]; hash *= 1099511628211ULL; }
+            };
+            mix(&w, sizeof(w)); mix(&h, sizeof(h));
+            mix(&cmeta->hotspot.x, sizeof(cmeta->hotspot.x));
+            mix(&cmeta->hotspot.y, sizeof(cmeta->hotspot.y));
+            mix(pixels, std::min<size_t>(row_bytes, 256));
+
+            if (hash != impl->last_shape_hash) {
+                impl->last_shape_hash = hash;
+                impl->cursor_state.shape_id = impl->next_shape_id++;
+                impl->pending_cursor_shape.id        = impl->cursor_state.shape_id;
+                impl->pending_cursor_shape.width     = static_cast<uint16_t>(w);
+                impl->pending_cursor_shape.height    = static_cast<uint16_t>(h);
+                impl->pending_cursor_shape.hotspot_x = static_cast<uint16_t>(cmeta->hotspot.x);
+                impl->pending_cursor_shape.hotspot_y = static_cast<uint16_t>(cmeta->hotspot.y);
+                impl->pending_cursor_shape.bgra.resize(w * h * 4);
+                for (size_t row = 0; row < h; ++row) {
+                    std::memcpy(impl->pending_cursor_shape.bgra.data() + row * w * 4,
+                                pixels + row * row_bytes, w * 4);
+                }
+                impl->new_shape_pending = true;
+            }
+        }
+    }
+
     if (impl->cb) impl->cb(f);
     pw_stream_queue_buffer(impl->stream, b);
 }
@@ -415,7 +539,24 @@ bool PipeWireCapture::init(FrameCallback cb) {
         dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sv}", &dict);
         dict_append_str(&dict, "handle_token", handle_token.c_str());
         dict_append_u32(&dict, "types", 1);          // 1 = monitor (whole screen)
-        dict_append_u32(&dict, "cursor_mode", 2);    // 2 = embedded in pixels
+        // cursor_mode 2 = EMBEDDED: portal draws the cursor straight into
+        // the captured pixels.  The "right" architecture is METADATA (4),
+        // which would let the client paint its own cursor at OS speed —
+        // but xdg-desktop-portal < 1.18 (Ubuntu 22.04 ships older) silently
+        // ignores METADATA and our SPA_META_Cursor blocks come back empty.
+        // EMBEDDED is the lowest-friction fallback that "just works":
+        // single visible cursor on the client (since stream_window
+        // defaults to BlankCursor over the stream area), at the cost of
+        // one round-trip of perceived cursor-move latency.
+        dict_append_u32(&dict, "cursor_mode", 2);
+        // Ask the portal to remember this grant across restarts and hand
+        // back a restore_token in the Start response.  Replaying that
+        // token on the next SelectSources skips the permission dialog.
+        dict_append_u32(&dict, "persist_mode", 2);
+        std::string saved_token = load_restore_token();
+        if (!saved_token.empty()) {
+            dict_append_str(&dict, "restore_token", saved_token.c_str());
+        }
         dbus_message_iter_close_container(&args, &dict);
 
         DBusMessage* reply = dbus_connection_send_with_reply_and_block(impl_->bus, msg, 5000, &err);
@@ -480,6 +621,13 @@ bool PipeWireCapture::init(FrameCallback cb) {
             log::error(TAG, "Start Response missing streams[0] node id");
             dbus_message_unref(response);
             return false;
+        }
+        // The portal places the new restore_token in the Start results
+        // dict (one of the few places — not in SelectSources response).
+        std::string new_token;
+        if (extract_str(response, "restore_token", new_token) && !new_token.empty()) {
+            save_restore_token(new_token);
+            log::info(TAG, "Saved restore_token (skip-dialog on next launch)");
         }
         dbus_message_unref(response);
         log::info(TAG, "Granted PipeWire node id=%u", impl_->pipewire_node_id);
@@ -571,7 +719,7 @@ bool PipeWireCapture::init(FrameCallback cb) {
 
     uint8_t buffer[1024];
     spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-    const spa_pod* params[1];
+    const spa_pod* params[2];
     params[0] = (const spa_pod*)spa_pod_builder_add_object(&b,
         SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
         SPA_FORMAT_mediaType,    SPA_POD_Id(SPA_MEDIA_TYPE_video),
@@ -590,6 +738,9 @@ bool PipeWireCapture::init(FrameCallback cb) {
         SPA_FORMAT_VIDEO_size,      SPA_POD_CHOICE_RANGE_Rectangle(&size_def, &size_min, &size_max),
         SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(&rate_def, &rate_min, &rate_max));
 
+    // SPA_META_Cursor request would go here when we re-enable METADATA
+    // cursor mode (portal 1.18+).  Today we use EMBEDDED so no metadata
+    // request is needed — the cursor is in the pixel buffer.
     int rc = pw_stream_connect(impl_->stream,
         PW_DIRECTION_INPUT,
         impl_->pipewire_node_id,

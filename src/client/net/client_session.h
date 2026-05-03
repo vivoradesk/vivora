@@ -104,6 +104,13 @@ public:
     bool take_new_cursor_shape(protocol::CursorShapeMessage& out);
     // Latest cursor position message from the host (updated every frame).
     const protocol::CursorPositionMessage& cursor_position() const { return cursor_pos_; }
+    // True only after the host has actually sent at least one cursor
+    // position packet — view layer must guard update_cursor_position
+    // calls with this so it doesn't react to the default-constructed
+    // (visible=false) message that would otherwise hijack the system
+    // cursor on hosts that don't sync cursors at all (e.g. Linux PipeWire
+    // where the cursor is baked into the captured frame).
+    bool has_cursor_position() const { return cursor_pos_received_; }
 
     // Pop a freshly-received StreamInfo (real pre-padding frame dims).
     // Returns false if nothing new has arrived since the last call.
@@ -173,6 +180,7 @@ private:
     // Latest cursor position/shape received from host. Shape is kept here
     // until the view layer picks it up via take_new_cursor_shape().
     protocol::CursorPositionMessage cursor_pos_{};
+    bool                            cursor_pos_received_ = false;
     protocol::CursorShapeMessage    pending_shape_{};
     bool pending_shape_valid_ = false;
     // Last shape_id we delivered to the view layer — avoids redelivering
