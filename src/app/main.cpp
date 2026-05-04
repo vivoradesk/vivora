@@ -70,6 +70,11 @@ int main(int argc, char* argv[]) {
     uint32_t manual_bitrate_bps = 0;
     deskbeam::EncoderKind encoder_kind = deskbeam::EncoderKind::Auto;
     deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
+    // Tracks whether the user explicitly passed --codec.  Linux silently
+    // downgrades the default HEVC to H.264 because iHD VAAPI HEVC has a
+    // known assertion path; an explicit --codec hevc is honoured so users
+    // can opt in on hardware where it works.
+    bool codec_explicit = false;
     // Google's public STUN server is the unofficial WebRTC default and is
     // reliable enough to use out-of-the-box.  Users can override for privacy
     // or run their own (coturn) in production.
@@ -102,6 +107,7 @@ int main(int argc, char* argv[]) {
                 std::fprintf(stderr, "Error: --codec must be h264 or hevc\n");
                 return 1;
             }
+            codec_explicit = true;
         } else if (std::strcmp(argv[i], "--view") == 0) {
             mode_view = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -143,15 +149,14 @@ int main(int argc, char* argv[]) {
 #ifdef DESKBEAM_LINUX
         // L3 Stage 3: PipeWire capture → VAAPI encode → HostSession network
         // pipeline.  Defaults to H.264 because Intel iHD HEVC vaapi has a
-        // known assertion-fail path on some resolutions; user can pick
-        // hevc explicitly via --codec hevc on hardware where it works.
-        deskbeam::VideoCodec linux_codec = (codec == deskbeam::VideoCodec::HEVC)
-            ? deskbeam::VideoCodec::H264
-            : codec;
-        if (codec == deskbeam::VideoCodec::HEVC) {
-            deskbeam::log::warn("HOST",
-                "Defaulting to H.264 on Linux host — HEVC vaapi disabled by default. "
-                "Pass --codec hevc to force.");
+        // known assertion-fail path on some resolutions.  Honour an
+        // explicit --codec hevc so users can opt in on hardware where it
+        // works.
+        deskbeam::VideoCodec linux_codec = codec;
+        if (!codec_explicit && codec == deskbeam::VideoCodec::HEVC) {
+            linux_codec = deskbeam::VideoCodec::H264;
+            deskbeam::log::info("HOST",
+                "Defaulting to H.264 on Linux host — pass --codec hevc to force HEVC vaapi.");
         }
         LinuxHostPlatform platform;
         if (!platform.init(manual_bitrate_bps, linux_codec)) return 1;
