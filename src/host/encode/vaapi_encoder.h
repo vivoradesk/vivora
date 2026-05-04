@@ -65,6 +65,14 @@ public:
     // Convenience for the PipeWire SHM path which delivers BGRx.
     bool encode_bgrx(const uint8_t* bgrx_data, int stride, uint64_t pts_us);
 
+    // Re-encode the last frame previously fed via encode_nv12/encode_bgrx.
+    // The cached NV12 staging frame is re-uploaded to the VAAPI surface
+    // and sent through the encoder again with a fresh PTS — used by the
+    // host_loop static-screen heartbeat to keep the wire cadence steady
+    // when capture is silent.  Cheap: ~1.5 bpp upload, no sws_scale, no
+    // BGRx snapshot.  Returns false until the first real frame arrives.
+    bool reencode_last(uint64_t pts_us);
+
     // Pull next encoded packet (one NAL unit access-unit at a time).
     // Returns false when the encoder has no output ready right now.
     bool get_packet(Packet& out);
@@ -88,6 +96,9 @@ private:
     SwsContext*    sws_bgrx_to_nv12_ = nullptr;
     bool           idr_requested_ = false;
     int64_t        frame_idx_ = 0;
+    // True once a real frame has been written into sw_frame_ — guards
+    // reencode_last() from sending an uninitialised surface.
+    bool           sw_frame_has_data_ = false;
 };
 
 } // namespace deskbeam::host

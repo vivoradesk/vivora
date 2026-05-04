@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <mutex>
 #include <queue>
-#include <vector>
 
 class LinuxHostPlatform : public deskbeam::HostPlatform {
 public:
@@ -53,23 +52,21 @@ private:
     bool     enc_ready_ = false;
     uint32_t bitrate_bps_ = 0;
 
-    // Latest capture buffer (for heartbeat re-encode).  Updated under
-    // frame_mu_ in the PipeWire callback; the heartbeat path snapshots
-    // it under the same lock before encoding.
-    std::mutex frame_mu_;
-    std::vector<uint8_t> last_bgrx_;
-    int      last_stride_ = 0;
-
-    // Encoder + output queue: PipeWire thread feeds the encoder and
-    // pushes any drained packets into queued_pkts_; host_loop pops via
-    // get_encoded_packet().
+    // Encoder + output queue: PipeWire thread (or heartbeat path) feeds
+    // the encoder and pushes any drained packets into queued_pkts_; the
+    // host_loop pops via get_encoded_packet().  The heartbeat tag rides
+    // alongside the packet so the wire layer can switch off FEC for it.
+    struct QueuedPacket {
+        deskbeam::host::VaapiEncoder::Packet pkt;
+        bool heartbeat = false;
+    };
     std::mutex enc_mu_;
-    std::queue<deskbeam::host::VaapiEncoder::Packet> queued_pkts_;
+    std::queue<QueuedPacket> queued_pkts_;
 
     // Outgoing packet view returned from get_encoded_packet — buffer
     // owned by us so the EncodedPacketView's data ptr stays valid until
     // the next call.
-    deskbeam::host::VaapiEncoder::Packet pkt_buf_;
+    QueuedPacket pkt_buf_;
 };
 
 #endif // DESKBEAM_LINUX

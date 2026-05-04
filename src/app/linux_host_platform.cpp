@@ -83,16 +83,16 @@ void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame
 
     if (f.dmabuf_fd >= 0 || !f.data || !f.size) return;  // SHM-only path right now.
 
-    // Skip the BGRx snapshot for heartbeat: copying ~9 MB per frame on
-    // the PipeWire thread starves encode (cuts 60fps → 38fps).  Linux
-    // heartbeat re-encode is deferred to Stage 4 (DMA-BUF zero-copy).
     // Encoder isn't internally thread-safe so capture_and_encode /
-    // get_encoded_packet on the host_loop thread share enc_mu_.
+    // get_encoded_packet on the host_loop thread share enc_mu_.  Heartbeat
+    // re-encode reuses the encoder's cached NV12 staging frame (~1.5 bpp,
+    // already converted from BGRx) — no need to snapshot the 4-bpp BGRx
+    // buffer here, which used to cost 9 MB/frame and starve capture.
     std::lock_guard<std::mutex> lk(enc_mu_);
     if (!enc_.encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
     deskbeam::host::VaapiEncoder::Packet pkt;
     while (enc_.get_packet(pkt)) {
-        queued_pkts_.push(std::move(pkt));
+        queued_pkts_.push({std::move(pkt), /*heartbeat=*/false});
     }
 }
 
@@ -104,16 +104,22 @@ bool LinuxHostPlatform::capture_and_encode(uint64_t& pts_us,
     // packets to drain.  pts/content_changed are best-effort metadata.
     std::lock_guard<std::mutex> lk(enc_mu_);
     if (queued_pkts_.empty()) return false;
-    pts_us = queued_pkts_.front().pts_us;
+    pts_us = queued_pkts_.front().pkt.pts_us;
     content_changed = true;
     return true;
 }
 
-bool LinuxHostPlatform::re_encode_last(uint64_t /*pts_us*/) {
-    // Heartbeat re-encode disabled on Linux until Stage 4 wires the
-    // DMA-BUF zero-copy capture buffer through directly — the SHM path
-    // would cost a 9 MB/frame snapshot on the PipeWire thread.
-    return false;
+bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
+    std::lock_guard<std::mutex> lk(enc_mu_);
+    if (!enc_ready_) return false;
+    if (!enc_.reencode_last(pts_us)) return false;
+    bool produced = false;
+    deskbeam::host::VaapiEncoder::Packet pkt;
+    while (enc_.get_packet(pkt)) {
+        queued_pkts_.push({std::move(pkt), /*heartbeat=*/true});
+        produced = true;
+    }
+    return produced;
 }
 
 bool LinuxHostPlatform::get_cursor_state(CursorState& out) {
@@ -143,11 +149,11 @@ bool LinuxHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     if (queued_pkts_.empty()) return false;
     pkt_buf_ = std::move(queued_pkts_.front());
     queued_pkts_.pop();
-    out.data      = pkt_buf_.data.data();
-    out.len       = pkt_buf_.data.size();
-    out.pts       = pkt_buf_.pts_us;
-    out.keyframe  = pkt_buf_.keyframe;
-    out.heartbeat = false;  // Stage 4 will plumb the heartbeat tag.
+    out.data      = pkt_buf_.pkt.data.data();
+    out.len       = pkt_buf_.pkt.data.size();
+    out.pts       = pkt_buf_.pkt.pts_us;
+    out.keyframe  = pkt_buf_.pkt.keyframe;
+    out.heartbeat = pkt_buf_.heartbeat;
     return true;
 }
 

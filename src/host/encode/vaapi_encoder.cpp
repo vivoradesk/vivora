@@ -180,6 +180,7 @@ bool VaapiEncoder::encode_nv12(const uint8_t* y_data, int y_stride,
         log::warn(TAG, "send_frame: %s", err);
         return false;
     }
+    sw_frame_has_data_ = true;
     return true;
 }
 
@@ -219,6 +220,33 @@ bool VaapiEncoder::encode_bgrx(const uint8_t* bgrx_data, int stride, uint64_t pt
     if (rc < 0 && rc != AVERROR(EAGAIN)) {
         char err[128]{}; av_strerror(rc, err, sizeof(err));
         log::warn(TAG, "send_frame (bgrx): %s", err);
+        return false;
+    }
+    sw_frame_has_data_ = true;
+    return true;
+}
+
+bool VaapiEncoder::reencode_last(uint64_t pts_us) {
+    if (!ctx_ || !sw_frame_has_data_) return false;
+    // sw_frame_ still holds the last NV12 from encode_nv12 / encode_bgrx —
+    // re-upload it as a fresh hw frame and feed the encoder again. ~1.5
+    // bpp upload (no sws_scale, no per-row memcpy beyond the upload),
+    // cheap enough to fire every min_frame_interval on a static screen.
+    int rc = av_hwframe_transfer_data(hw_frame_, sw_frame_, 0);
+    if (rc < 0) { log::warn(TAG, "hwframe_transfer_data (heartbeat) failed: %d", rc); return false; }
+
+    (void)pts_us;
+    hw_frame_->pts = ++frame_idx_;
+    if (idr_requested_) {
+        hw_frame_->pict_type = AV_PICTURE_TYPE_I;
+        idr_requested_ = false;
+    } else {
+        hw_frame_->pict_type = AV_PICTURE_TYPE_NONE;
+    }
+    rc = avcodec_send_frame(ctx_, hw_frame_);
+    if (rc < 0 && rc != AVERROR(EAGAIN)) {
+        char err[128]{}; av_strerror(rc, err, sizeof(err));
+        log::warn(TAG, "send_frame (heartbeat): %s", err);
         return false;
     }
     return true;
