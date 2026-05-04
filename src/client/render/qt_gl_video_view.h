@@ -12,6 +12,8 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
+#include <QPoint>
+#include <QTimer>
 
 #include <cstdint>
 #include <functional>
@@ -77,6 +79,8 @@ protected:
     void wheelEvent(QWheelEvent*) override;
     void keyPressEvent(QKeyEvent*) override;
     void keyReleaseEvent(QKeyEvent*) override;
+    void focusInEvent(QFocusEvent*) override;
+    void focusOutEvent(QFocusEvent*) override;
 
 private:
     void emit_mouse_button(int qt_button, bool down);
@@ -131,6 +135,27 @@ private:
     std::unordered_map<uint32_t, QCursor> cursor_cache_;
     uint32_t active_shape_id_ = 0;
     bool     have_active_shape_ = false;
+
+    // Relative-mouse mode (host hid the cursor — game / 3D app).  Only
+    // active on X11 because Wayland refuses programmatic pointer warps,
+    // making the warp-to-centre trick unworkable there. Wayland will need
+    // zwp_relative_pointer_v1 + pointer-constraints — separate work.
+    bool   relative_mode_ = false;
+    bool   host_cursor_visible_ = true;
+    bool   was_relative_on_focus_loss_ = false;
+    QPoint saved_global_pos_;
+    QPoint last_warp_global_;     // global-space anchor we warp back to
+    // Visibility flicker debounce — same shape as StreamWindow's: games
+    // toggle cursor visibility on HUD interactions, wait for stable signal
+    // before flipping to avoid jumpy entry/exit cycles.
+    QTimer* visibility_debounce_ = nullptr;
+    bool    pending_visibility_ = true;
+    bool    pending_visibility_valid_ = false;
+    void    apply_pending_visibility();
+    void    enter_relative_mode();
+    void    exit_relative_mode();
+    void    refresh_cursor();
+    bool    is_x11_session() const;
 };
 
 } // namespace deskbeam::client

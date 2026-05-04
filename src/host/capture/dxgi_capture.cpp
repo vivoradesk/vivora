@@ -137,8 +137,6 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
 }
 
 bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
-    ScopedTimer timer(TAG, "capture_frame");
-
     // Silently recreate the duplication if it was dropped on a previous tick
     // (exclusive fullscreen enter/exit, UAC, secure-desktop, mode switch).
     // init_output_duplication logs on success, so we stay quiet here on the

@@ -1,6 +1,8 @@
 #include "client/render/qt_gl_video_view.h"
 #include "common/utils/log.h"
 
+#include <QFocusEvent>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -405,9 +407,49 @@ void QtGlVideoView::emit_key(int qt_key, bool down) {
     input_cb_(ev);
 }
 
-void QtGlVideoView::mouseMoveEvent(QMouseEvent*)     { emit_mouse_pos(); }
+void QtGlVideoView::mouseMoveEvent(QMouseEvent* e) {
+    if (!relative_mode_) {
+        emit_mouse_pos();
+        return;
+    }
+    // Relative mode: compute delta from the global anchor, send as a raw
+    // motion delta, then warp back to the anchor.  The post-warp event
+    // delivers (0,0) which we ignore — otherwise we'd halve every motion.
+    const QPoint cur = e->globalPosition().toPoint();
+    const int dx = cur.x() - last_warp_global_.x();
+    const int dy = cur.y() - last_warp_global_.y();
+    if (dx == 0 && dy == 0) return;
+    if (input_cb_) {
+        protocol::InputEvent ev{};
+        ev.type = protocol::InputEventType::MouseMoveRelative;
+        ev.dx   = dx;
+        ev.dy   = dy;
+        input_cb_(ev);
+    }
+    // Re-anchor to widget centre — also handles the case where the widget
+    // was moved/resized between events.
+    last_warp_global_ = mapToGlobal(QPoint(width() / 2, height() / 2));
+    QCursor::setPos(last_warp_global_);
+}
 void QtGlVideoView::mousePressEvent(QMouseEvent* e)  { emit_mouse_button(e->button(), true); }
 void QtGlVideoView::mouseReleaseEvent(QMouseEvent* e){ emit_mouse_button(e->button(), false); }
+
+void QtGlVideoView::focusOutEvent(QFocusEvent* e) {
+    // Same shape as StreamWindow: drop relative grab while we're back-
+    // grounded so the user can interact with whatever stole focus, but
+    // remember the prior state so re-focus restores it.
+    was_relative_on_focus_loss_ = relative_mode_;
+    if (relative_mode_) exit_relative_mode();
+    QOpenGLWidget::focusOutEvent(e);
+}
+
+void QtGlVideoView::focusInEvent(QFocusEvent* e) {
+    if (was_relative_on_focus_loss_ && !host_cursor_visible_) {
+        enter_relative_mode();
+    }
+    was_relative_on_focus_loss_ = false;
+    QOpenGLWidget::focusInEvent(e);
+}
 
 void QtGlVideoView::wheelEvent(QWheelEvent* e) {
     if (!input_cb_) return;
@@ -508,14 +550,96 @@ void QtGlVideoView::upload_cursor_shape(const protocol::CursorShapeMessage& shap
 }
 
 void QtGlVideoView::update_cursor_position(const protocol::CursorPositionMessage& pos) {
-    // Position is ignored — local OS already follows the user's mouse.
-    // Apply the shape if it changed and we have it cached; otherwise the
-    // next upload_cursor_shape with this id will pick it up.
-    if (!have_active_shape_ || pos.shape_id != active_shape_id_) {
-        active_shape_id_   = pos.shape_id;
-        have_active_shape_ = true;
-        auto it = cursor_cache_.find(active_shape_id_);
-        if (it != cursor_cache_.end()) setCursor(it->second);
+    // Position itself is ignored — local OS already follows the user's
+    // mouse.  We use this message for two things: the active shape id, and
+    // the visibility flag (host hides the cursor in games / 3D apps —
+    // that's the trigger to enter relative-input mode).
+    const bool shape_changed = !have_active_shape_ || pos.shape_id != active_shape_id_;
+    active_shape_id_   = pos.shape_id;
+    have_active_shape_ = true;
+
+    if (pos.visible != host_cursor_visible_) {
+        // Debounce visibility flips — games toggle visible/hidden on HUD
+        // / menu interactions and we don't want to ping-pong relative mode
+        // every couple of frames.  Same shape as StreamWindow's logic.
+        if (!visibility_debounce_) {
+            visibility_debounce_ = new QTimer(this);
+            visibility_debounce_->setSingleShot(true);
+            connect(visibility_debounce_, &QTimer::timeout,
+                    this, &QtGlVideoView::apply_pending_visibility);
+        }
+        if (!pending_visibility_valid_ || pending_visibility_ != pos.visible) {
+            pending_visibility_ = pos.visible;
+            pending_visibility_valid_ = true;
+            visibility_debounce_->start(50);
+        }
+    } else if (pending_visibility_valid_ && pending_visibility_ != pos.visible) {
+        // Visibility reverted before debounce fired — cancel the pending flip.
+        pending_visibility_valid_ = false;
+    }
+
+    if (shape_changed) refresh_cursor();
+}
+
+void QtGlVideoView::apply_pending_visibility() {
+    if (!pending_visibility_valid_) return;
+    pending_visibility_valid_ = false;
+    if (pending_visibility_ == host_cursor_visible_) return;
+    host_cursor_visible_ = pending_visibility_;
+    if (!host_cursor_visible_) enter_relative_mode();
+    else                       exit_relative_mode();
+    refresh_cursor();
+}
+
+bool QtGlVideoView::is_x11_session() const {
+    // QGuiApplication::platformName() returns "xcb" on X11 and "wayland"
+    // on Wayland.  Pointer warp + grab is functional on X11; Wayland
+    // refuses warp for security so we'd need zwp_relative_pointer_v1 /
+    // pointer-constraints to make this work there.
+    return QGuiApplication::platformName() == QStringLiteral("xcb");
+}
+
+void QtGlVideoView::enter_relative_mode() {
+    if (relative_mode_) return;
+    if (!is_x11_session()) {
+        log::warn("CURSOR", "relative mode requested but session is not X11 (%s) — ignoring",
+                  QGuiApplication::platformName().toUtf8().constData());
+        return;
+    }
+    relative_mode_ = true;
+    saved_global_pos_ = QCursor::pos();
+    grabMouse();
+    // Anchor at widget centre so deltas are computed against a fixed point
+    // and we have maximum room before the cursor approaches the screen
+    // edge between events.
+    last_warp_global_ = mapToGlobal(QPoint(width() / 2, height() / 2));
+    QCursor::setPos(last_warp_global_);
+    log::info("CURSOR", "enter relative mode (saved pos %d,%d, anchor %d,%d)",
+              saved_global_pos_.x(), saved_global_pos_.y(),
+              last_warp_global_.x(), last_warp_global_.y());
+}
+
+void QtGlVideoView::exit_relative_mode() {
+    if (!relative_mode_) return;
+    relative_mode_ = false;
+    releaseMouse();
+    if (is_x11_session()) QCursor::setPos(saved_global_pos_);
+    log::info("CURSOR", "exit relative mode (restored pos %d,%d)",
+              saved_global_pos_.x(), saved_global_pos_.y());
+}
+
+void QtGlVideoView::refresh_cursor() {
+    if (!host_cursor_visible_) {
+        setCursor(Qt::BlankCursor);
+        return;
+    }
+    auto it = cursor_cache_.find(active_shape_id_);
+    if (it != cursor_cache_.end()) {
+        setCursor(it->second);
+    } else {
+        // Host says visible but we haven't received that shape yet — fall
+        // back to a plain arrow so the user isn't left invisible.
+        setCursor(Qt::ArrowCursor);
     }
 }
 
