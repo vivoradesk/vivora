@@ -10,7 +10,7 @@
 
 class MacHostPlatform : public deskbeam::HostPlatform {
 public:
-    bool init(uint32_t display_index, bool prefer_hdr, uint32_t manual_bitrate_bps,
+    bool init(uint32_t display_index, uint32_t manual_bitrate_bps,
               deskbeam::VideoCodec codec);
 
     uint32_t capture_width()  const override;
