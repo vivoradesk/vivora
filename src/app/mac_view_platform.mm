@@ -55,6 +55,10 @@ void MacViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPos
     view_.update_cursor_position(pos);
 }
 
+void MacViewPlatform::update_stats(const deskbeam::StatsView& stats) {
+    view_.update_stats(stats);
+}
+
 void MacViewPlatform::shutdown() {}
 
 #endif // DESKBEAM_MACOS

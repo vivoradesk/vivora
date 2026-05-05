@@ -62,8 +62,13 @@ namespace deskbeam { struct MacVideoViewImpl; }
 }
 @property (nonatomic, strong) AVSampleBufferDisplayLayer* videoLayer;
 @property (nonatomic, strong) CALayer* cursorLayer;
+@property (nonatomic, strong) CATextLayer* hudLayer;
+@property (nonatomic, assign) BOOL hudVisible;
 - (void)enterRelativeMode;
 - (void)exitRelativeMode;
+- (void)toggleHud;
+- (void)setHudText:(NSString*)text;
+- (void)layoutHud;
 @end
 
 // Forward declaration so the view can call into C++.
@@ -94,6 +99,24 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         _cursorLayer.contentsGravity = kCAGravityResize;
         [self.layer addSublayer:_cursorLayer];
 
+        // F9 diagnostics HUD: CATextLayer composes natively over the video
+        // layer (no NSTextField z-order issues with AVSampleBufferDisplayLayer).
+        // Hidden by default; geometry recomputed in -layoutHud on each text
+        // change so it sticks to the top-right of the view.
+        _hudLayer = [[CATextLayer alloc] init];
+        _hudLayer.hidden = YES;
+        _hudLayer.font = (__bridge CFTypeRef)[NSFont fontWithName:@"Menlo" size:12]
+                       ?: (__bridge CFTypeRef)[NSFont userFixedPitchFontOfSize:12];
+        _hudLayer.fontSize = 12.0;
+        _hudLayer.foregroundColor = [[NSColor colorWithCalibratedRed:0.9 green:0.9 blue:0.9 alpha:1.0] CGColor];
+        _hudLayer.backgroundColor = [[NSColor colorWithCalibratedRed:0 green:0 blue:0 alpha:0.43] CGColor];
+        _hudLayer.cornerRadius = 6.0;
+        _hudLayer.alignmentMode = kCAAlignmentLeft;
+        _hudLayer.contentsScale = self.window.backingScaleFactor ?: 2.0;
+        _hudLayer.string = @"HUD ready (F9)";
+        [self.layer addSublayer:_hudLayer];
+        _hudVisible = NO;
+
         lastModifierFlags = 0;
     }
     return self;
@@ -104,6 +127,38 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 - (void)layout {
     [super layout];
     _videoLayer.frame = self.bounds;
+    [self layoutHud];
+}
+
+- (void)toggleHud {
+    self.hudVisible = !self.hudVisible;
+    self.hudLayer.hidden = !self.hudVisible;
+    if (self.hudVisible) [self layoutHud];
+}
+
+- (void)setHudText:(NSString*)text {
+    if (!text) text = @"";
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];   // no implicit fade on every refresh
+    self.hudLayer.string = text;
+    [self layoutHud];
+    [CATransaction commit];
+}
+
+- (void)layoutHud {
+    if (!self.hudLayer || self.hudLayer.hidden) return;
+    NSString* s = (NSString*)self.hudLayer.string ?: @"";
+    NSDictionary* attrs = @{ NSFontAttributeName: (__bridge id)self.hudLayer.font ?: [NSFont userFixedPitchFontOfSize:12] };
+    NSSize text_size = [s sizeWithAttributes:attrs];
+    const CGFloat pad = 8.0;
+    const CGFloat margin = 12.0;
+    CGFloat w = ceil(text_size.width)  + pad * 2;
+    CGFloat h = ceil(text_size.height) + pad * 2;
+    // Anchor top-right.  NSView coords are bottom-up by default for backing
+    // layers, so the y origin is (height - hud_h - margin).
+    CGFloat x = self.bounds.size.width  - w - margin;
+    CGFloat y = self.bounds.size.height - h - margin;
+    self.hudLayer.frame = CGRectMake(x, y, w, h);
 }
 
 - (void)updateTrackingAreas {
@@ -228,9 +283,13 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 
 - (void)keyDown:(NSEvent*)event {
     if (event.isARepeat) return; // host handles auto-repeat
+    // F9 (mac kVK 0x65) toggles the diagnostics HUD locally.  Eat it so
+    // the host doesn't see a phantom keypress.
+    if (event.keyCode == 0x65) { [self toggleHud]; return; }
     [self sendKey:event.keyCode down:YES];
 }
 - (void)keyUp:(NSEvent*)event {
+    if (event.keyCode == 0x65) return; // local toggle, don't forward
     [self sendKey:event.keyCode down:NO];
 }
 
@@ -597,6 +656,31 @@ void MacVideoView::set_stream_size(uint32_t width, uint32_t height) {
     if (!impl || width == 0 || height == 0) return;
     impl->host_w = width;
     impl->host_h = height;
+}
+
+void MacVideoView::update_stats(const StatsView& stats) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || !impl->view) return;
+    @autoreleasepool {
+        NSString* txt = [NSString stringWithFormat:
+            @"FPS:    %5.1f decoded / %5.1f arrived / target %u\n"
+             "RTT:    %5.1f ms   Bitrate: %u kbps\n"
+             "Reject: %5.2f%% (%llu)   Drop: %5.2f%% (%llu)\n"
+             "Audio:  %u pps   PLC %u%%\n"
+             "FEC:    %llu recovered / %llu failed\n"
+             "Stream: %ux%u%s\n"
+             "Decoder: VTB HW",
+            stats.fps, stats.arrived_fps, (unsigned)stats.target_fps,
+            stats.rtt_ms, (unsigned)stats.bitrate_kbps,
+            stats.reject_pct, (unsigned long long)stats.total_rejected,
+            stats.drop_pct,   (unsigned long long)stats.total_dropped,
+            (unsigned)stats.audio_pps, (unsigned)stats.plc_pct,
+            (unsigned long long)stats.fec_recovered,
+            (unsigned long long)stats.fec_groups_failed,
+            (unsigned)stats.width, (unsigned)stats.height,
+            stats.hdr ? " HDR" : ""];
+        [impl->view setHudText:txt];
+    }
 }
 
 void MacVideoView::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {

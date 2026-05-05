@@ -2,6 +2,7 @@
 
 #ifdef DESKBEAM_MACOS
 
+#include "app/view_platform.h"
 #include "common/codec/video_codec.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
@@ -45,6 +46,9 @@ public:
     // update_cursor_position is called per-frame with normalized coords.
     void upload_cursor_shape(const protocol::CursorShapeMessage& shape);
     void update_cursor_position(const protocol::CursorPositionMessage& pos);
+
+    // Push diagnostics snapshot to the F9 HUD overlay (no-op when hidden).
+    void update_stats(const StatsView& stats);
 
     // Pump NSApplication events non-blocking. Call regularly from the main loop.
     void pump_events();
