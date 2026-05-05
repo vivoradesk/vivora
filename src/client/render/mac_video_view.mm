@@ -356,6 +356,11 @@ struct MacVideoViewImpl {
     uint32_t host_w = 0;
     uint32_t host_h = 0;
     VideoCodec codec = VideoCodec::HEVC;
+    // True if the active format description carries a PQ or HLG transfer
+    // function — surfaced through update_stats so the F9 HUD reports HDR.
+    // Detected from kCMFormatDescriptionExtension_TransferFunction once
+    // the CMVideoFormatDescription is created from VPS/SPS/PPS.
+    bool is_hdr = false;
 
     // Cursor cache: shape_id -> CGImage (+ owned backing BGRA buffer).
     std::unordered_map<uint32_t, CursorShapeEntry> cursor_shapes;
@@ -662,6 +667,9 @@ void MacVideoView::update_stats(const StatsView& stats) {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl || !impl->view) return;
     @autoreleasepool {
+        // view_loop doesn't know HDR-ness — use the flag detected from the
+        // active CMVideoFormatDescription's transfer function.
+        const bool hdr = impl->is_hdr;
         NSString* txt = [NSString stringWithFormat:
             @"FPS:    %5.1f decoded / %5.1f arrived / target %u\n"
              "RTT:    %5.1f ms   Bitrate: %u kbps\n"
@@ -678,7 +686,7 @@ void MacVideoView::update_stats(const StatsView& stats) {
             (unsigned long long)stats.fec_recovered,
             (unsigned long long)stats.fec_groups_failed,
             (unsigned)stats.width, (unsigned)stats.height,
-            stats.hdr ? " HDR" : ""];
+            hdr ? " HDR" : ""];
         [impl->view setHudText:txt];
     }
 }
@@ -870,8 +878,20 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
                 impl->host_w = static_cast<uint32_t>(dims.width);
                 impl->host_h = static_cast<uint32_t>(dims.height);
             }
-            log::info(TAG, "%s format description ready: %dx%d",
-                      is_hevc ? "HEVC" : "H264", dims.width, dims.height);
+            // Detect HDR from the format description's transfer function.
+            // PQ (SMPTE 2084) or HLG (Rec.2100) → treat as HDR for the HUD.
+            CFStringRef tfn = (CFStringRef)CMFormatDescriptionGetExtension(
+                impl->format_desc, kCMFormatDescriptionExtension_TransferFunction);
+            impl->is_hdr = false;
+            if (tfn) {
+                if (CFEqual(tfn, kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ) ||
+                    CFEqual(tfn, kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG)) {
+                    impl->is_hdr = true;
+                }
+            }
+            log::info(TAG, "%s format description ready: %dx%d%s",
+                      is_hevc ? "HEVC" : "H264", dims.width, dims.height,
+                      impl->is_hdr ? " HDR" : "");
         }
     }
 
