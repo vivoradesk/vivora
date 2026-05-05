@@ -7,6 +7,9 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 
+#include <algorithm>
+#include <cmath>
+
 namespace deskbeam::client {
 
 namespace {
@@ -89,6 +92,8 @@ vec3 srgb_oetf(vec3 v) {
     return mix(hi, lo, vec3(small));
 }
 
+uniform float u_hdr_exposure;  // multiplier on linear PQ output
+
 void main() {
     float Y = texture(y_tex, v_uv).r;
     float U = texture(u_tex, v_uv).r;
@@ -97,15 +102,14 @@ void main() {
     vec3 rgb;
     if (u_hdr != 0) {
         rgb = yuv_limited_to_rgb_bt2020(Y, U, V);
-        // Decode PQ to linear (1.0 == 10000 nits) then expose so a
-        // typical SDR-in-HDR mid-white (~200 nits = 0.02 linear) maps
-        // to sRGB 1.0.  Highlights above 200 nits clip — for desktop
-        // streaming that's the right trade since the source content is
-        // mostly SDR text/UI rendered into an HDR container.  No filmic
-        // tonemap: it overcompresses the low end on 8-bit input and we
-        // got an all-white render with it.
+        // PQ -> linear (1.0 == 10000 nits) then exposure-scale.  Exposure
+        // is set per-frame on the CPU from a 99th-percentile Y sample so
+        // dim SDR-in-HDR content maps to sRGB white and bright HDR videos
+        // don't blow out — replaces the old hardcoded 50x gain.  Highlight
+        // clip still happens (no filmic tonemap), but the auto-exposure
+        // keeps that to actual specular highlights instead of midtones.
         vec3 lin = pq_to_linear(clamp(rgb, 0.0, 1.0));
-        lin *= 50.0;
+        lin *= u_hdr_exposure;
         rgb = srgb_oetf(clamp(lin, 0.0, 1.0));
     } else {
         rgb = yuv_limited_to_rgb_bt709(Y, U, V);
@@ -255,7 +259,69 @@ void QtGlVideoView::update_yuv(const uint8_t* y, int y_stride,
     // the aspect rect matches the actual decoded dims when no StreamInfo
     // arrived yet.
     if (size_changed) recompute_viewport();
+
+    // HDR auto-exposure — sample once per ~30 frames (≈1 Hz at 30 fps,
+    // 0.5 Hz at 60).  Cheap: ~4k Y samples on a 1080p frame at 16-px
+    // stride.  Cycle is short enough to react to scene changes within
+    // ~2 s after EWMA but slow enough to not pump on small flickers.
+    if (is_hdr_ && ++hdr_sample_counter_ >= 30) {
+        hdr_sample_counter_ = 0;
+        recompute_hdr_exposure();
+    }
+
     update();  // schedule paintGL
+}
+
+void QtGlVideoView::recompute_hdr_exposure() {
+    if (frame_w_ == 0 || frame_h_ == 0 || y_buf_.empty()) return;
+    // Subsample at 16-px stride in both dimensions — for 1920x1080 that's
+    // ~120x67 = ~8000 samples, plenty for a percentile estimate while
+    // staying ~10 µs on CPU.  Stride is in pixels; row pitch is y_stride_.
+    constexpr int STRIDE = 16;
+    const int W = static_cast<int>(frame_w_);
+    const int H = static_cast<int>(frame_h_);
+    std::vector<uint8_t> samples;
+    samples.reserve((W / STRIDE + 1) * (H / STRIDE + 1));
+    for (int y = 0; y < H; y += STRIDE) {
+        const uint8_t* row = y_buf_.data() + static_cast<size_t>(y) * y_stride_;
+        for (int x = 0; x < W; x += STRIDE) {
+            samples.push_back(row[x]);
+        }
+    }
+    if (samples.empty()) return;
+
+    // 99th percentile via nth_element — O(n).
+    const size_t pct_idx = samples.size() - samples.size() / 100;
+    std::nth_element(samples.begin(), samples.begin() + pct_idx - 1, samples.end());
+    const uint8_t y8 = samples[pct_idx - 1];
+
+    // BT.2020 limited-range Y' to full-range PQ-encoded value [0..1].
+    float y_full = (static_cast<float>(y8) - 16.0f) * (255.0f / 219.0f) / 255.0f;
+    y_full = std::clamp(y_full, 0.0f, 1.0f);
+
+    // PQ EOTF (inverse): PQ-encoded → linear nits / 10000.
+    constexpr float m1 = 2610.0f / 4096.0f / 4.0f;
+    constexpr float m2 = 2523.0f / 4096.0f * 128.0f;
+    constexpr float c1 = 3424.0f / 4096.0f;
+    constexpr float c2 = 2413.0f / 4096.0f * 32.0f;
+    constexpr float c3 = 2392.0f / 4096.0f * 32.0f;
+    const float p   = std::pow(std::max(y_full, 0.0f), 1.0f / m2);
+    const float num = std::max(p - c1, 0.0f);
+    const float den = std::max(c2 - c3 * p, 1e-6f);
+    const float lin = std::pow(num / den, 1.0f / m1);  // 0..1, 1 == 10000 nits
+
+    // Target exposure: scale 99th-percentile linear to ~0.85 of sRGB
+    // headroom so highlights have ~15% room before hard clipping.
+    constexpr float HEADROOM = 0.85f;
+    constexpr float MIN_EXPOSURE = 5.0f;     // very bright HDR (1700+ nits peak)
+    constexpr float MAX_EXPOSURE = 200.0f;   // very dim SDR-in-HDR (~50 nits)
+    const float target = std::clamp(HEADROOM / std::max(lin, 1e-4f),
+                                    MIN_EXPOSURE, MAX_EXPOSURE);
+
+    // EWMA: fast darken (avoid blowout flicker), slow brighten (avoid
+    // pumping on transient dim frames).
+    const float alpha = (target < hdr_exposure_) ? 0.5f : 0.1f;
+    hdr_exposure_ = hdr_exposure_ * (1.0f - alpha) + target * alpha;
 }
 
 void QtGlVideoView::initializeGL() {
@@ -353,6 +419,7 @@ void QtGlVideoView::paintGL() {
     program_.setUniformValue("u_tex", 1);
     program_.setUniformValue("v_tex", 2);
     program_.setUniformValue("u_hdr", is_hdr_ ? 1 : 0);
+    program_.setUniformValue("u_hdr_exposure", hdr_exposure_);
     vao_.bind();
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     vao_.release();

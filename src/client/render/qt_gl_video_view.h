@@ -108,6 +108,13 @@ private:
     bool has_frame_ = false;
     bool is_hdr_   = false;  // true → BT.2020 + PQ + tonemap path
 
+    // HDR auto-exposure state — recomputed every N frames from a Y-plane
+    // 99th-percentile sample, EWMA-smoothed (fast on darken, slow on
+    // brighten).  Replaces the old hardcoded 50x gain in the HDR shader.
+    float    hdr_exposure_       = 50.0f;
+    int      hdr_sample_counter_ = 0;
+    void     recompute_hdr_exposure();
+
     // Diagnostics overlay — child QLabel positioned top-right, repositioned
     // on resize.  Shown / hidden by F9, last-pushed stats kept so that a
     // toggle while no fresh stats arrive still shows something reasonable.
