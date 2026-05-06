@@ -40,6 +40,9 @@ add_subdirectory(src/common)
 # Main application (single binary: host + client)
 add_subdirectory(src/app)
 
+# Standalone rendezvous + relay servers (no Qt, no media — just signalling).
+add_subdirectory(src/relay)
+
 # Legacy targets (kept for test compilation that references sources directly)
 # add_subdirectory(src/host)   # sources used directly by src/app and tests
 # add_subdirectory(src/client) # sources used directly by src/app and tests

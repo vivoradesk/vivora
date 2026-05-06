@@ -8,6 +8,7 @@ add_library(deskbeam_common STATIC
     net/frame_assembler.cpp
     net/fec_codec.cpp
     net/stun_client.cpp
+    net/rendezvous_protocol.cpp
     audio/audio_codec.cpp
     audio/resampler.cpp
     audio/jitter_buffer.cpp
