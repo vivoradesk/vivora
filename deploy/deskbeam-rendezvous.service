@@ -1,0 +1,47 @@
+[Unit]
+Description=DeskBeam rendezvous signalling server
+Documentation=https://github.com/deskbeam/deskbeam
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/deskbeam-rendezvous --port 7000
+Restart=on-failure
+RestartSec=2
+# Run as a dedicated unprivileged user (created by deploy-rendezvous.sh).
+User=deskbeam
+Group=deskbeam
+
+# Lockdown — the server has no business touching the filesystem, opening
+# new sockets beyond its own UDP listener, or talking to anyone on the
+# host beyond stdout/stderr.  Anything that reduces blast radius if the
+# binary is ever compromised is a win for a public-facing service.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# Resource caps — the server is in-memory and tiny.  64 MiB is generous.
+MemoryHigh=64M
+MemoryMax=128M
+TasksMax=32
+
+# Crash logs land in journalctl -u deskbeam-rendezvous.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deskbeam-rendezvous
+
+[Install]
+WantedBy=multi-user.target
