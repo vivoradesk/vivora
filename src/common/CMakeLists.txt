@@ -18,6 +18,7 @@ add_library(deskbeam_common STATIC
     crypto/noise_nk.cpp
     crypto/host_identity.cpp
     crypto/packet_crypto.cpp
+    crypto/peer_pin.cpp
 )
 
 target_link_libraries(deskbeam_common PUBLIC opus speex_resampler monocypher)

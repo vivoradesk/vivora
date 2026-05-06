@@ -1,5 +1,6 @@
 #include "client/net/client_session.h"
 #include "common/crypto/packet_crypto.h"
+#include "common/crypto/peer_pin.h"
 #include "common/net/rendezvous_protocol.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/cursor_message.h"
@@ -73,6 +74,28 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
             } else {
                 std::memcpy(host_static_pk_, resolved_pk, 32);
                 host_key_set_ = true;
+            }
+            // Trust-on-first-use pin against persisted file.  Decoupled
+            // from the explicit --host-key check above so even hex-pinned
+            // connects benefit from the historical record.
+            if (!peer_code_.empty()) {
+                using crypto::PinResult;
+                const PinResult pr = crypto::check_or_pin_peer(peer_code_, resolved_pk);
+                if (pr == PinResult::NewlyPinned) {
+                    log::info("ClientSession",
+                        "Pinned new peer '%s' (first connect)", peer_code_.c_str());
+                } else if (pr == PinResult::Mismatch) {
+                    const std::string path = crypto::default_peer_pins_path();
+                    log::error("ClientSession",
+                        "Peer '%s' pubkey CHANGED — refusing to connect.\n"
+                        "  If this is intentional (host re-installed), delete the\n"
+                        "  matching line in: %s",
+                        peer_code_.c_str(), path.c_str());
+                    return false;
+                } else if (pr == PinResult::IoError) {
+                    log::warn("ClientSession",
+                        "Could not read/write peer pin file (continuing without pin)");
+                }
             }
             log::info("ClientSession",
                 "Rendezvous lookup → host at %u.%u.%u.%u:%u",
