@@ -14,6 +14,9 @@ struct HostLoopConfig {
     // STUN server "host:port" for reflexive-address discovery.  Empty string
     // disables STUN (LAN-only). Hostnames are resolved via getaddrinfo.
     const char* stun_server = nullptr;
+    // Optional rendezvous server "host:port".  When set, the host registers
+    // its long-term pubkey at the rendezvous so peers can locate it by id.
+    const char* rendezvous_server = nullptr;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

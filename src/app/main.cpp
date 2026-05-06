@@ -54,6 +54,9 @@ static void print_usage(const char* prog) {
     std::printf("  --no-stun         Disable STUN discovery (LAN-only)\n");
     std::printf("  --host-key HEX    (view) Host's Curve25519 public key, 64 hex chars\n");
     std::printf("                    — printed by the host on startup; required by Noise_NK\n");
+    std::printf("  --rendezvous HP   Rendezvous server \"host:port\" (host registers, view looks up)\n");
+    std::printf("  --peer HEX        (view) Peer host's pubkey to look up at the rendezvous\n");
+    std::printf("                    — same hex as --host-key; --view IP becomes a fallback\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -80,6 +83,8 @@ int main(int argc, char* argv[]) {
     // or run their own (coturn) in production.
     const char* stun_server = "stun.l.google.com:19302";
     const char* host_key_hex = nullptr;
+    const char* rendezvous_server = nullptr;
+    const char* peer_pubkey_hex = nullptr;
 
     for (int i = 1; i < argc; ++i) {
         const char* v = nullptr;
@@ -121,6 +126,10 @@ int main(int argc, char* argv[]) {
             stun_server = nullptr;
         } else if ((v = flag_value("--host-key", argv, argc, i)) != nullptr) {
             host_key_hex = v;
+        } else if ((v = flag_value("--rendezvous", argv, argc, i)) != nullptr) {
+            rendezvous_server = v;
+        } else if ((v = flag_value("--peer", argv, argc, i)) != nullptr) {
+            peer_pubkey_hex = v;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -171,14 +180,18 @@ int main(int argc, char* argv[]) {
         lcfg.codec = codec;
 #endif
         lcfg.stun_server = stun_server;
+        lcfg.rendezvous_server = rendezvous_server;
         return deskbeam::run_host_loop(platform, lcfg);
     }
 
     if (mode_view) {
-        if (!host_ip) {
-            std::fprintf(stderr, "Error: --view requires an IP address\n");
+        if (!host_ip && !(rendezvous_server && peer_pubkey_hex)) {
+            std::fprintf(stderr,
+                "Error: --view requires either an IP address, "
+                "or --rendezvous + --peer\n");
             return 1;
         }
+        if (!host_ip) host_ip = "0.0.0.0";  // placeholder until rdv lookup overrides
 #ifdef DESKBEAM_WINDOWS
         deskbeam::net::WinsockInit wsa;
         if (!wsa.ok) {
@@ -201,6 +214,8 @@ int main(int argc, char* argv[]) {
         vcfg.port = port;
         vcfg.stun_server = stun_server;
         vcfg.host_key_hex = host_key_hex;
+        vcfg.rendezvous_server = rendezvous_server;
+        vcfg.peer_pubkey_hex = peer_pubkey_hex;
         return deskbeam::run_view_loop(platform, vcfg);
     }
 

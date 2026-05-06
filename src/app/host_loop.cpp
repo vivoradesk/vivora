@@ -59,6 +59,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             session.set_stun_server(stun);
         }
     }
+    if (cfg.rendezvous_server && *cfg.rendezvous_server) {
+        net::SocketAddr rdv = net::resolve_host_port(cfg.rendezvous_server);
+        if (rdv.ip == 0) {
+            log::warn("HOST", "Could not resolve rendezvous '%s' — disabling",
+                      cfg.rendezvous_server);
+        } else {
+            session.set_rendezvous(rdv);
+            log::info("HOST", "Rendezvous: %s", cfg.rendezvous_server);
+        }
+    }
     if (!session.start(cfg.port)) {
         log::error("HOST", "Failed to start session on port %u", cfg.port);
         return 1;

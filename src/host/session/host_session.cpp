@@ -1,6 +1,7 @@
 #include "host/session/host_session.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
+#include "common/net/rendezvous_protocol.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
@@ -85,6 +86,13 @@ bool HostSession::start(uint16_t port) {
         } else {
             log::warn("HostSession", "STUN discovery failed — reflexive address unknown");
         }
+    }
+
+    // Rendezvous registration — same socket as the future video traffic so
+    // the binding the rdv server sees is the same one peers will hit.
+    if (rendezvous_addr_.ip != 0) {
+        send_rendezvous_register();
+        last_rdv_send_ = Clock::now();
     }
 
     return true;
@@ -183,6 +191,17 @@ void HostSession::poll() {
     if (clients_.empty() && state_ == SessionState::Connected) {
         log::info("HostSession", "All clients disconnected");
         state_ = SessionState::Disconnected;
+    }
+
+    // Refresh rendezvous registration well before TTL — TTL is 60s, send
+    // every 30s so a single dropped keepalive doesn't drop us off the map.
+    if (rendezvous_addr_.ip != 0) {
+        auto since_rdv = std::chrono::duration_cast<std::chrono::seconds>(
+            now - last_rdv_send_).count();
+        if (since_rdv >= RDV_KEEPALIVE_S) {
+            send_rendezvous_register();
+            last_rdv_send_ = now;
+        }
     }
 }
 
@@ -287,6 +306,14 @@ ClientInfo* HostSession::find_client(const net::SocketAddr& addr) {
 }
 
 void HostSession::handle_packet(const uint8_t* data, size_t len, const net::SocketAddr& sender) {
+    // Demux rendezvous traffic before anything else — the wire magic ('D'
+    // 0x44) doesn't collide with any PacketType enum value, so this is a
+    // safe top-of-loop check.
+    if (len >= 4 && data[0] == 'D' && data[1] == 'B' && data[2] == 'R' && data[3] == 'V') {
+        handle_rendezvous_packet(data, len, sender);
+        return;
+    }
+
     if (len < protocol::PacketHeader::WIRE_SIZE) return;
 
     auto header = protocol::PacketHeader::deserialize(data);
@@ -681,6 +708,65 @@ void HostSession::handle_input(const uint8_t* payload, size_t len) {
 
 std::string HostSession::host_public_key_hex() const {
     return crypto::hex_encode(host_identity_.public_key, 32);
+}
+
+void HostSession::send_rendezvous_register() {
+    if (!socket_ || rendezvous_addr_.ip == 0) return;
+    namespace rdv = net::rdv;
+    rdv::RegisterPayload reg{};
+    std::memcpy(reg.pubkey, host_identity_.public_key, 32);
+    uint8_t buf[rdv::MAX_PACKET];
+    const size_t n = rdv::encode_register(buf, sizeof(buf), reg);
+    if (n == 0) return;
+    socket_->send_to(buf, n, rendezvous_addr_);
+}
+
+void HostSession::handle_rendezvous_packet(const uint8_t* data, size_t len,
+                                           const net::SocketAddr& sender) {
+    namespace rdv = net::rdv;
+    rdv::MsgType type;
+    size_t poff = 0, plen = 0;
+    if (!rdv::parse_header(data, len, type, poff, plen)) return;
+
+    switch (type) {
+    case rdv::MsgType::RegisterAck: {
+        rdv::RegisterAckPayload p;
+        if (!rdv::decode_register_ack(data + poff, plen, p)) break;
+        log::info("HostSession",
+                  "Rendezvous OK: reflexive %u.%u.%u.%u:%u (TTL %us)",
+                  (p.reflexive_ip >>  0) & 0xff, (p.reflexive_ip >>  8) & 0xff,
+                  (p.reflexive_ip >> 16) & 0xff, (p.reflexive_ip >> 24) & 0xff,
+                  p.reflexive_port, p.ttl_seconds);
+        break;
+    }
+    case rdv::MsgType::PunchHint: {
+        rdv::PunchHintPayload p;
+        if (!rdv::decode_punch_hint(data + poff, plen, p)) break;
+        net::SocketAddr client_ep{ p.client_ip, p.client_port };
+        log::info("HostSession",
+                  "PunchHint: client at %u.%u.%u.%u:%u — opening pinhole",
+                  (p.client_ip >>  0) & 0xff, (p.client_ip >>  8) & 0xff,
+                  (p.client_ip >> 16) & 0xff, (p.client_ip >> 24) & 0xff,
+                  p.client_port);
+        punch_to(client_ep);
+        break;
+    }
+    default:
+        // Server shouldn't be sending us Register/Lookup; ignore quietly.
+        (void)sender;
+        break;
+    }
+}
+
+void HostSession::punch_to(const net::SocketAddr& client) {
+    if (!socket_) return;
+    // Send 3 small one-byte UDP packets to the client.  The client side will
+    // ignore them (length < PacketHeader::WIRE_SIZE → handle_packet bails
+    // immediately) but the NAT in front of us now has an outbound binding
+    // toward client_addr, so its return HELLOs will land on this socket.
+    // Three packets gives us margin against a single drop.
+    const uint8_t pad = 0x00;
+    for (int i = 0; i < 3; ++i) socket_->send_to(&pad, 1, client);
 }
 
 } // namespace deskbeam::host

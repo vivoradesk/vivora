@@ -1,11 +1,13 @@
 #include "client/net/client_session.h"
 #include "common/crypto/packet_crypto.h"
+#include "common/net/rendezvous_protocol.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
 #include <cstring>
 #include <chrono>
+#include <thread>
 
 namespace deskbeam::client {
 
@@ -15,6 +17,11 @@ static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x
 void ClientSession::set_host_key(const uint8_t host_pk[32]) {
     std::memcpy(host_static_pk_, host_pk, 32);
     host_key_set_ = true;
+}
+
+void ClientSession::set_peer_pubkey(const uint8_t pubkey[32]) {
+    std::memcpy(peer_pubkey_, pubkey, 32);
+    peer_pubkey_set_ = true;
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
@@ -37,6 +44,26 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 
     host_addr_.ip = net::parse_ip(host_ip);
     host_addr_.port = port;
+
+    // Rendezvous lookup overrides the manually-passed --view IP:PORT when
+    // both --rendezvous and --peer are set.  We do the lookup BEFORE STUN
+    // so the eventual punch happens through the same socket binding the
+    // rendezvous already saw.  If the lookup fails and we have no fallback
+    // host_ip, we bail.
+    if (rendezvous_addr_.ip != 0 && peer_pubkey_set_) {
+        net::SocketAddr discovered{};
+        if (lookup_via_rendezvous(discovered) && discovered.ip != 0) {
+            host_addr_ = discovered;
+            log::info("ClientSession",
+                "Rendezvous lookup → host at %u.%u.%u.%u:%u",
+                (host_addr_.ip >> 0) & 0xff, (host_addr_.ip >> 8) & 0xff,
+                (host_addr_.ip >> 16) & 0xff, (host_addr_.ip >> 24) & 0xff,
+                host_addr_.port);
+        } else {
+            log::warn("ClientSession",
+                "Rendezvous lookup failed — falling back to --view target");
+        }
+    }
 
     if (host_addr_.ip == 0) {
         log::error("ClientSession", "Invalid host IP: %s", host_ip);
@@ -88,7 +115,10 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     last_hello_time_ = {};
     last_recv_time_ = Clock::now();
 
-    log::info("ClientSession", "Connecting to %s:%u", host_ip, port);
+    log::info("ClientSession", "Connecting to %u.%u.%u.%u:%u",
+              (host_addr_.ip >> 0) & 0xff, (host_addr_.ip >> 8) & 0xff,
+              (host_addr_.ip >> 16) & 0xff, (host_addr_.ip >> 24) & 0xff,
+              host_addr_.port);
     send_hello();
     return true;
 }
@@ -327,6 +357,16 @@ bool ClientSession::pop_frame(net::AssembledFrame& frame) {
 }
 
 void ClientSession::handle_packet(const uint8_t* data, size_t len) {
+    // Drop rendezvous packets that arrive after start() has finished — they
+    // happen if the server retransmits a LookupResponse for the same lookup,
+    // or if a stray PunchHint somehow lands here.  Either way, ignored at
+    // steady state.  The pre-handshake lookup loop pulls them inside
+    // lookup_via_rendezvous() directly.  Single-byte UDP "punch" probes
+    // from the host's pinhole-opener also land here and fall through the
+    // size guard below.
+    if (len >= 4 && data[0] == 'D' && data[1] == 'B' && data[2] == 'R' && data[3] == 'V') {
+        return;
+    }
     if (len < protocol::PacketHeader::WIRE_SIZE) return;
 
     auto header = protocol::PacketHeader::deserialize(data);
@@ -831,6 +871,62 @@ void ClientSession::send_fec_report() {
 
 uint64_t ClientSession::frames_dropped() const {
     return receiver_ ? receiver_->frames_dropped() : 0;
+}
+
+bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out) {
+    if (!socket_ || rendezvous_addr_.ip == 0 || !peer_pubkey_set_) return false;
+    namespace rdv = net::rdv;
+
+    rdv::LookupPayload q{};
+    std::memcpy(q.pubkey, peer_pubkey_, 32);
+    uint8_t txbuf[rdv::MAX_PACKET];
+    const size_t txlen = rdv::encode_lookup(txbuf, sizeof(txbuf), q);
+    if (txlen == 0) return false;
+
+    log::info("ClientSession",
+        "Rendezvous lookup at %u.%u.%u.%u:%u",
+        (rendezvous_addr_.ip >> 0) & 0xff, (rendezvous_addr_.ip >> 8) & 0xff,
+        (rendezvous_addr_.ip >> 16) & 0xff, (rendezvous_addr_.ip >> 24) & 0xff,
+        rendezvous_addr_.port);
+
+    // Retry every 200 ms for up to 3 s.  Drains the main socket's recv
+    // queue between attempts so we catch the answer the moment it lands.
+    const auto start = std::chrono::steady_clock::now();
+    auto next_send = start;
+    uint8_t rxbuf[rdv::MAX_PACKET];
+    while (true) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - start > std::chrono::seconds(3)) break;
+        if (now >= next_send) {
+            socket_->send_to(txbuf, txlen, rendezvous_addr_);
+            next_send = now + std::chrono::milliseconds(200);
+        }
+        net::SocketAddr sender;
+        int n = socket_->recv_from(rxbuf, sizeof(rxbuf), sender);
+        if (n > 0) {
+            // Only accept DBRV packets here; everything else is unexpected
+            // pre-handshake noise and is silently dropped.
+            rdv::MsgType type;
+            size_t poff = 0, plen = 0;
+            if (rdv::parse_header(rxbuf, static_cast<size_t>(n), type, poff, plen)
+                && type == rdv::MsgType::LookupResponse) {
+                rdv::LookupResponsePayload p{};
+                if (rdv::decode_lookup_resp(rxbuf + poff, plen, p) && p.found) {
+                    out.ip   = p.host_ip;
+                    out.port = p.host_port;
+                    return true;
+                }
+                if (rdv::decode_lookup_resp(rxbuf + poff, plen, p) && !p.found) {
+                    log::warn("ClientSession",
+                        "Peer not registered at rendezvous (yet?)");
+                    // Keep retrying — host might come online during the 3s window.
+                }
+            }
+            // Other DBRV types (RegisterAck etc) are not for us, ignore.
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
 }
 
 } // namespace deskbeam::client

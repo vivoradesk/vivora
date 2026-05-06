@@ -84,6 +84,12 @@ public:
     void set_stun_server(const net::SocketAddr& addr) { stun_server_ = addr; }
     net::SocketAddr reflexive_addr() const { return reflexive_addr_; }
 
+    // Optional rendezvous server.  When set, start() registers the host's
+    // long-term pubkey at the rendezvous so clients can locate us by id
+    // through --peer.  poll() refreshes the registration every 30s and
+    // reacts to PunchHint by opening a NAT pinhole toward the client.
+    void set_rendezvous(const net::SocketAddr& addr) { rendezvous_addr_ = addr; }
+
     // Advertise which codec the host is encoding in.  Sent to the client
     // in HELLO_ACK so it can initialise the matching decoder.
     void set_codec(VideoCodec codec) { codec_ = codec; }
@@ -160,6 +166,16 @@ public:
 private:
     void handle_packet(const uint8_t* data, size_t len, const net::SocketAddr& sender);
     void handle_hello(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
+    // Rendezvous wire integration — DBRV-magic packets are demuxed off the
+    // top of handle_packet and forwarded here.  Same socket as video so any
+    // NAT pinhole the rendezvous server opens (via REGISTER round-trip) is
+    // exactly the binding the client will reach.
+    void send_rendezvous_register();
+    void handle_rendezvous_packet(const uint8_t* data, size_t len, const net::SocketAddr& sender);
+    // Called from handle_rendezvous_packet on PunchHint — sends a tiny UDP
+    // probe toward the inbound client so port-restricted NATs accept the
+    // upcoming HELLO.  The client side will be retrying HELLO anyway.
+    void punch_to(const net::SocketAddr& client);
     // Seal `wire` with client's send_cs and push it out the main socket.
     // Returns true on success.  Used by every non-handshake send path so the
     // encryption layer lives in exactly one place.
@@ -191,6 +207,13 @@ private:
     // captured at start() for external signaling to pick up.
     net::SocketAddr stun_server_{};
     net::SocketAddr reflexive_addr_{};
+
+    // Rendezvous: when set, register host pubkey at this server post-STUN
+    // and refresh every RDV_KEEPALIVE_S.  last_rdv_send_ paces keepalive
+    // ticks driven from poll() — no separate timer thread.
+    net::SocketAddr rendezvous_addr_{};
+    TimePoint       last_rdv_send_{};
+    static constexpr int64_t RDV_KEEPALIVE_S = 30;
 
     // Long-term host identity.  Loaded once from disk (or generated on
     // first run) in start().  Its public key is shared out-of-band with the

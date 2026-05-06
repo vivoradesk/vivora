@@ -40,6 +40,14 @@ public:
     void set_stun_server(const net::SocketAddr& addr) { stun_server_ = addr; }
     net::SocketAddr reflexive_addr() const { return reflexive_addr_; }
 
+    // Optional rendezvous lookup target.  When both rendezvous and peer
+    // pubkey are set, start() performs a synchronous LOOKUP at the
+    // rendezvous server (3s timeout) and connects to whatever reflexive
+    // endpoint comes back in the LookupResponse.  --view IP:PORT is then
+    // used only as a fallback if the lookup fails.
+    void set_rendezvous(const net::SocketAddr& addr) { rendezvous_addr_ = addr; }
+    void set_peer_pubkey(const uint8_t pubkey[32]);
+
     // Drive the session: send hellos, receive packets, respond to pings.
     void poll();
 
@@ -159,6 +167,13 @@ private:
     bool handshake_complete_ = false;
     net::SocketAddr stun_server_{};
     net::SocketAddr reflexive_addr_{};
+    net::SocketAddr rendezvous_addr_{};
+    uint8_t         peer_pubkey_[32] = {};
+    bool            peer_pubkey_set_ = false;
+    // Synchronous LOOKUP at the rendezvous.  Writes a connectable endpoint
+    // into `out` on success.  Blocks for up to ~3s, draining any DBRV-magic
+    // packets that arrive on the main socket.
+    bool lookup_via_rendezvous(net::SocketAddr& out);
     TimePoint connect_start_;
     TimePoint last_hello_time_;
     TimePoint last_recv_time_;

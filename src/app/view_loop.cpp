@@ -44,7 +44,24 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             session.set_stun_server(stun);
         }
     }
-    if (!session.start(cfg.host_ip, cfg.port)) {
+    if (cfg.rendezvous_server && *cfg.rendezvous_server
+        && cfg.peer_pubkey_hex && *cfg.peer_pubkey_hex) {
+        net::SocketAddr rdv = net::resolve_host_port(cfg.rendezvous_server);
+        if (rdv.ip == 0) {
+            log::warn("VIEW", "Could not resolve rendezvous '%s' — disabling",
+                      cfg.rendezvous_server);
+        } else {
+            uint8_t peer_pk[32];
+            if (!crypto::hex_decode_32(cfg.peer_pubkey_hex, peer_pk)) {
+                log::error("VIEW", "Invalid --peer key — expected 64 lowercase hex chars");
+                return 1;
+            }
+            session.set_rendezvous(rdv);
+            session.set_peer_pubkey(peer_pk);
+            log::info("VIEW", "Rendezvous lookup target: %s", cfg.rendezvous_server);
+        }
+    }
+    if (!session.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
         log::error("VIEW", "Failed to start client session");
         return 1;
     }

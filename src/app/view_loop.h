@@ -15,6 +15,12 @@ struct ViewLoopConfig {
     // The host logs its own pubkey on startup — paste that here (or scan QR).
     // Required: Noise_NK refuses to start without this pin.
     const char* host_key_hex = nullptr;
+    // Optional rendezvous server "host:port".  When set together with --peer,
+    // the client looks up the host's reflexive endpoint at the rendezvous
+    // and connects to whatever it returns; --view IP becomes a fallback.
+    const char* rendezvous_server = nullptr;
+    // Same hex format as --host-key; identifies which host to look up.
+    const char* peer_pubkey_hex = nullptr;
 };
 
 // Run the view (client) main loop.  Blocks until disconnected or window closed.
