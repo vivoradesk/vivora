@@ -34,6 +34,7 @@ enum class MsgType : uint8_t {
     LookupResponse  = 0x04,  // server → client: peer's reflexive (or not-found)
     PunchHint       = 0x05,  // server → host: a client is trying to reach you
     Keepalive       = 0x06,  // host → server: refresh registration TTL
+    LookupByCode    = 0x07,  // client → server: ask by short memorable code
 };
 
 // Payload layouts — fixed-size, no length prefixes inside.
@@ -90,6 +91,17 @@ static_assert(sizeof(PunchHintPayload) == 8, "PunchHintPayload must be packed");
 // refresh.  Sent by the host every TTL/2 seconds.
 using KeepalivePayload = RegisterPayload;
 
+// LookupByCode: client wants to reach the host identified by a short
+// memorable code (`<adjective>-<noun>-NNNN`, see common/utils/peer_code.h).
+// Server resolves the code to a pubkey on its side and answers with the
+// usual LookupResponse — the response carries the pubkey so the client
+// can drive Noise_NK without needing to know it up front.
+struct LookupByCodePayload {
+    // Null-terminated ASCII, fits MAX_CODE_LEN.  Padded with NULs.
+    char code[24];
+};
+static_assert(sizeof(LookupByCodePayload) == 24, "LookupByCodePayload must be packed");
+
 // ---------------------------------------------------------------------------
 // Encoding / decoding helpers.  All functions are header-only-friendly: no
 // dynamic allocation, no streams, just plain memcpy into a caller-supplied
@@ -112,6 +124,7 @@ size_t encode_lookup       (uint8_t* buf, size_t buf_len, const LookupPayload& p
 size_t encode_lookup_resp  (uint8_t* buf, size_t buf_len, const LookupResponsePayload& p);
 size_t encode_punch_hint   (uint8_t* buf, size_t buf_len, const PunchHintPayload& p);
 size_t encode_keepalive    (uint8_t* buf, size_t buf_len, const KeepalivePayload& p);
+size_t encode_lookup_code  (uint8_t* buf, size_t buf_len, const LookupByCodePayload& p);
 
 // Decoders read from already-validated payload bytes (post-parse_header).
 // Return false if payload size is wrong for the expected type.
@@ -121,6 +134,7 @@ bool decode_lookup       (const uint8_t* p, size_t len, LookupPayload& out);
 bool decode_lookup_resp  (const uint8_t* p, size_t len, LookupResponsePayload& out);
 bool decode_punch_hint   (const uint8_t* p, size_t len, PunchHintPayload& out);
 bool decode_keepalive    (const uint8_t* p, size_t len, KeepalivePayload& out);
+bool decode_lookup_code  (const uint8_t* p, size_t len, LookupByCodePayload& out);
 
 // Hex-encode a 32-byte pubkey for log output.
 void pubkey_to_hex(const uint8_t pubkey[32], char out[65]);

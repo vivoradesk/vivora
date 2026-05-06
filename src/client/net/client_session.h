@@ -12,6 +12,7 @@
 #include "common/utils/types.h"
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 namespace deskbeam::client {
@@ -47,6 +48,10 @@ public:
     // used only as a fallback if the lookup fails.
     void set_rendezvous(const net::SocketAddr& addr) { rendezvous_addr_ = addr; }
     void set_peer_pubkey(const uint8_t pubkey[32]);
+    // Lookup-by-code variant: rendezvous resolves the code to a pubkey
+    // server-side and the client receives the pubkey alongside the
+    // reflexive endpoint.  Mutually exclusive with set_peer_pubkey.
+    void set_peer_code(const std::string& code) { peer_code_ = code; }
 
     // Drive the session: send hellos, receive packets, respond to pings.
     void poll();
@@ -170,10 +175,12 @@ private:
     net::SocketAddr rendezvous_addr_{};
     uint8_t         peer_pubkey_[32] = {};
     bool            peer_pubkey_set_ = false;
-    // Synchronous LOOKUP at the rendezvous.  Writes a connectable endpoint
-    // into `out` on success.  Blocks for up to ~3s, draining any DBRV-magic
-    // packets that arrive on the main socket.
-    bool lookup_via_rendezvous(net::SocketAddr& out);
+    std::string     peer_code_;        // alternative to peer_pubkey_; resolved at start()
+    // Synchronous LOOKUP at the rendezvous.  Writes the connectable endpoint
+    // into `out` on success and (for the by-code variant) the resolved
+    // pubkey into `out_pk` so the caller can finish Noise_NK setup.  Blocks
+    // for up to ~3s, draining any DBRV-magic packets along the way.
+    bool lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[32]);
     TimePoint connect_start_;
     TimePoint last_hello_time_;
     TimePoint last_recv_time_;

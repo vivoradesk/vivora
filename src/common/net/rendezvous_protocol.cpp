@@ -106,6 +106,13 @@ size_t encode_keepalive(uint8_t* buf, size_t buf_len, const KeepalivePayload& p)
     return total;
 }
 
+size_t encode_lookup_code(uint8_t* buf, size_t buf_len, const LookupByCodePayload& p) {
+    const size_t total = encode_header(buf, buf_len, MsgType::LookupByCode, sizeof(p));
+    if (total == 0) return 0;
+    std::memcpy(buf + HEADER_SIZE, p.code, sizeof(p.code));
+    return total;
+}
+
 // Decoders -------------------------------------------------------------------
 
 bool decode_register(const uint8_t* p, size_t len, RegisterPayload& out) {
@@ -148,6 +155,14 @@ bool decode_punch_hint(const uint8_t* p, size_t len, PunchHintPayload& out) {
 
 bool decode_keepalive(const uint8_t* p, size_t len, KeepalivePayload& out) {
     return decode_register(p, len, out);
+}
+
+bool decode_lookup_code(const uint8_t* p, size_t len, LookupByCodePayload& out) {
+    if (len != sizeof(out.code)) return false;
+    std::memcpy(out.code, p, sizeof(out.code));
+    // Force terminator in case the sender forgot.
+    out.code[sizeof(out.code) - 1] = '\0';
+    return true;
 }
 
 void pubkey_to_hex(const uint8_t pubkey[32], char out[65]) {

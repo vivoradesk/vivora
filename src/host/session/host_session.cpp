@@ -6,6 +6,7 @@
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
 #include "common/utils/log.h"
+#include "common/utils/peer_code.h"
 #include <algorithm>
 #include <cstring>
 #include <chrono>
@@ -24,8 +25,13 @@ bool HostSession::start(uint16_t port) {
         log::error("HostSession", "Failed to load or create host identity");
         return false;
     }
-    log::info("HostSession", "Host public key: %s",
-              crypto::hex_encode(host_identity_.public_key, 32).c_str());
+    {
+        const std::string code = peer_code::encode(host_identity_.public_key);
+        log::info("HostSession", "Peer code: %s   (share this with your peer)",
+                  code.c_str());
+        log::info("HostSession", "Host public key: %s",
+                  crypto::hex_encode(host_identity_.public_key, 32).c_str());
+    }
 
     socket_ = net::IUdpSocket::create();
     if (!socket_) return false;

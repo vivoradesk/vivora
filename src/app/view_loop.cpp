@@ -4,6 +4,7 @@
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/log.h"
+#include "common/utils/peer_code.h"
 #include "common/utils/thread_priority.h"
 #include "common/utils/types.h"
 #include "client/net/client_session.h"
@@ -23,17 +24,25 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     // The host's static pubkey is mandatory — Noise_NK won't run without it.
     // Paste it via --host-key (hex) at the CLI; the host prints its own key
     // on startup.
-    if (!cfg.host_key_hex || !*cfg.host_key_hex) {
-        log::error("VIEW", "Missing --host-key HEX (64 hex chars). "
-                           "Get it from the host's startup log.");
+    // --host-key remains optional when --peer is a memorable code: the
+    // rendezvous response carries the pubkey for us in that flow.  When
+    // --host-key is present, it acts as an explicit pin and the lookup
+    // result is verified against it.
+    const bool has_peer_code = cfg.rendezvous_server && cfg.peer_pubkey_hex
+        && *cfg.peer_pubkey_hex
+        && !peer_code::looks_like_hex_pubkey(cfg.peer_pubkey_hex);
+    if (cfg.host_key_hex && *cfg.host_key_hex) {
+        uint8_t host_pk[32];
+        if (!crypto::hex_decode_32(cfg.host_key_hex, host_pk)) {
+            log::error("VIEW", "Invalid --host-key — expected 64 lowercase hex chars");
+            return 1;
+        }
+        session.set_host_key(host_pk);
+    } else if (!has_peer_code) {
+        log::error("VIEW", "Missing --host-key HEX (64 hex chars) or --peer code. "
+                           "Get either from the host's startup log.");
         return 1;
     }
-    uint8_t host_pk[32];
-    if (!crypto::hex_decode_32(cfg.host_key_hex, host_pk)) {
-        log::error("VIEW", "Invalid --host-key — expected 64 lowercase hex chars");
-        return 1;
-    }
-    session.set_host_key(host_pk);
 
     if (cfg.stun_server && *cfg.stun_server) {
         net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
@@ -51,21 +60,36 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             log::warn("VIEW", "Could not resolve rendezvous '%s' — disabling",
                       cfg.rendezvous_server);
         } else {
-            uint8_t peer_pk[32];
-            if (!crypto::hex_decode_32(cfg.peer_pubkey_hex, peer_pk)) {
-                log::error("VIEW", "Invalid --peer key — expected 64 lowercase hex chars");
+            session.set_rendezvous(rdv);
+            // --peer accepts either a 64-char hex pubkey OR a memorable
+            // code from the host's startup line (e.g. "swift-tiger-4271").
+            // Hex pin is more paranoid (no rendezvous trust); code is
+            // the easier-to-share path with TOFU on the rdv response.
+            if (peer_code::looks_like_hex_pubkey(cfg.peer_pubkey_hex)) {
+                uint8_t peer_pk[32];
+                if (!crypto::hex_decode_32(cfg.peer_pubkey_hex, peer_pk)) {
+                    log::error("VIEW", "Invalid --peer hex");
+                    return 1;
+                }
+                session.set_peer_pubkey(peer_pk);
+                log::info("VIEW", "Rendezvous lookup (by pubkey): %s", cfg.rendezvous_server);
+            } else if (peer_code::is_well_formed(cfg.peer_pubkey_hex)) {
+                session.set_peer_code(cfg.peer_pubkey_hex);
+                log::info("VIEW", "Rendezvous lookup (by code '%s'): %s",
+                          cfg.peer_pubkey_hex, cfg.rendezvous_server);
+            } else {
+                log::error("VIEW",
+                    "--peer must be a 64-char hex pubkey OR an 'adjective-noun-NNNN' code");
                 return 1;
             }
-            session.set_rendezvous(rdv);
-            session.set_peer_pubkey(peer_pk);
-            log::info("VIEW", "Rendezvous lookup target: %s", cfg.rendezvous_server);
         }
     }
     if (!session.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
         log::error("VIEW", "Failed to start client session");
         return 1;
     }
-    log::info("VIEW", "Connecting to %s:%u...", cfg.host_ip, cfg.port);
+    // ClientSession::start() already logged the resolved (post-rendezvous)
+    // host endpoint — no need to print the placeholder cfg.host_ip here.
 
     // Wire input: window events → session → host.
     platform.set_input_callback([&session](const protocol::InputEvent& ev) {

@@ -25,8 +25,13 @@ void ClientSession::set_peer_pubkey(const uint8_t pubkey[32]) {
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
-    if (!host_key_set_) {
-        log::error("ClientSession", "Host public key not set — refusing to start");
+    // The pubkey may be either pinned up front (--host-key HEX) or learned
+    // mid-start() from a rendezvous lookup-by-code. The hard check moves
+    // to after the lookup attempt — until then either a pinned pubkey or
+    // a peer_code_ to resolve is sufficient.
+    if (!host_key_set_ && peer_code_.empty()) {
+        log::error("ClientSession",
+            "Host pubkey not set and no --peer code — refusing to start");
         return false;
     }
 
@@ -50,10 +55,25 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     // so the eventual punch happens through the same socket binding the
     // rendezvous already saw.  If the lookup fails and we have no fallback
     // host_ip, we bail.
-    if (rendezvous_addr_.ip != 0 && peer_pubkey_set_) {
+    if (rendezvous_addr_.ip != 0 && (peer_pubkey_set_ || !peer_code_.empty())) {
         net::SocketAddr discovered{};
-        if (lookup_via_rendezvous(discovered) && discovered.ip != 0) {
+        uint8_t resolved_pk[32]{};
+        if (lookup_via_rendezvous(discovered, resolved_pk) && discovered.ip != 0) {
             host_addr_ = discovered;
+            // Lookup-by-code path: the rendezvous tells us the pubkey.  If
+            // the user had also explicitly pinned --host-key, verify the
+            // returned pubkey matches — otherwise the server is MITM-ing
+            // and we refuse to proceed.
+            if (host_key_set_) {
+                if (std::memcmp(resolved_pk, host_static_pk_, 32) != 0) {
+                    log::error("ClientSession",
+                        "Rendezvous returned a different pubkey than --host-key — refusing");
+                    return false;
+                }
+            } else {
+                std::memcpy(host_static_pk_, resolved_pk, 32);
+                host_key_set_ = true;
+            }
             log::info("ClientSession",
                 "Rendezvous lookup → host at %u.%u.%u.%u:%u",
                 (host_addr_.ip >> 0) & 0xff, (host_addr_.ip >> 8) & 0xff,
@@ -67,6 +87,11 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 
     if (host_addr_.ip == 0) {
         log::error("ClientSession", "Invalid host IP: %s", host_ip);
+        return false;
+    }
+    if (!host_key_set_) {
+        log::error("ClientSession",
+            "Could not resolve host pubkey (rendezvous lookup failed)");
         return false;
     }
 
@@ -873,21 +898,35 @@ uint64_t ClientSession::frames_dropped() const {
     return receiver_ ? receiver_->frames_dropped() : 0;
 }
 
-bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out) {
-    if (!socket_ || rendezvous_addr_.ip == 0 || !peer_pubkey_set_) return false;
+bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[32]) {
+    if (!socket_ || rendezvous_addr_.ip == 0) return false;
+    if (!peer_pubkey_set_ && peer_code_.empty())  return false;
     namespace rdv = net::rdv;
 
-    rdv::LookupPayload q{};
-    std::memcpy(q.pubkey, peer_pubkey_, 32);
     uint8_t txbuf[rdv::MAX_PACKET];
-    const size_t txlen = rdv::encode_lookup(txbuf, sizeof(txbuf), q);
+    size_t  txlen = 0;
+    if (peer_pubkey_set_) {
+        rdv::LookupPayload q{};
+        std::memcpy(q.pubkey, peer_pubkey_, 32);
+        txlen = rdv::encode_lookup(txbuf, sizeof(txbuf), q);
+        log::info("ClientSession",
+            "Rendezvous lookup (by pubkey) at %u.%u.%u.%u:%u",
+            (rendezvous_addr_.ip >> 0) & 0xff, (rendezvous_addr_.ip >> 8) & 0xff,
+            (rendezvous_addr_.ip >> 16) & 0xff, (rendezvous_addr_.ip >> 24) & 0xff,
+            rendezvous_addr_.port);
+    } else {
+        rdv::LookupByCodePayload q{};
+        std::memset(q.code, 0, sizeof(q.code));
+        std::strncpy(q.code, peer_code_.c_str(), sizeof(q.code) - 1);
+        txlen = rdv::encode_lookup_code(txbuf, sizeof(txbuf), q);
+        log::info("ClientSession",
+            "Rendezvous lookup (by code '%s') at %u.%u.%u.%u:%u",
+            peer_code_.c_str(),
+            (rendezvous_addr_.ip >> 0) & 0xff, (rendezvous_addr_.ip >> 8) & 0xff,
+            (rendezvous_addr_.ip >> 16) & 0xff, (rendezvous_addr_.ip >> 24) & 0xff,
+            rendezvous_addr_.port);
+    }
     if (txlen == 0) return false;
-
-    log::info("ClientSession",
-        "Rendezvous lookup at %u.%u.%u.%u:%u",
-        (rendezvous_addr_.ip >> 0) & 0xff, (rendezvous_addr_.ip >> 8) & 0xff,
-        (rendezvous_addr_.ip >> 16) & 0xff, (rendezvous_addr_.ip >> 24) & 0xff,
-        rendezvous_addr_.port);
 
     // Retry every 200 ms for up to 3 s.  Drains the main socket's recv
     // queue between attempts so we catch the answer the moment it lands.
@@ -911,15 +950,17 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out) {
             if (rdv::parse_header(rxbuf, static_cast<size_t>(n), type, poff, plen)
                 && type == rdv::MsgType::LookupResponse) {
                 rdv::LookupResponsePayload p{};
-                if (rdv::decode_lookup_resp(rxbuf + poff, plen, p) && p.found) {
-                    out.ip   = p.host_ip;
-                    out.port = p.host_port;
-                    return true;
-                }
-                if (rdv::decode_lookup_resp(rxbuf + poff, plen, p) && !p.found) {
-                    log::warn("ClientSession",
-                        "Peer not registered at rendezvous (yet?)");
-                    // Keep retrying — host might come online during the 3s window.
+                if (rdv::decode_lookup_resp(rxbuf + poff, plen, p)) {
+                    if (p.found) {
+                        out.ip   = p.host_ip;
+                        out.port = p.host_port;
+                        std::memcpy(out_pk, p.pubkey, 32);
+                        return true;
+                    } else {
+                        log::warn("ClientSession",
+                            "Peer not registered at rendezvous (yet?)");
+                        // Keep retrying — host might come online in-window.
+                    }
                 }
             }
             // Other DBRV types (RegisterAck etc) are not for us, ignore.

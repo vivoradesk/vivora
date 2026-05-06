@@ -17,6 +17,7 @@
 #include "common/net/rendezvous_protocol.h"
 #include "common/net/socket.h"
 #include "common/utils/log.h"
+#include "common/utils/peer_code.h"
 
 #include <array>
 #include <chrono>
@@ -125,6 +126,10 @@ int main(int argc, char** argv) {
 
     using PubkeyArr = std::array<uint8_t, 32>;
     std::unordered_map<PubkeyArr, Registration, PubkeyHash> registry;
+    // Reverse index: peer_code → pubkey.  Built / refreshed on every
+    // Register so a host coming back online with a new reflexive doesn't
+    // need to wait for the old code-binding to expire.
+    std::unordered_map<std::string, PubkeyArr> code_index;
     std::vector<uint8_t> rxbuf(rdv::MAX_PACKET);
     uint8_t txbuf[rdv::MAX_PACKET];
 
@@ -148,9 +153,18 @@ int main(int argc, char** argv) {
                 if (it->second.expires_at <= now) {
                     char hex[65];
                     rdv::pubkey_to_hex(it->first.data(), hex);
-                    log::info(TAG, "expired registration %.16s... (was at %s:%u)",
-                              hex, ip_to_string(it->second.endpoint.ip).c_str(),
+                    const std::string code = peer_code::encode(it->first.data());
+                    log::info(TAG, "expired registration %s (%.16s...) (was at %s:%u)",
+                              code.c_str(), hex,
+                              ip_to_string(it->second.endpoint.ip).c_str(),
                               it->second.endpoint.port);
+                    // Drop matching code → pubkey entry too, but only if it
+                    // still points at THIS pubkey (a newer Register may have
+                    // taken the code over since the expired one was made).
+                    auto ci = code_index.find(code);
+                    if (ci != code_index.end() && ci->second == it->first) {
+                        code_index.erase(ci);
+                    }
                     it = registry.erase(it);
                     ++total_drop;
                 } else {
@@ -193,12 +207,26 @@ int main(int argc, char** argv) {
             r.endpoint   = sender;
             r.expires_at = now + std::chrono::seconds(REGISTRATION_TTL);
             ++total_register;
+            // Build / refresh the reverse code → pubkey index.  Two distinct
+            // pubkeys with the same code are a real collision and we keep
+            // the more recently registered one (last-writer-wins) — the
+            // log line makes the eviction visible to operators.
+            const std::string code = peer_code::encode(reg.pubkey);
+            auto code_it = code_index.find(code);
+            if (code_it != code_index.end() && code_it->second != key) {
+                char old_hex[65];
+                rdv::pubkey_to_hex(code_it->second.data(), old_hex);
+                log::warn(TAG, "code collision: '%s' rebound from %.16s... → new pubkey",
+                          code.c_str(), old_hex);
+            }
+            code_index[code] = key;
             if (fresh) {
                 char hex[65];
                 rdv::pubkey_to_hex(reg.pubkey, hex);
-                log::info(TAG, "%s %.16s... at %s:%u (live=%zu)",
+                log::info(TAG, "%s %s (%.16s...) at %s:%u (live=%zu)",
                           type == rdv::MsgType::Register ? "registered" : "rebinding",
-                          hex, ip_to_string(sender.ip).c_str(), sender.port,
+                          code.c_str(), hex,
+                          ip_to_string(sender.ip).c_str(), sender.port,
                           registry.size());
             }
             // Always ack so the host knows the registration landed and
@@ -209,6 +237,65 @@ int main(int argc, char** argv) {
             ack.ttl_seconds    = REGISTRATION_TTL;
             const size_t out_len = rdv::encode_register_ack(txbuf, sizeof(txbuf), ack);
             if (out_len) sock->send_to(txbuf, out_len, sender);
+            break;
+        }
+
+        case rdv::MsgType::LookupByCode: {
+            rdv::LookupByCodePayload q;
+            if (!rdv::decode_lookup_code(rxbuf.data() + poff, plen, q)) break;
+            ++total_lookup;
+            // Filter early: malformed / unknown words → respond not-found
+            // with a zeroed pubkey so the client doesn't keep retrying.
+            rdv::LookupResponsePayload resp{};
+            if (!peer_code::is_well_formed(q.code)) {
+                resp.found = 0;
+                log::info(TAG, "lookup-by-code '%s': malformed", q.code);
+                const size_t rl = rdv::encode_lookup_resp(txbuf, sizeof(txbuf), resp);
+                if (rl) sock->send_to(txbuf, rl, sender);
+                break;
+            }
+            auto code_it = code_index.find(std::string(q.code));
+            PubkeyArr key{};
+            bool have_key = false;
+            if (code_it != code_index.end()) {
+                key = code_it->second;
+                have_key = true;
+            }
+            if (!have_key) {
+                resp.found = 0;
+                log::info(TAG, "lookup-by-code '%s' NOT FOUND (client at %s:%u)",
+                          q.code, ip_to_string(sender.ip).c_str(), sender.port);
+                const size_t rl = rdv::encode_lookup_resp(txbuf, sizeof(txbuf), resp);
+                if (rl) sock->send_to(txbuf, rl, sender);
+                break;
+            }
+            // Fall through into the by-pubkey lookup path with `key`
+            // already filled — same response shape, same PunchHint logic.
+            std::memcpy(resp.pubkey, key.data(), 32);
+            auto rit = registry.find(key);
+            if (rit != registry.end() && rit->second.expires_at > now) {
+                resp.host_ip   = rit->second.endpoint.ip;
+                resp.host_port = rit->second.endpoint.port;
+                resp.found     = 1;
+                rdv::PunchHintPayload hint{};
+                hint.client_ip   = sender.ip;
+                hint.client_port = sender.port;
+                const size_t hl = rdv::encode_punch_hint(txbuf, sizeof(txbuf), hint);
+                if (hl) {
+                    sock->send_to(txbuf, hl, rit->second.endpoint);
+                    ++total_punch_hint;
+                }
+                log::info(TAG, "lookup-by-code '%s' → %s:%u (client at %s:%u)",
+                          q.code,
+                          ip_to_string(resp.host_ip).c_str(), resp.host_port,
+                          ip_to_string(sender.ip).c_str(), sender.port);
+            } else {
+                resp.found = 0;
+                log::info(TAG, "lookup-by-code '%s': stale registration",
+                          q.code);
+            }
+            const size_t rl = rdv::encode_lookup_resp(txbuf, sizeof(txbuf), resp);
+            if (rl) sock->send_to(txbuf, rl, sender);
             break;
         }
 

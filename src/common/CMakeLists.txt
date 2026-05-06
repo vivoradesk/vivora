@@ -1,6 +1,7 @@
 add_library(deskbeam_common STATIC
     utils/log.cpp
     utils/metrics.cpp
+    utils/peer_code.cpp
     utils/thread_priority.cpp
     protocol/packet.cpp
     net/socket.cpp
