@@ -721,6 +721,19 @@ void HostSession::send_rendezvous_register() {
     namespace rdv = net::rdv;
     rdv::RegisterPayload reg{};
     std::memcpy(reg.pubkey, host_identity_.public_key, 32);
+
+    // Advertise LAN candidates so peers behind the same NAT can connect
+    // directly without the (usually broken) hairpin path through the
+    // public router.  The candidate port is whatever the host bound the
+    // main video socket to; the rendezvous gets it from socket_->local_port.
+    const uint16_t local_port = socket_->local_port();
+    const auto lans = net::enumerate_local_ipv4(rdv::MAX_LAN_CANDIDATES);
+    reg.lan_count = static_cast<uint8_t>(std::min(lans.size(), rdv::MAX_LAN_CANDIDATES));
+    for (uint8_t i = 0; i < reg.lan_count; ++i) {
+        reg.lan[i].ip   = lans[i];
+        reg.lan[i].port = local_port;
+    }
+
     uint8_t buf[rdv::MAX_PACKET];
     const size_t n = rdv::encode_register(buf, sizeof(buf), reg);
     if (n == 0) return;

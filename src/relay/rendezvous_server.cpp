@@ -49,6 +49,8 @@ using TimePoint = Clock::time_point;
 struct Registration {
     deskbeam::net::SocketAddr endpoint;   // reflexive (the source addr the rdv saw)
     TimePoint                 expires_at; // wall-clock cutoff
+    uint8_t                   lan_count = 0;
+    deskbeam::net::rdv::LanCandidate lan[deskbeam::net::rdv::MAX_LAN_CANDIDATES]{};
 };
 
 // Hash a pubkey by treating it as four 64-bit words — cheap, reasonable
@@ -206,6 +208,8 @@ int main(int argc, char** argv) {
             const bool fresh = (r.endpoint != sender);
             r.endpoint   = sender;
             r.expires_at = now + std::chrono::seconds(REGISTRATION_TTL);
+            r.lan_count  = reg.lan_count;
+            std::memcpy(r.lan, reg.lan, sizeof(r.lan));
             ++total_register;
             // Build / refresh the reverse code → pubkey index.  Two distinct
             // pubkeys with the same code are a real collision and we keep
@@ -277,6 +281,8 @@ int main(int argc, char** argv) {
                 resp.host_ip   = rit->second.endpoint.ip;
                 resp.host_port = rit->second.endpoint.port;
                 resp.found     = 1;
+                resp.lan_count = rit->second.lan_count;
+                std::memcpy(resp.lan, rit->second.lan, sizeof(resp.lan));
                 rdv::PunchHintPayload hint{};
                 hint.client_ip   = sender.ip;
                 hint.client_port = sender.port;
@@ -312,6 +318,8 @@ int main(int argc, char** argv) {
                 resp.host_ip   = it->second.endpoint.ip;
                 resp.host_port = it->second.endpoint.port;
                 resp.found     = 1;
+                resp.lan_count = it->second.lan_count;
+                std::memcpy(resp.lan, it->second.lan, sizeof(resp.lan));
                 // Tell the host about the inbound client so both sides can
                 // start punching simultaneously.
                 rdv::PunchHintPayload hint{};

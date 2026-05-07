@@ -56,10 +56,41 @@ bool parse_header(const uint8_t* buf, size_t len,
 
 // Encoders -------------------------------------------------------------------
 
+// Helper: emit the 4-byte (count + 3 reserved) + N×8 LAN tail used by
+// both Register and LookupResponse.  Caller passes the count and array.
+namespace {
+size_t put_lan_tail(uint8_t* buf, uint8_t count, const LanCandidate lan[MAX_LAN_CANDIDATES]) {
+    buf[0] = count;
+    buf[1] = 0; buf[2] = 0; buf[3] = 0;   // reserved
+    size_t off = 4;
+    for (uint8_t i = 0; i < MAX_LAN_CANDIDATES; ++i) {
+        put_u32_le(buf + off + 0, lan[i].ip);
+        put_u16_le(buf + off + 4, lan[i].port);
+        put_u16_le(buf + off + 6, 0);
+        off += 8;
+    }
+    return off;
+}
+
+bool get_lan_tail(const uint8_t* buf, uint8_t& count, LanCandidate lan[MAX_LAN_CANDIDATES]) {
+    count = buf[0];
+    if (count > MAX_LAN_CANDIDATES) return false;
+    size_t off = 4;
+    for (uint8_t i = 0; i < MAX_LAN_CANDIDATES; ++i) {
+        lan[i].ip       = get_u32_le(buf + off + 0);
+        lan[i].port     = get_u16_le(buf + off + 4);
+        lan[i].reserved = 0;
+        off += 8;
+    }
+    return true;
+}
+} // namespace
+
 size_t encode_register(uint8_t* buf, size_t buf_len, const RegisterPayload& p) {
     const size_t total = encode_header(buf, buf_len, MsgType::Register, sizeof(p));
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.pubkey, 32);
+    put_lan_tail(buf + HEADER_SIZE + 32, p.lan_count, p.lan);
     return total;
 }
 
@@ -80,13 +111,24 @@ size_t encode_lookup(uint8_t* buf, size_t buf_len, const LookupPayload& p) {
 }
 
 size_t encode_lookup_resp(uint8_t* buf, size_t buf_len, const LookupResponsePayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::LookupResponse, 40);
+    const size_t total = encode_header(buf, buf_len, MsgType::LookupResponse, sizeof(p));
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.pubkey, 32);
     put_u32_le(buf + HEADER_SIZE + 32, p.host_ip);
     put_u16_le(buf + HEADER_SIZE + 36, p.host_port);
     buf[HEADER_SIZE + 38] = p.found;
-    buf[HEADER_SIZE + 39] = 0;
+    buf[HEADER_SIZE + 39] = p.lan_count;
+    // The LAN tail layout matches put_lan_tail's: count + 3 reserved + N×8.
+    // We've already written `found` + `lan_count` in slots 38/39, so the
+    // 3 reserved bytes here would overlap.  Skip the helper and write the
+    // candidates directly starting at offset 40.
+    size_t off = HEADER_SIZE + 40;
+    for (uint8_t i = 0; i < MAX_LAN_CANDIDATES; ++i) {
+        put_u32_le(buf + off + 0, p.lan[i].ip);
+        put_u16_le(buf + off + 4, p.lan[i].port);
+        put_u16_le(buf + off + 6, 0);
+        off += 8;
+    }
     return total;
 }
 
@@ -116,9 +158,9 @@ size_t encode_lookup_code(uint8_t* buf, size_t buf_len, const LookupByCodePayloa
 // Decoders -------------------------------------------------------------------
 
 bool decode_register(const uint8_t* p, size_t len, RegisterPayload& out) {
-    if (len != 32) return false;
+    if (len != sizeof(out)) return false;
     std::memcpy(out.pubkey, p, 32);
-    return true;
+    return get_lan_tail(p + 32, out.lan_count, out.lan);
 }
 
 bool decode_register_ack(const uint8_t* p, size_t len, RegisterAckPayload& out) {
@@ -136,12 +178,20 @@ bool decode_lookup(const uint8_t* p, size_t len, LookupPayload& out) {
 }
 
 bool decode_lookup_resp(const uint8_t* p, size_t len, LookupResponsePayload& out) {
-    if (len != 40) return false;
+    if (len != sizeof(out)) return false;
     std::memcpy(out.pubkey, p, 32);
     out.host_ip   = get_u32_le(p + 32);
     out.host_port = get_u16_le(p + 36);
     out.found     = p[38];
-    out.reserved  = p[39];
+    out.lan_count = p[39];
+    if (out.lan_count > MAX_LAN_CANDIDATES) return false;
+    size_t off = 40;
+    for (uint8_t i = 0; i < MAX_LAN_CANDIDATES; ++i) {
+        out.lan[i].ip       = get_u32_le(p + off + 0);
+        out.lan[i].port     = get_u16_le(p + off + 4);
+        out.lan[i].reserved = 0;
+        off += 8;
+    }
     return true;
 }
 

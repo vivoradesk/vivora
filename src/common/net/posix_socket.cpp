@@ -4,6 +4,9 @@
 #include "common/utils/log.h"
 
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -53,6 +56,27 @@ SocketAddr resolve_host(const char* host, uint16_t port) {
         }
     }
     freeaddrinfo(res);
+    return out;
+}
+
+// --- enumerate_local_ipv4 ---
+
+std::vector<uint32_t> enumerate_local_ipv4(size_t max_count) {
+    std::vector<uint32_t> out;
+    ifaddrs* ifa_list = nullptr;
+    if (getifaddrs(&ifa_list) != 0 || !ifa_list) return out;
+    for (ifaddrs* ifa = ifa_list; ifa && out.size() < max_count; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (!(ifa->ifa_flags & IFF_UP) || (ifa->ifa_flags & IFF_LOOPBACK)) continue;
+        const auto* sa = reinterpret_cast<const sockaddr_in*>(ifa->ifa_addr);
+        const uint32_t ip = sa->sin_addr.s_addr;  // network byte order
+        // Skip 169.254.0.0/16 (link-local) and 0.0.0.0.
+        const uint32_t host_order = ntohl(ip);
+        if (host_order == 0)                                 continue;
+        if ((host_order & 0xFFFF0000u) == 0xA9FE0000u)        continue;
+        out.push_back(ip);
+    }
+    freeifaddrs(ifa_list);
     return out;
 }
 

@@ -3,7 +3,11 @@
 #include "common/net/winsock_socket.h"
 #include "common/utils/log.h"
 
+#include <iphlpapi.h>
+#include <vector>
+
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 
 namespace deskbeam::net {
 
@@ -60,6 +64,43 @@ SocketAddr resolve_host(const char* host, uint16_t port) {
         }
     }
     freeaddrinfo(res);
+    return out;
+}
+
+// --- enumerate_local_ipv4 ---
+
+std::vector<uint32_t> enumerate_local_ipv4(size_t max_count) {
+    std::vector<uint32_t> out;
+    ULONG buflen = 16 * 1024;
+    std::vector<BYTE> buf(buflen);
+    PIP_ADAPTER_ADDRESSES list = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+    DWORD rc = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, list, &buflen);
+    if (rc == ERROR_BUFFER_OVERFLOW) {
+        buf.resize(buflen);
+        list = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data());
+        rc = GetAdaptersAddresses(AF_INET,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            nullptr, list, &buflen);
+    }
+    if (rc != NO_ERROR) return out;
+    for (auto* adapter = list; adapter && out.size() < max_count; adapter = adapter->Next) {
+        if (adapter->OperStatus != IfOperStatusUp)             continue;
+        if (adapter->IfType    == IF_TYPE_SOFTWARE_LOOPBACK)   continue;
+        for (auto* ua = adapter->FirstUnicastAddress;
+             ua && out.size() < max_count;
+             ua = ua->Next) {
+            if (!ua->Address.lpSockaddr) continue;
+            if (ua->Address.lpSockaddr->sa_family != AF_INET) continue;
+            const auto* sa = reinterpret_cast<sockaddr_in*>(ua->Address.lpSockaddr);
+            const uint32_t ip = sa->sin_addr.s_addr;
+            const uint32_t host_order = ntohl(ip);
+            if (host_order == 0)                                  continue;
+            if ((host_order & 0xFFFF0000u) == 0xA9FE0000u)         continue; // 169.254/16
+            out.push_back(ip);
+        }
+    }
     return out;
 }
 

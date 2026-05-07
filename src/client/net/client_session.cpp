@@ -51,11 +51,26 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     host_addr_.ip = net::parse_ip(host_ip);
     host_addr_.port = port;
 
+    // STUN before the rendezvous lookup so we have our own reflexive in
+    // hand for same-NAT detection (compare against host's reflexive that
+    // the lookup returns).  Same socket as the future video session, so
+    // the binding STUN observed is the binding any peer will reach.
+    if (stun_server_.ip != 0 && stun_server_.port != 0) {
+        reflexive_addr_ = net::StunClient::discover(stun_server_, *socket_);
+        if (reflexive_addr_.ip != 0) {
+            log::info("ClientSession",
+                "Reflexive address: %u.%u.%u.%u:%u (share this with the peer)",
+                (reflexive_addr_.ip >> 0) & 0xFF, (reflexive_addr_.ip >> 8) & 0xFF,
+                (reflexive_addr_.ip >> 16) & 0xFF, (reflexive_addr_.ip >> 24) & 0xFF,
+                reflexive_addr_.port);
+        } else {
+            log::warn("ClientSession", "STUN discovery failed — reflexive address unknown");
+        }
+    }
+
     // Rendezvous lookup overrides the manually-passed --view IP:PORT when
-    // both --rendezvous and --peer are set.  We do the lookup BEFORE STUN
-    // so the eventual punch happens through the same socket binding the
-    // rendezvous already saw.  If the lookup fails and we have no fallback
-    // host_ip, we bail.
+    // both --rendezvous and --peer are set.  If the lookup fails and we
+    // have no fallback host_ip, we bail.
     if (rendezvous_addr_.ip != 0 && (peer_pubkey_set_ || !peer_code_.empty())) {
         net::SocketAddr discovered{};
         uint8_t resolved_pk[32]{};
@@ -98,10 +113,18 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
                 }
             }
             log::info("ClientSession",
-                "Rendezvous lookup → host at %u.%u.%u.%u:%u",
+                "Rendezvous lookup → host at %u.%u.%u.%u:%u (+ %u LAN candidate(s))",
                 (host_addr_.ip >> 0) & 0xff, (host_addr_.ip >> 8) & 0xff,
                 (host_addr_.ip >> 16) & 0xff, (host_addr_.ip >> 24) & 0xff,
-                host_addr_.port);
+                host_addr_.port,
+                (unsigned)lookup_lan_count_);
+            for (uint8_t i = 0; i < lookup_lan_count_; ++i) {
+                log::info("ClientSession",
+                    "  LAN candidate %u: %u.%u.%u.%u:%u", (unsigned)i,
+                    (lookup_lan_[i].ip >>  0) & 0xff, (lookup_lan_[i].ip >>  8) & 0xff,
+                    (lookup_lan_[i].ip >> 16) & 0xff, (lookup_lan_[i].ip >> 24) & 0xff,
+                    lookup_lan_[i].port);
+            }
         } else {
             log::warn("ClientSession",
                 "Rendezvous lookup failed — falling back to --view target");
@@ -133,20 +156,22 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
         audio_local_port_ = 0;
     }
 
-    // STUN before the first HELLO so the socket is still quiet and the NAT
-    // mapping we discover is the same one the host will see. Non-fatal:
-    // a broken STUN server shouldn't block a LAN connect.
-    if (stun_server_.ip != 0 && stun_server_.port != 0) {
-        reflexive_addr_ = net::StunClient::discover(stun_server_, *socket_);
-        if (reflexive_addr_.ip != 0) {
-            log::info("ClientSession",
-                "Reflexive address: %u.%u.%u.%u:%u (share this with the peer)",
-                (reflexive_addr_.ip >> 0) & 0xFF, (reflexive_addr_.ip >> 8) & 0xFF,
-                (reflexive_addr_.ip >> 16) & 0xFF, (reflexive_addr_.ip >> 24) & 0xFF,
-                reflexive_addr_.port);
-        } else {
-            log::warn("ClientSession", "STUN discovery failed — reflexive address unknown");
-        }
+    // Same-NAT short-circuit.  If our reflexive matches the host's, we're
+    // both behind the same router and the public-IP punch path requires
+    // hairpin NAT — usually broken on consumer routers.  Try the first
+    // LAN candidate the host advertised instead.  Reflexive falls through
+    // unchanged when the IPs differ (regular two-NAT case).
+    if (lookup_lan_count_ > 0
+        && reflexive_addr_.ip != 0
+        && reflexive_addr_.ip == host_addr_.ip) {
+        const net::SocketAddr lan = lookup_lan_[0];
+        log::info("ClientSession",
+            "Same-NAT detected (both at %u.%u.%u.%u) — trying LAN candidate %u.%u.%u.%u:%u",
+            (reflexive_addr_.ip >>  0) & 0xff, (reflexive_addr_.ip >>  8) & 0xff,
+            (reflexive_addr_.ip >> 16) & 0xff, (reflexive_addr_.ip >> 24) & 0xff,
+            (lan.ip >>  0) & 0xff, (lan.ip >>  8) & 0xff,
+            (lan.ip >> 16) & 0xff, (lan.ip >> 24) & 0xff, lan.port);
+        host_addr_ = lan;
     }
 
     // Prime a fresh Noise_NK handshake.  send_hello() will write msg1 into
@@ -978,6 +1003,16 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
                         out.ip   = p.host_ip;
                         out.port = p.host_port;
                         std::memcpy(out_pk, p.pubkey, 32);
+                        // Pull out the LAN candidate list so start() can
+                        // do same-NAT detection later.
+                        lookup_lan_count_ = p.lan_count;
+                        if (lookup_lan_count_ > rdv::MAX_LAN_CANDIDATES) {
+                            lookup_lan_count_ = rdv::MAX_LAN_CANDIDATES;
+                        }
+                        for (uint8_t i = 0; i < lookup_lan_count_; ++i) {
+                            lookup_lan_[i].ip   = p.lan[i].ip;
+                            lookup_lan_[i].port = p.lan[i].port;
+                        }
                         return true;
                     } else {
                         log::warn("ClientSession",

@@ -176,6 +176,11 @@ private:
     uint8_t         peer_pubkey_[32] = {};
     bool            peer_pubkey_set_ = false;
     std::string     peer_code_;        // alternative to peer_pubkey_; resolved at start()
+    // LAN candidates advertised by the host at registration, retrieved in
+    // the LookupResponse and used by start() for same-NAT short-circuit.
+    static constexpr size_t MAX_LAN_CANDIDATES = 4;
+    net::SocketAddr lookup_lan_[MAX_LAN_CANDIDATES]{};
+    uint8_t         lookup_lan_count_ = 0;
     // Synchronous LOOKUP at the rendezvous.  Writes the connectable endpoint
     // into `out` on success and (for the by-code variant) the resolved
     // pubkey into `out_pk` so the caller can finish Noise_NK setup.  Blocks

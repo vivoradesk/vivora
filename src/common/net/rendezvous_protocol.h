@@ -26,6 +26,10 @@ constexpr std::array<uint8_t, 4> MAGIC   = { 'D', 'B', 'R', 'V' };
 constexpr uint8_t                VERSION = 1;
 constexpr size_t                 HEADER_SIZE = 8;
 constexpr size_t                 MAX_PACKET  = 256;
+// Cap on the number of LAN candidate addresses peers can advertise.  Real
+// machines rarely have more than two routable IPv4 interfaces; four gives
+// headroom for VPN / docker bridge while keeping the wire payload small.
+constexpr size_t                 MAX_LAN_CANDIDATES = 4;
 
 enum class MsgType : uint8_t {
     Register        = 0x01,  // host → server: claim a peer id
@@ -39,14 +43,29 @@ enum class MsgType : uint8_t {
 
 // Payload layouts — fixed-size, no length prefixes inside.
 
-// Register: host announces its Curve25519 long-term public key.  Server
-// stores `pubkey → (sender_ip, sender_port)` from the UDP source address
-// (more trustworthy than what the host would self-report; it's the actual
-// reflexive binding the rendezvous saw).
-struct RegisterPayload {
-    uint8_t  pubkey[32];   // host's Noise_NK static public key
+// Register: host announces its Curve25519 long-term public key plus a
+// short list of LAN candidate endpoints.  Server stores `pubkey →
+// (sender_ip, sender_port, lan_candidates)` — sender_ip/port comes from
+// the UDP source address (more trustworthy than self-report; it's the
+// actual reflexive binding the rendezvous saw).  LAN candidates are the
+// host's own enumerated routable IPv4 + bound port, used by clients to
+// short-circuit hairpin NAT when both peers turn out to be behind the
+// same router.
+struct LanCandidate {
+    uint32_t ip;            // network byte order
+    uint16_t port;          // host byte order
+    uint16_t reserved;
 };
-static_assert(sizeof(RegisterPayload) == 32, "RegisterPayload must be packed");
+static_assert(sizeof(LanCandidate) == 8, "LanCandidate must be packed");
+
+struct RegisterPayload {
+    uint8_t  pubkey[32];                                // host's Noise_NK static public key
+    uint8_t  lan_count;                                 // 0..MAX_LAN_CANDIDATES
+    uint8_t  reserved[3];
+    LanCandidate lan[MAX_LAN_CANDIDATES];               // valid entries: [0..lan_count)
+};
+static_assert(sizeof(RegisterPayload) == 32 + 4 + 8 * MAX_LAN_CANDIDATES,
+              "RegisterPayload must be packed");
 
 // RegisterAck: tells the host what reflexive endpoint the rendezvous
 // recorded.  Host can compare against its own STUN-discovered address and
@@ -64,17 +83,21 @@ struct LookupPayload {
 };
 static_assert(sizeof(LookupPayload) == 32, "LookupPayload must be packed");
 
-// LookupResponse: server returns the host's reflexive endpoint.
+// LookupResponse: server returns the host's reflexive endpoint and the
+// LAN candidates it advertised at registration time.
 //   found = 0 → not registered (or registration expired); ip/port are 0.
 //   found = 1 → ip/port carry the reflexive endpoint to punch toward.
+//             Plus any LAN candidates the host advertised.
 struct LookupResponsePayload {
     uint8_t  pubkey[32];
     uint32_t host_ip;
     uint16_t host_port;
     uint8_t  found;
-    uint8_t  reserved;
+    uint8_t  lan_count;                                 // 0..MAX_LAN_CANDIDATES
+    LanCandidate lan[MAX_LAN_CANDIDATES];               // valid: [0..lan_count)
 };
-static_assert(sizeof(LookupResponsePayload) == 40, "LookupResponsePayload must be packed");
+static_assert(sizeof(LookupResponsePayload) == 40 + 8 * MAX_LAN_CANDIDATES,
+              "LookupResponsePayload must be packed");
 
 // PunchHint: when a Lookup arrives, the rendezvous proactively tells the
 // host the client's reflexive endpoint.  Both sides then start sending

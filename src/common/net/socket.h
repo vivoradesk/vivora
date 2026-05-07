@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace deskbeam::net {
 
@@ -29,6 +30,15 @@ SocketAddr resolve_host(const char* host, uint16_t port);
 // Delegates to resolve_host for the host half. Returns {0,0} on any parse
 // failure, unknown host, or missing port. Blocking.
 SocketAddr resolve_host_port(const char* host_port);
+
+// Enumerate non-loopback, non-link-local IPv4 addresses bound on this host
+// (network byte order).  Used by host registration to advertise LAN
+// candidates so peers behind the same NAT can connect directly without
+// the hairpin round-trip through the public router.  Linux/Mac via
+// getifaddrs, Windows via GetAdaptersAddresses.  Returns at most
+// `max_count` entries — caller-defined cap matched to the rendezvous
+// MAX_LAN_CANDIDATES.
+std::vector<uint32_t> enumerate_local_ipv4(size_t max_count);
 
 class IUdpSocket {
 public:
