@@ -54,6 +54,16 @@ else
     SCP_OPTS=()
 fi
 
+# Optional SSH identity file via SSH_KEY env var — for VPSes that require
+# a specific key (e.g. Oracle's auto-generated key, AWS .pem).
+if [[ -n "${SSH_KEY:-}" ]]; then
+    SSH_OPTS+=(-i "$SSH_KEY")
+    SCP_OPTS+=(-i "$SSH_KEY")
+fi
+# Skip the strict-host-key prompt on first deploy.
+SSH_OPTS+=(-o StrictHostKeyChecking=accept-new)
+SCP_OPTS+=(-o StrictHostKeyChecking=accept-new)
+
 echo "==> Uploading binary + unit file to $HOSTPART"
 scp "${SCP_OPTS[@]}" "$BIN" "$SERVICE_FILE" "$HOSTPART:/tmp/" 1>/dev/null
 
@@ -82,10 +92,12 @@ if command -v ufw &>/dev/null; then
     echo "  + ufw allow 7000/udp"
 fi
 
-# 5. Enable + restart.
+# 5. Enable + (re)start.  Use restart explicitly so a redeploy always
+#    picks up the new binary even when the unit was already active.
 sudo systemctl daemon-reload
-sudo systemctl enable --now deskbeam-rendezvous.service
-echo "  + service enabled + started"
+sudo systemctl enable deskbeam-rendezvous.service >/dev/null 2>&1 || true
+sudo systemctl restart deskbeam-rendezvous.service
+echo "  + service enabled + (re)started"
 
 # 6. Status.
 sudo systemctl --no-pager --full status deskbeam-rendezvous.service | head -20
