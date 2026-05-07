@@ -109,6 +109,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     uint64_t total_frames = 0;
     auto last_log_time = Clock::now();
     uint64_t last_log_frames = 0;
+    // Encode-time aggregator — reset every periodic log tick.  We measure
+    // the platform.capture_and_encode() duration rather than just the
+    // encoder kernel because that's the wall-clock cost the host_loop
+    // sees, which is what really constrains capture cadence.
+    double   enc_min_ms = 1e9, enc_max_ms = 0.0, enc_sum_ms = 0.0;
+    uint64_t enc_count  = 0;
     // No periodic IDR. Encoders run with continuous intra refresh
     // (NVENC intraRefresh* / QSV IntRefType=HORIZONTAL), so the picture
     // self-heals every ~1s worth of frames without the packet burst of a
@@ -305,8 +311,17 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // Capture + encode.
         uint64_t pts_us = 0;
         bool content_changed = false;
+        const auto enc_start = Clock::now();
         bool got_frame = platform.capture_and_encode(pts_us, content_changed, force_encode);
-        if (got_frame) last_capture_time = Clock::now();
+        if (got_frame) {
+            last_capture_time = Clock::now();
+            const double enc_ms = std::chrono::duration<double, std::milli>(
+                last_capture_time - enc_start).count();
+            if (enc_ms < enc_min_ms) enc_min_ms = enc_ms;
+            if (enc_ms > enc_max_ms) enc_max_ms = enc_ms;
+            enc_sum_ms += enc_ms;
+            enc_count++;
+        }
 
         // Constant-rate heartbeat: when capture stays silent on a static
         // screen, re-feed the last texture so the wire keeps the same
@@ -430,23 +445,27 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             frame_seq++;
             total_frames++;
 
-            if (total_frames % 60 == 0) {
-                auto now = Clock::now();
-                double window_sec = std::chrono::duration<double>(now - last_log_time).count();
-                double inst_fps = window_sec > 0
-                    ? (total_frames - last_log_frames) / window_sec
-                    : 0.0;
-                last_log_time = now;
+            const auto now_log = Clock::now();
+            const double window_sec = std::chrono::duration<double>(now_log - last_log_time).count();
+            if (window_sec >= 1.0) {
+                const double inst_fps = (total_frames - last_log_frames) / window_sec;
+                last_log_time   = now_log;
                 last_log_frames = total_frames;
-                uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
-                uint8_t fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
-                log::info("HOST", "Frames: %llu, FPS: %.1f, RTT: %.1fms, retx: %llu, fec_k: %d, clients: %zu",
+                const uint64_t retx = session.sender() ? session.sender()->retransmits() : 0;
+                const uint8_t  fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
+                const double avg_ms = enc_count > 0 ? enc_sum_ms / static_cast<double>(enc_count) : 0.0;
+                const double min_ms = enc_count > 0 ? enc_min_ms : 0.0;
+                log::info("HOST",
+                    "Frames: %llu, FPS: %.1f, encode: %.2f/%.2f/%.2f ms (min/avg/max), "
+                    "RTT: %.1fms, retx: %llu, fec_k: %d, clients: %zu",
                     (unsigned long long)total_frames,
                     inst_fps,
+                    min_ms, avg_ms, enc_max_ms,
                     session.rtt_ms(),
                     (unsigned long long)retx,
                     (int)fec_k,
                     session.client_count());
+                enc_min_ms = 1e9; enc_max_ms = 0.0; enc_sum_ms = 0.0; enc_count = 0;
             }
         }
     }

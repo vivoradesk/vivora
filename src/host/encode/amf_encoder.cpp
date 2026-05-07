@@ -2,7 +2,6 @@
 
 #include "host/encode/amf_encoder.h"
 #include "common/utils/log.h"
-#include "common/utils/metrics.h"
 
 // AMF headers
 #include "core/Factory.h"
@@ -195,8 +194,6 @@ bool AmfEncoder::create_encoder() {
 }
 
 bool AmfEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
-    ScopedTimer timer(TAG, "encode");
-
     if (!encoder_) return false;
 
     // Allocate AMF surface (AMF manages its own textures to avoid conflicts)
@@ -255,7 +252,6 @@ bool AmfEncoder::encode(ID3D11Texture2D* texture, uint64_t pts_us) {
 }
 
 bool AmfEncoder::encode_skip(ID3D11Texture2D* texture, uint64_t pts_us) {
-    ScopedTimer timer(TAG, "encode_heartbeat");
     if (!encoder_) return false;
 
     AMFSurface* surface = nullptr;
