@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <random>
 #include <string>
 #include <thread>
@@ -77,12 +78,12 @@ struct EndpointKeyHash {
     }
 };
 
-struct PubkeyArr {
+struct SessionId {
     std::array<uint8_t, 32> v;
-    bool operator==(const PubkeyArr& o) const { return v == o.v; }
+    bool operator==(const SessionId& o) const { return v == o.v; }
 };
-struct PubkeyHash {
-    size_t operator()(const PubkeyArr& k) const noexcept {
+struct SessionIdHash {
+    size_t operator()(const SessionId& k) const noexcept {
         size_t h = 0;
         for (size_t i = 0; i < 32; i += 8) {
             uint64_t word = 0;
@@ -94,11 +95,10 @@ struct PubkeyHash {
 };
 
 // One side of a paired session.  `paired_alloc` is the alloc id of the
-// other peer once both halves bound; until then it's all-zero.
+// other peer once both halves bound; until then it's unset.
 struct Binding {
     deskbeam::net::SocketAddr endpoint;
-    PubkeyArr                 my_pubkey;
-    PubkeyArr                 peer_pubkey;
+    SessionId                 session_id;
     AllocId                   paired_alloc;
     bool                      paired = false;
     TimePoint                 expires_at;
@@ -175,41 +175,12 @@ int main(int argc, char** argv) {
 
     // Allocations and the indexes we lookup from each path:
     //   alloc_id → Binding   (DATA / KEEPALIVE arrive with alloc_id)
-    //   pubkey-pair → alloc_id  (BIND looks up the mirror to pair)
+    //   session_id → list<alloc_id>   (BIND looks for the matching half)
     //   endpoint → alloc_id   (cleanup: drop the binding when the peer
     //                          rebinds from the same endpoint)
-    std::unordered_map<AllocId,    Binding,  AllocIdHash>     bindings;
-    auto pair_key = [](const PubkeyArr& a, const PubkeyArr& b) {
-        // Lexicographic-min(a)+max(a,b) so peer A binding (A,B) and
-        // peer B binding (B,A) hash to the same slot when looked up
-        // after swapping (my_pubkey, peer_pubkey).  We don't actually
-        // use that here — we look up by (peer_pubkey, my_pubkey) — but
-        // keep this structure ready for it.
-        std::array<uint8_t, 64> joined{};
-        std::memcpy(joined.data(),      a.v.data(), 32);
-        std::memcpy(joined.data() + 32, b.v.data(), 32);
-        PubkeyArr p1{}; PubkeyArr p2{};
-        std::memcpy(p1.v.data(), joined.data(),      32);
-        std::memcpy(p2.v.data(), joined.data() + 32, 32);
-        // We can't return both — caller wants the looked-up key, just emit p1.
-        (void)p2;
-        return p1;
-    };
-    (void)pair_key;
-    // Lookup by (my_pubkey, peer_pubkey) → alloc_id.  When BIND from
-    // peer X with peer_pubkey=Y arrives, we look up the mirror entry
-    // (my_pubkey=Y, peer_pubkey=X); if it exists we have both halves.
-    struct PubkeyPair {
-        PubkeyArr a; PubkeyArr b;
-        bool operator==(const PubkeyPair& o) const { return a == o.a && b == o.b; }
-    };
-    struct PubkeyPairHash {
-        size_t operator()(const PubkeyPair& p) const noexcept {
-            return PubkeyHash{}(p.a) ^ (PubkeyHash{}(p.b) << 1);
-        }
-    };
-    std::unordered_map<PubkeyPair, AllocId, PubkeyPairHash> by_pair;
-    std::unordered_map<EndpointKey, AllocId, EndpointKeyHash> by_endpoint;
+    std::unordered_map<AllocId,   Binding,            AllocIdHash>     bindings;
+    std::unordered_map<SessionId, std::vector<AllocId>, SessionIdHash> by_session;
+    std::unordered_map<EndpointKey, AllocId, EndpointKeyHash>          by_endpoint;
 
     std::random_device rd;
     std::mt19937_64    rng(rd());
@@ -224,7 +195,13 @@ int main(int argc, char** argv) {
             auto pit = bindings.find(it->second.paired_alloc);
             if (pit != bindings.end()) pit->second.paired = false;
         }
-        by_pair.erase(PubkeyPair{ it->second.my_pubkey, it->second.peer_pubkey });
+        // Drop our entry from the session_id slot.
+        auto sit = by_session.find(it->second.session_id);
+        if (sit != by_session.end()) {
+            auto& list = sit->second;
+            list.erase(std::remove(list.begin(), list.end(), id), list.end());
+            if (list.empty()) by_session.erase(sit);
+        }
         EndpointKey ek{ it->second.endpoint.ip, it->second.endpoint.port };
         by_endpoint.erase(ek);
         bindings.erase(it);
@@ -304,34 +281,44 @@ int main(int argc, char** argv) {
 
             Binding b;
             b.endpoint    = sender;
-            std::memcpy(b.my_pubkey.v.data(),   p.my_pubkey,   32);
-            std::memcpy(b.peer_pubkey.v.data(), p.peer_pubkey, 32);
+            std::memcpy(b.session_id.v.data(), p.session_id, 32);
             b.expires_at  = now + std::chrono::seconds(BINDING_TTL);
             b.paired      = false;
 
-            // Look for the mirror binding (peer_pubkey = my_pubkey, my_pubkey = peer_pubkey).
-            PubkeyPair mirror{ b.peer_pubkey, b.my_pubkey };
-            auto pit = by_pair.find(mirror);
-            if (pit != by_pair.end()) {
-                auto other = bindings.find(pit->second);
+            // Find any existing binding with the same session_id — if one
+            // is waiting, link them.  We only support pairing two peers
+            // per session_id; further binds with the same id are rejected
+            // (would otherwise create a triangle that can't forward
+            // unambiguously).
+            auto& slot = by_session[b.session_id];
+            if (slot.size() >= 2) {
+                log::warn(TAG, "session_id collision: third bind from %s:%u rejected",
+                          ip_to_string(sender.ip).c_str(), sender.port);
+                rly::BindAckPayload ack{};
+                ack.paired = 0;
+                ack.ttl_seconds = 0;
+                const size_t ackn = rly::encode_bind_ack(txbuf, sizeof(txbuf), ack);
+                if (ackn) sock->send_to(txbuf, ackn, sender);
+                break;
+            }
+            if (slot.size() == 1) {
+                auto other = bindings.find(slot[0]);
                 if (other != bindings.end()) {
                     b.paired       = true;
-                    b.paired_alloc = pit->second;
+                    b.paired_alloc = slot[0];
                     other->second.paired       = true;
                     other->second.paired_alloc = id;
                 }
             }
 
-            // Indexes.
-            by_pair[PubkeyPair{ b.my_pubkey, b.peer_pubkey }] = id;
+            slot.push_back(id);
             by_endpoint[ek] = id;
             bindings[id]    = b;
 
-            char hex_self[17], hex_peer[17];
-            hex_short(p.my_pubkey,   hex_self);
-            hex_short(p.peer_pubkey, hex_peer);
-            log::info(TAG, "bind %s↔%s from %s:%u alloc=%02x%02x%02x%02x%02x%02x%02x%02x paired=%d",
-                      hex_self, hex_peer,
+            char sid_short[17];
+            hex_short(p.session_id, sid_short);
+            log::info(TAG, "bind sid=%s.. from %s:%u alloc=%02x%02x%02x%02x%02x%02x%02x%02x paired=%d",
+                      sid_short,
                       ip_to_string(sender.ip).c_str(), sender.port,
                       id.bytes[0], id.bytes[1], id.bytes[2], id.bytes[3],
                       id.bytes[4], id.bytes[5], id.bytes[6], id.bytes[7],

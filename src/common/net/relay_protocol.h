@@ -42,17 +42,23 @@ enum class MsgType : uint8_t {
     Keepalive = 0x04,  // peer → relay: refresh TTL on an existing binding
 };
 
-// Bind: peer announces itself + the peer it wants to talk to.  The relay
-// records (sender_endpoint, my_pubkey, peer_pubkey) and looks for the
-// mirror binding (peer_pubkey == other.my_pubkey AND my_pubkey ==
-// other.peer_pubkey).  When both halves arrive the relay links them.
+// Bind: peer announces a 32-byte session_id that both peers agreed on
+// out of band (over the rendezvous, in our case).  The first BIND for
+// a given id holds the slot; the second BIND with the same id links
+// the two and the relay starts forwarding DATA between them.
+//
+// Why session_id instead of (my_pubkey, peer_pubkey) mirror: the
+// client doesn't have a long-term pubkey to bind under, and the host
+// has no a-priori knowledge of clients.  A symmetric session_id sidesteps
+// the asymmetry and lets the same protocol carry multiple concurrent
+// pairings to the same host (each pair gets its own random id).
+//
 // Wire layout for these structs is fixed by the encode_/decode_ helpers
 // below; the struct shape is just a convenience for callers.  No static
 // asserts on sizeof — padding from short fields would trip them and the
 // raw layout never depends on it.
 struct BindPayload {
-    uint8_t my_pubkey[32];
-    uint8_t peer_pubkey[32];
+    uint8_t session_id[32];
 };
 
 // BindAck: returns the relay-assigned 8-byte allocation id.  All future

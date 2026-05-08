@@ -53,13 +53,12 @@ int main() {
 
     const auto relay_addr = loopback(7100);
 
-    // A pubkey: 0x01 0x02 ... B pubkey: 0x33 0x34 ...
+    // Both peers BIND with the same session_id.  In real use the id would
+    // come from rendezvous (random per pairing); here we hard-code it.
     rly::BindPayload bA{}, bB{};
     for (int i = 0; i < 32; ++i) {
-        bA.my_pubkey[i]   = static_cast<uint8_t>(i + 1);
-        bA.peer_pubkey[i] = static_cast<uint8_t>(i + 33);
-        bB.my_pubkey[i]   = static_cast<uint8_t>(i + 33);
-        bB.peer_pubkey[i] = static_cast<uint8_t>(i + 1);
+        bA.session_id[i] = static_cast<uint8_t>(i + 1);
+        bB.session_id[i] = static_cast<uint8_t>(i + 1);
     }
 
     uint8_t buf[rly::MAX_DATA_PACKET];

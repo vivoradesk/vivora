@@ -41,15 +41,14 @@ bool parse_header(const uint8_t* buf, size_t len,
 // --- encoders --------------------------------------------------------------
 
 // Wire-format payload lengths — fixed regardless of struct padding.
-constexpr size_t kBindWire      = 64;
+constexpr size_t kBindWire      = 32;
 constexpr size_t kBindAckWire   = 11;
 constexpr size_t kKeepaliveWire = 8;
 
 size_t encode_bind(uint8_t* buf, size_t buf_len, const BindPayload& p) {
     const size_t total = encode_header(buf, buf_len, MsgType::Bind, kBindWire);
     if (total == 0) return 0;
-    std::memcpy(buf + HEADER_SIZE +  0, p.my_pubkey,   32);
-    std::memcpy(buf + HEADER_SIZE + 32, p.peer_pubkey, 32);
+    std::memcpy(buf + HEADER_SIZE, p.session_id, 32);
     return total;
 }
 
@@ -84,8 +83,7 @@ size_t encode_data(uint8_t* buf, size_t buf_len,
 
 bool decode_bind(const uint8_t* p, size_t len, BindPayload& out) {
     if (len != kBindWire) return false;
-    std::memcpy(out.my_pubkey,   p +  0, 32);
-    std::memcpy(out.peer_pubkey, p + 32, 32);
+    std::memcpy(out.session_id, p, 32);
     return true;
 }
 
