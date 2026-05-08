@@ -33,6 +33,13 @@ target_link_libraries(noise_test PRIVATE deskbeam_common)
 target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME noise_test COMMAND noise_test)
 
+# Smoke test for deskbeam-relay — must be run manually with the relay
+# server running on localhost:7100.  Not registered with ctest because the
+# server isn't auto-started here; the test fails fast on missing server.
+add_executable(relay_test relay_test.cpp)
+target_link_libraries(relay_test PRIVATE deskbeam_common)
+target_include_directories(relay_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # --- Windows-only integration tests ------------------------------------------
 
 if(WIN32)

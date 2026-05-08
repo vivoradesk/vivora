@@ -10,6 +10,7 @@ add_library(deskbeam_common STATIC
     net/fec_codec.cpp
     net/stun_client.cpp
     net/rendezvous_protocol.cpp
+    net/relay_protocol.cpp
     audio/audio_codec.cpp
     audio/resampler.cpp
     audio/jitter_buffer.cpp
