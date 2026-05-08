@@ -762,6 +762,11 @@ void HostSession::set_relay(const net::SocketAddr& addr, const uint8_t session_i
     relay_session_set_ = true;
 }
 
+void HostSession::set_relay_license(const uint8_t token[95]) {
+    std::memcpy(relay_license_, token, 95);
+    relay_license_set_ = true;
+}
+
 int HostSession::transport_send(const uint8_t* data, size_t len, const net::SocketAddr& peer) {
     if (!socket_) return -1;
     if (relay_active_) {
@@ -791,14 +796,19 @@ bool HostSession::relay_bind_blocking() {
     namespace rly = net::relay;
     rly::BindPayload b{};
     std::memcpy(b.session_id, relay_session_id_, 32);
+    if (relay_license_set_) {
+        b.has_license = true;
+        std::memcpy(b.license, relay_license_, 95);
+    }
     uint8_t txbuf[rly::MAX_CONTROL_PACKET];
     const size_t txlen = rly::encode_bind(txbuf, sizeof(txbuf), b);
     if (txlen == 0) return false;
 
-    log::info("HostSession", "Relay BIND at %u.%u.%u.%u:%u",
+    log::info("HostSession", "Relay BIND at %u.%u.%u.%u:%u%s",
               (relay_addr_.ip >>  0) & 0xff, (relay_addr_.ip >>  8) & 0xff,
               (relay_addr_.ip >> 16) & 0xff, (relay_addr_.ip >> 24) & 0xff,
-              relay_addr_.port);
+              relay_addr_.port,
+              relay_license_set_ ? " [with license]" : "");
 
     const auto start = std::chrono::steady_clock::now();
     auto next_send = start;

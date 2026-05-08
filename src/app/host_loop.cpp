@@ -1,6 +1,7 @@
 #include "app/host_loop.h"
 #include "common/audio/audio_capture.h"
 #include "common/crypto/host_identity.h"   // hex_decode_32
+#include <fstream>
 #include "common/codec/bitrate_controller.h"
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
@@ -82,6 +83,18 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         } else {
             session.set_relay(rly, sid);
             log::info("HOST", "Relay: %s (session set)", cfg.relay_server);
+            if (cfg.license_file && *cfg.license_file) {
+                std::ifstream lf(cfg.license_file, std::ios::binary);
+                uint8_t token[95];
+                if (lf && (lf.read(reinterpret_cast<char*>(token), 95),
+                           lf.gcount() == 95)) {
+                    session.set_relay_license(token);
+                    log::info("HOST", "License attached (%s)", cfg.license_file);
+                } else {
+                    log::warn("HOST", "Could not read 95-byte license from %s",
+                              cfg.license_file);
+                }
+            }
         }
     }
     if (!session.start(cfg.port)) {

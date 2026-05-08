@@ -57,6 +57,10 @@ public:
     // for now (testing); a future commit will trigger this automatically
     // when direct hole-punching times out.
     void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
+    // Optional: provide a 95-byte license token to attach to the relay
+    // BIND.  Only required when the configured relay enforces
+    // --require-license (Pro-managed).  Self-host instances ignore it.
+    void set_relay_license(const uint8_t token[95]);
     // Lookup-by-code variant: rendezvous resolves the code to a pubkey
     // server-side and the client receives the pubkey alongside the
     // reflexive endpoint.  Mutually exclusive with set_peer_pubkey.
@@ -202,6 +206,8 @@ private:
     uint8_t         relay_alloc_id_[8]    = {};
     bool            relay_active_         = false;
     TimePoint       last_relay_keepalive_{};
+    uint8_t         relay_license_[95]    = {};
+    bool            relay_license_set_    = false;
     bool relay_bind_blocking();          // synchronous BIND + ACK during start()
     bool transport_send(const uint8_t* data, size_t len);   // wrap or direct
     void relay_send_keepalive();

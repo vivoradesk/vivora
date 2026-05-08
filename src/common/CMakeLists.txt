@@ -18,6 +18,7 @@ add_library(deskbeam_common STATIC
     crypto/random.cpp
     crypto/noise_nk.cpp
     crypto/host_identity.cpp
+    crypto/license_token.cpp
     crypto/packet_crypto.cpp
     crypto/peer_pin.cpp
 )

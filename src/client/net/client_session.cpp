@@ -32,6 +32,11 @@ void ClientSession::set_relay(const net::SocketAddr& addr, const uint8_t session
     relay_session_set_ = true;
 }
 
+void ClientSession::set_relay_license(const uint8_t token[95]) {
+    std::memcpy(relay_license_, token, 95);
+    relay_license_set_ = true;
+}
+
 bool ClientSession::start(const char* host_ip, uint16_t port) {
     // The pubkey may be either pinned up front (--host-key HEX) or learned
     // mid-start() from a rendezvous lookup-by-code. The hard check moves
@@ -1019,14 +1024,19 @@ bool ClientSession::relay_bind_blocking() {
     namespace rly = net::relay;
     rly::BindPayload b{};
     std::memcpy(b.session_id, relay_session_id_, 32);
-    uint8_t txbuf[rly::MAX_CONTROL_PACKET];
+    if (relay_license_set_) {
+        b.has_license = true;
+        std::memcpy(b.license, relay_license_, 95);
+    }
+    uint8_t txbuf[rly::MAX_CONTROL_PACKET];   // 256 fits 8+32+95=135
     const size_t txlen = rly::encode_bind(txbuf, sizeof(txbuf), b);
     if (txlen == 0) return false;
 
-    log::info("ClientSession", "Relay BIND at %u.%u.%u.%u:%u",
+    log::info("ClientSession", "Relay BIND at %u.%u.%u.%u:%u%s",
               (relay_addr_.ip >>  0) & 0xff, (relay_addr_.ip >>  8) & 0xff,
               (relay_addr_.ip >> 16) & 0xff, (relay_addr_.ip >> 24) & 0xff,
-              relay_addr_.port);
+              relay_addr_.port,
+              relay_license_set_ ? " [with license]" : "");
 
     // Same retry shape as lookup_via_rendezvous: 200ms tries, 3s total.
     const auto start = std::chrono::steady_clock::now();

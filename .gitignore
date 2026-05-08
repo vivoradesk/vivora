@@ -3,3 +3,7 @@ build/
 build2/
 build-linux/
 *.log
+# Generated test license artefacts (do NOT commit secrets to the repo)
+license.sk
+license.pk
+token.bin

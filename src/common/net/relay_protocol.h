@@ -59,6 +59,14 @@ enum class MsgType : uint8_t {
 // raw layout never depends on it.
 struct BindPayload {
     uint8_t session_id[32];
+    // Optional license token (95 bytes — see crypto/license_token.h).
+    // Wire shape:
+    //   has_license=false → payload is 32 bytes (session_id only)
+    //   has_license=true  → payload is 32+95=127 bytes (session_id + token)
+    // Servers without --require-license accept both shapes; servers with
+    // it set demand has_license=true and verify the token before pairing.
+    bool    has_license = false;
+    uint8_t license[95] = {};
 };
 
 // BindAck: returns the relay-assigned 8-byte allocation id.  All future

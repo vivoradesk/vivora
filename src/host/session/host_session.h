@@ -99,6 +99,10 @@ public:
     // session_id, one binding); multi-client relay needs per-client
     // session_ids minted by the rendezvous, deferred to a later commit.
     void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
+    // Optional 95-byte license token attached to the relay BIND.  Required
+    // when the configured relay enforces --require-license; ignored by
+    // self-host instances.
+    void set_relay_license(const uint8_t token[95]);
 
     // Advertise which codec the host is encoding in.  Sent to the client
     // in HELLO_ACK so it can initialise the matching decoder.
@@ -232,6 +236,8 @@ private:
     uint8_t         relay_alloc_id_[8]    = {};
     bool            relay_active_         = false;
     TimePoint       last_relay_keepalive_{};
+    uint8_t         relay_license_[95]    = {};
+    bool            relay_license_set_    = false;
     static constexpr int64_t RELAY_KEEPALIVE_S = 20;
     bool relay_bind_blocking();
     void relay_send_keepalive();

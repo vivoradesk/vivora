@@ -23,6 +23,10 @@ struct HostLoopConfig {
     // automatic when direct hole-punching times out in a later iteration.
     const char* relay_server  = nullptr;
     const char* relay_session_hex = nullptr;
+    // Path to a 95-byte license token file, attached to the relay BIND.
+    // Required by Pro-managed relay (--require-license); ignored by
+    // self-host instances.
+    const char* license_file = nullptr;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

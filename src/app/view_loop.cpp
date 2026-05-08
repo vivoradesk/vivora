@@ -9,6 +9,8 @@
 #include "common/utils/types.h"
 #include "client/net/client_session.h"
 
+#include <fstream>
+
 #include <chrono>
 #include <thread>
 
@@ -65,6 +67,18 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         } else {
             session.set_relay(rly, sid);
             log::info("VIEW", "Relay: %s (session set)", cfg.relay_server);
+            if (cfg.license_file && *cfg.license_file) {
+                std::ifstream lf(cfg.license_file, std::ios::binary);
+                uint8_t token[95];
+                if (lf && (lf.read(reinterpret_cast<char*>(token), 95),
+                           lf.gcount() == 95)) {
+                    session.set_relay_license(token);
+                    log::info("VIEW", "License attached (%s)", cfg.license_file);
+                } else {
+                    log::warn("VIEW", "Could not read 95-byte license from %s",
+                              cfg.license_file);
+                }
+            }
         }
     }
     if (cfg.rendezvous_server && *cfg.rendezvous_server

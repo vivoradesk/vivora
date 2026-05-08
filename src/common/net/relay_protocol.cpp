@@ -41,14 +41,19 @@ bool parse_header(const uint8_t* buf, size_t len,
 // --- encoders --------------------------------------------------------------
 
 // Wire-format payload lengths — fixed regardless of struct padding.
-constexpr size_t kBindWire      = 32;
-constexpr size_t kBindAckWire   = 11;
-constexpr size_t kKeepaliveWire = 8;
+constexpr size_t kBindWireBare    = 32;          // session_id only
+constexpr size_t kBindWireLicense = 32 + 95;     // session_id + license token
+constexpr size_t kBindAckWire     = 11;
+constexpr size_t kKeepaliveWire   = 8;
 
 size_t encode_bind(uint8_t* buf, size_t buf_len, const BindPayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::Bind, kBindWire);
+    const size_t plen = p.has_license ? kBindWireLicense : kBindWireBare;
+    const size_t total = encode_header(buf, buf_len, MsgType::Bind, plen);
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.session_id, 32);
+    if (p.has_license) {
+        std::memcpy(buf + HEADER_SIZE + 32, p.license, 95);
+    }
     return total;
 }
 
@@ -82,9 +87,18 @@ size_t encode_data(uint8_t* buf, size_t buf_len,
 // --- decoders --------------------------------------------------------------
 
 bool decode_bind(const uint8_t* p, size_t len, BindPayload& out) {
-    if (len != kBindWire) return false;
-    std::memcpy(out.session_id, p, 32);
-    return true;
+    if (len == kBindWireBare) {
+        std::memcpy(out.session_id, p, 32);
+        out.has_license = false;
+        return true;
+    }
+    if (len == kBindWireLicense) {
+        std::memcpy(out.session_id, p, 32);
+        std::memcpy(out.license, p + 32, 95);
+        out.has_license = true;
+        return true;
+    }
+    return false;
 }
 
 bool decode_bind_ack(const uint8_t* p, size_t len, BindAckPayload& out) {

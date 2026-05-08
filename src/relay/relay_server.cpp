@@ -14,6 +14,7 @@
 // every 15-25s on the peer side keep entries fresh.
 
 #include "common/net/relay_protocol.h"
+#include "common/crypto/license_token.h"
 #include "common/net/socket.h"
 #include "common/utils/log.h"
 
@@ -23,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <fstream>
 #include <random>
 #include <string>
 #include <thread>
@@ -112,9 +114,21 @@ std::string ip_to_string(uint32_t ip_be) {
 
 void usage(const char* argv0) {
     std::fprintf(stderr,
-        "usage: %s [--port PORT]\n"
-        "  --port PORT     UDP port to listen on (default %u)\n",
+        "usage: %s [--port PORT] [--require-license PUBKEY_FILE]\n"
+        "  --port PORT              UDP port to listen on (default %u)\n"
+        "  --require-license PATH   Reject BINDs without a valid Ed25519-signed\n"
+        "                           license token (verified against PUBKEY_FILE,\n"
+        "                           a 32-byte raw public key).  Off by default —\n"
+        "                           AGPL self-host instances stay open.\n",
         argv0, DEFAULT_PORT);
+}
+
+// Read exactly N bytes from a file into out[].  Returns true on success.
+bool read_file_exact(const char* path, uint8_t* out, size_t n) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    in.read(reinterpret_cast<char*>(out), static_cast<std::streamsize>(n));
+    return static_cast<size_t>(in.gcount()) == n;
 }
 
 #ifndef _WIN32
@@ -138,9 +152,18 @@ int main(int argc, char** argv) {
     namespace rly = deskbeam::net::relay;
 
     uint16_t port = DEFAULT_PORT;
+    bool require_license = false;
+    uint8_t license_pubkey[32] = {};
     for (int i = 1; i < argc; ++i) {
         if ((std::strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
             port = static_cast<uint16_t>(std::atoi(argv[++i]));
+        } else if ((std::strcmp(argv[i], "--require-license") == 0) && i + 1 < argc) {
+            const char* path = argv[++i];
+            if (!read_file_exact(path, license_pubkey, 32)) {
+                std::fprintf(stderr, "failed to read 32-byte license pubkey from %s\n", path);
+                return 1;
+            }
+            require_license = true;
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;
@@ -171,7 +194,9 @@ int main(int argc, char** argv) {
     sock->set_recvbuf(4 << 20);
     sock->set_sendbuf(4 << 20);
     sock->set_nonblocking(true);
-    log::info(TAG, "deskbeam-relay listening on UDP :%u (TTL=%ds)", port, BINDING_TTL);
+    log::info(TAG, "deskbeam-relay listening on UDP :%u (TTL=%ds)%s",
+              port, BINDING_TTL,
+              require_license ? "  [license required]" : "");
 
     // Allocations and the indexes we lookup from each path:
     //   alloc_id → Binding   (DATA / KEEPALIVE arrive with alloc_id)
@@ -264,6 +289,43 @@ int main(int argc, char** argv) {
             rly::BindPayload p{};
             if (!rly::decode_bind(rxbuf.data() + poff, plen, p)) break;
             ++total_bind;
+
+            // License check (managed-relay mode only).  Reject quietly with
+            // a paired=0 / ttl=0 ack so a probing client gets a definitive
+            // "no" without us spending CPU on real allocation.
+            if (require_license) {
+                if (!p.has_license) {
+                    log::info(TAG, "reject bind from %s:%u: no license",
+                              ip_to_string(sender.ip).c_str(), sender.port);
+                    rly::BindAckPayload ack{};
+                    const size_t ackn = rly::encode_bind_ack(txbuf, sizeof(txbuf), ack);
+                    if (ackn) sock->send_to(txbuf, ackn, sender);
+                    break;
+                }
+                deskbeam::crypto::LicenseClaims claims;
+                const int64_t now_unix =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                if (!deskbeam::crypto::verify_license(p.license, license_pubkey,
+                                                      now_unix, claims)) {
+                    log::info(TAG, "reject bind from %s:%u: invalid / expired license",
+                              ip_to_string(sender.ip).c_str(), sender.port);
+                    rly::BindAckPayload ack{};
+                    const size_t ackn = rly::encode_bind_ack(txbuf, sizeof(txbuf), ack);
+                    if (ackn) sock->send_to(txbuf, ackn, sender);
+                    break;
+                }
+                // Pro-tier required for managed relay.  Trial tier passes
+                // verification but doesn't get to bind here.
+                if (claims.tier != deskbeam::crypto::LicenseTier::Pro) {
+                    log::info(TAG, "reject bind from %s:%u: trial tier",
+                              ip_to_string(sender.ip).c_str(), sender.port);
+                    rly::BindAckPayload ack{};
+                    const size_t ackn = rly::encode_bind_ack(txbuf, sizeof(txbuf), ack);
+                    if (ackn) sock->send_to(txbuf, ackn, sender);
+                    break;
+                }
+            }
 
             // If the same endpoint is already bound, drop the old binding
             // (rebind on reconnect / source-port change is the only sane
