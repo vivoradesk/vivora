@@ -94,7 +94,9 @@ These are **not** on the active roadmap — listed so we know what to say when a
 | Rendezvous + memorable codes             | ✅ public server on Oracle Free Tier |
 | Hole-punching (STUN + PunchHint)         | ✅ tested inter-ISP (1123ms handshake) |
 | Same-NAT short-circuit (LAN candidates)  | ✅ tested (11ms handshake same WiFi) |
-| Relay (symmetric NAT fallback)           | ❌ open question — see below |
+| Relay daemon (`deskbeam-relay`)          | ✅ AGPL self-host code, smoke-tested localhost |
+| Relay client/host integration            | ✅ manual mode (`--relay` + `--relay-session`); auto-fallback pending |
+| Relay license auth (Pro-managed)         | ⏳ next — `--require-license` + JWT verify |
 
 ### Production deploy artefacts
 

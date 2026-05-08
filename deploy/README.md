@@ -49,3 +49,46 @@ Clients pass it as `--rendezvous rdv.deskbeam.dev:7000`.
 The server is fully in-memory.  Restarts drop all registrations; hosts
 re-register on their next 30 s keepalive tick.  No persistent state to
 back up.
+
+## Relay server
+
+Stateless UDP forwarder for the case where direct hole-punching can't
+establish a peer-to-peer link (symmetric NAT, CGNAT, blocking firewalls).
+Both peers BIND with a shared 32-byte session_id; the relay forwards
+DBRL DATA packets between them.  See `src/relay/relay_server.cpp`.
+
+### Deploy
+
+```sh
+./deploy/deploy-relay.sh user@your.vps.example.com
+```
+
+Same shape as the rendezvous deploy: scp binary + systemd unit, reuse
+the `deskbeam` system user, open UDP/7100 in ufw, enable + (re)start
+the service.
+
+After a fresh box receives both deploys (`deploy-rendezvous.sh` then
+`deploy-relay.sh`), the same VPS hosts both:
+
+- `7000/udp` — rendezvous (signalling, kilobytes per session)
+- `7100/udp` — relay (media path, megabits per session)
+
+### Bandwidth note
+
+Unlike rendezvous, the relay carries the full media stream (~15 Mbps
+per 1080p60 HEVC session = ~1.6 TB/month/heavy user).  Oracle Free
+Tier's 10 TB egress is enough for the early test phase but won't scale
+— move the relay to a paid VPS with bandwidth headroom (Hetzner CCX23
+~€27/mo includes 20 TB) once usage takes off.
+
+The Pro-managed instance will gate access via a `--require-license`
+flag (separate commit) — self-hosted instances stay open by default.
+
+### Operations
+
+- Logs:    `journalctl -u deskbeam-relay -f`
+- Status:  `systemctl status deskbeam-relay`
+- Update:  rerun `deploy-relay.sh` (auto-restarts the unit)
+
+State is fully in-memory.  Bindings expire after 60 s if no keepalive;
+peers refresh every 20 s on their side.

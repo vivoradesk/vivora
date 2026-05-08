@@ -1,0 +1,46 @@
+[Unit]
+Description=DeskBeam media relay (UDP forwarder)
+Documentation=https://github.com/deskbeam/deskbeam
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/deskbeam-relay --port 7100
+Restart=on-failure
+RestartSec=2
+# Same dedicated unprivileged user the rendezvous unit creates.
+User=deskbeam
+Group=deskbeam
+
+# Lockdown — same shape as deskbeam-rendezvous.service.  The relay
+# touches a UDP socket and that's it; everything else is denied.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# Resource caps — the relay holds in-memory bindings only, no buffers
+# beyond the per-packet receive size.  256 MiB hard cap leaves room
+# for hundreds of paired sessions.
+MemoryHigh=128M
+MemoryMax=256M
+TasksMax=32
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deskbeam-relay
+
+[Install]
+WantedBy=multi-user.target
