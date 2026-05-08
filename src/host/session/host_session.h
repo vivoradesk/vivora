@@ -90,6 +90,16 @@ public:
     // reacts to PunchHint by opening a NAT pinhole toward the client.
     void set_rendezvous(const net::SocketAddr& addr) { rendezvous_addr_ = addr; }
 
+    // Optional relay endpoint + 32-byte session id agreed with the client
+    // out of band.  When set, start() BINDs to the relay and every
+    // outbound packet to the (single) connected client goes through
+    // relay-wrapped DBRL DATA; inbound DBRL DATA from the relay is
+    // unwrapped and dispatched as if from the client's direct endpoint.
+    // V1 limitation: only one concurrent client in relay mode (one
+    // session_id, one binding); multi-client relay needs per-client
+    // session_ids minted by the rendezvous, deferred to a later commit.
+    void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
+
     // Advertise which codec the host is encoding in.  Sent to the client
     // in HELLO_ACK so it can initialise the matching decoder.
     void set_codec(VideoCodec codec) { codec_ = codec; }
@@ -214,6 +224,19 @@ private:
     net::SocketAddr rendezvous_addr_{};
     TimePoint       last_rdv_send_{};
     static constexpr int64_t RDV_KEEPALIVE_S = 30;
+
+    // Relay (v1: single concurrent client, manual session_id from CLI).
+    net::SocketAddr relay_addr_{};
+    uint8_t         relay_session_id_[32] = {};
+    bool            relay_session_set_    = false;
+    uint8_t         relay_alloc_id_[8]    = {};
+    bool            relay_active_         = false;
+    TimePoint       last_relay_keepalive_{};
+    static constexpr int64_t RELAY_KEEPALIVE_S = 20;
+    bool relay_bind_blocking();
+    void relay_send_keepalive();
+    // Wrap in DBRL DATA when relay_active_, else direct UDP to `peer`.
+    int  transport_send(const uint8_t* data, size_t len, const net::SocketAddr& peer);
 
     // Long-term host identity.  Loaded once from disk (or generated on
     // first run) in start().  Its public key is shared out-of-band with the

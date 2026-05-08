@@ -53,6 +53,20 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             session.set_stun_server(stun);
         }
     }
+    if (cfg.relay_server && *cfg.relay_server
+        && cfg.relay_session_hex && *cfg.relay_session_hex) {
+        net::SocketAddr rly = net::resolve_host_port(cfg.relay_server);
+        uint8_t sid[32];
+        if (rly.ip == 0) {
+            log::warn("VIEW", "Could not resolve relay '%s' — disabling", cfg.relay_server);
+        } else if (!crypto::hex_decode_32(cfg.relay_session_hex, sid)) {
+            log::error("VIEW", "Invalid --relay-session — expected 64 lowercase hex chars");
+            return 1;
+        } else {
+            session.set_relay(rly, sid);
+            log::info("VIEW", "Relay: %s (session set)", cfg.relay_server);
+        }
+    }
     if (cfg.rendezvous_server && *cfg.rendezvous_server
         && cfg.peer_pubkey_hex && *cfg.peer_pubkey_hex) {
         net::SocketAddr rdv = net::resolve_host_port(cfg.rendezvous_server);

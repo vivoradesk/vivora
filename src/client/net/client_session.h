@@ -48,6 +48,15 @@ public:
     // used only as a fallback if the lookup fails.
     void set_rendezvous(const net::SocketAddr& addr) { rendezvous_addr_ = addr; }
     void set_peer_pubkey(const uint8_t pubkey[32]);
+
+    // Optional explicit relay endpoint + 32-byte session id agreed with
+    // the host out of band.  When set, start() BINDs to the relay before
+    // the first HELLO and all subsequent host-bound traffic is wrapped
+    // in DBRL DATA frames; incoming DBRL DATA from the relay is unwrapped
+    // and dispatched as if it came directly from the host.  Manual flag
+    // for now (testing); a future commit will trigger this automatically
+    // when direct hole-punching times out.
+    void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
     // Lookup-by-code variant: rendezvous resolves the code to a pubkey
     // server-side and the client receives the pubkey alongside the
     // reflexive endpoint.  Mutually exclusive with set_peer_pubkey.
@@ -181,6 +190,21 @@ private:
     static constexpr size_t MAX_LAN_CANDIDATES = 4;
     net::SocketAddr lookup_lan_[MAX_LAN_CANDIDATES]{};
     uint8_t         lookup_lan_count_ = 0;
+
+    // Relay: target endpoint, agreed-on session id, and runtime state.
+    // When relay_active_ is true, every host-bound packet is wrapped in
+    // DBRL DATA before going on the wire; conversely, DBRL DATA arriving
+    // from relay_addr_ is unwrapped and re-fed through handle_packet as
+    // if from the host.
+    net::SocketAddr relay_addr_{};
+    uint8_t         relay_session_id_[32] = {};
+    bool            relay_session_set_    = false;
+    uint8_t         relay_alloc_id_[8]    = {};
+    bool            relay_active_         = false;
+    TimePoint       last_relay_keepalive_{};
+    bool relay_bind_blocking();          // synchronous BIND + ACK during start()
+    bool transport_send(const uint8_t* data, size_t len);   // wrap or direct
+    void relay_send_keepalive();
     // Synchronous LOOKUP at the rendezvous.  Writes the connectable endpoint
     // into `out` on success and (for the by-code variant) the resolved
     // pubkey into `out_pk` so the caller can finish Noise_NK setup.  Blocks

@@ -1,6 +1,7 @@
 #include "client/net/client_session.h"
 #include "common/crypto/packet_crypto.h"
 #include "common/crypto/peer_pin.h"
+#include "common/net/relay_protocol.h"
 #include "common/net/rendezvous_protocol.h"
 #include "common/net/stun_client.h"
 #include "common/protocol/cursor_message.h"
@@ -23,6 +24,12 @@ void ClientSession::set_host_key(const uint8_t host_pk[32]) {
 void ClientSession::set_peer_pubkey(const uint8_t pubkey[32]) {
     std::memcpy(peer_pubkey_, pubkey, 32);
     peer_pubkey_set_ = true;
+}
+
+void ClientSession::set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]) {
+    relay_addr_ = addr;
+    std::memcpy(relay_session_id_, session_id, 32);
+    relay_session_set_ = true;
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
@@ -156,6 +163,17 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
         audio_local_port_ = 0;
     }
 
+    // Relay path: when explicitly configured, BIND now and from this point
+    // on every host-bound packet goes through transport_send → relay.
+    // Done before HELLO so the handshake itself rides the relay.
+    if (relay_session_set_ && relay_addr_.ip != 0) {
+        if (!relay_bind_blocking()) {
+            log::error("ClientSession",
+                "Relay required but BIND failed — refusing to start");
+            return false;
+        }
+    }
+
     // Same-NAT short-circuit.  If our reflexive matches the host's, we're
     // both behind the same router and the public-IP punch path requires
     // hairpin NAT — usually broken on consumer routers.  Try the first
@@ -240,6 +258,16 @@ void ClientSession::stop_audio() {
 
 void ClientSession::poll() {
     if (!socket_) return;
+
+    // Refresh the relay binding well before TTL (server uses 60s); this
+    // also keeps any NAT pinhole alive on long-quiet sessions.
+    if (relay_active_) {
+        const auto now = Clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(
+                now - last_relay_keepalive_).count() >= 20) {
+            relay_send_keepalive();
+        }
+    }
 
     uint8_t buf[RECV_BUF_SIZE];
     net::SocketAddr sender;
@@ -440,6 +468,23 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
     if (len >= 4 && data[0] == 'D' && data[1] == 'B' && data[2] == 'R' && data[3] == 'V') {
         return;
     }
+    // Relay-forwarded payload arrives wrapped in DBRL DATA — strip the
+    // header and re-feed the inner payload through this same handler.
+    // BIND_ACK is consumed inline in relay_bind_blocking() during start(),
+    // not here; if we see one at steady state it's a stray, drop it.
+    if (len >= 4 && data[0] == 'D' && data[1] == 'B' && data[2] == 'R' && data[3] == 'L') {
+        namespace rly = net::relay;
+        rly::MsgType t; size_t poff = 0, plen = 0;
+        if (!rly::parse_header(data, len, t, poff, plen)) return;
+        if (t != rly::MsgType::Data) return;
+        uint8_t aid[8]; const uint8_t* inner = nullptr; size_t inner_len = 0;
+        if (!rly::decode_data(data + poff, plen, aid, &inner, &inner_len)) return;
+        // Verify alloc id matches our binding.  Mismatch = stray traffic
+        // for someone else, drop.
+        if (std::memcmp(aid, relay_alloc_id_, 8) != 0) return;
+        handle_packet(inner, inner_len);
+        return;
+    }
     if (len < protocol::PacketHeader::WIRE_SIZE) return;
 
     auto header = protocol::PacketHeader::deserialize(data);
@@ -514,8 +559,7 @@ bool ClientSession::send_sealed(const std::vector<uint8_t>& wire) {
         log::warn("ClientSession", "seal_packet failed (nonce exhausted?)");
         return false;
     }
-    int r = socket_->send_to(sealed, sealed_len, host_addr_);
-    return r >= 0;
+    return transport_send(sealed, sealed_len);
 }
 
 void ClientSession::handle_control(const uint8_t* payload, size_t len) {
@@ -697,7 +741,7 @@ void ClientSession::send_hello() {
     hello.header.payload_len = static_cast<uint16_t>(hello.payload.size());
 
     auto wire = hello.serialize();
-    socket_->send_to(wire.data(), wire.size(), host_addr_);
+    transport_send(wire.data(), wire.size());
     last_hello_time_ = Clock::now();
 }
 
@@ -944,6 +988,80 @@ void ClientSession::send_fec_report() {
 
 uint64_t ClientSession::frames_dropped() const {
     return receiver_ ? receiver_->frames_dropped() : 0;
+}
+
+bool ClientSession::transport_send(const uint8_t* data, size_t len) {
+    if (!socket_) return false;
+    if (relay_active_) {
+        namespace rly = net::relay;
+        uint8_t buf[rly::MAX_DATA_PACKET];
+        const size_t n = rly::encode_data(buf, sizeof(buf), relay_alloc_id_, data, len);
+        if (n == 0) return false;
+        return socket_->send_to(buf, n, relay_addr_) >= 0;
+    }
+    return socket_->send_to(data, len, host_addr_) >= 0;
+}
+
+void ClientSession::relay_send_keepalive() {
+    if (!relay_active_ || !socket_) return;
+    namespace rly = net::relay;
+    rly::KeepalivePayload k{};
+    std::memcpy(k.alloc_id, relay_alloc_id_, 8);
+    uint8_t buf[rly::MAX_CONTROL_PACKET];
+    const size_t n = rly::encode_keepalive(buf, sizeof(buf), k);
+    if (n == 0) return;
+    socket_->send_to(buf, n, relay_addr_);
+    last_relay_keepalive_ = Clock::now();
+}
+
+bool ClientSession::relay_bind_blocking() {
+    if (!socket_ || !relay_session_set_ || relay_addr_.ip == 0) return false;
+    namespace rly = net::relay;
+    rly::BindPayload b{};
+    std::memcpy(b.session_id, relay_session_id_, 32);
+    uint8_t txbuf[rly::MAX_CONTROL_PACKET];
+    const size_t txlen = rly::encode_bind(txbuf, sizeof(txbuf), b);
+    if (txlen == 0) return false;
+
+    log::info("ClientSession", "Relay BIND at %u.%u.%u.%u:%u",
+              (relay_addr_.ip >>  0) & 0xff, (relay_addr_.ip >>  8) & 0xff,
+              (relay_addr_.ip >> 16) & 0xff, (relay_addr_.ip >> 24) & 0xff,
+              relay_addr_.port);
+
+    // Same retry shape as lookup_via_rendezvous: 200ms tries, 3s total.
+    const auto start = std::chrono::steady_clock::now();
+    auto next_send = start;
+    uint8_t rxbuf[rly::MAX_DATA_PACKET];
+    while (true) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - start > std::chrono::seconds(3)) break;
+        if (now >= next_send) {
+            socket_->send_to(txbuf, txlen, relay_addr_);
+            next_send = now + std::chrono::milliseconds(200);
+        }
+        net::SocketAddr sender;
+        const int n = socket_->recv_from(rxbuf, sizeof(rxbuf), sender);
+        if (n > 0 && n >= 4 && rxbuf[0] == 'D' && rxbuf[1] == 'B'
+            && rxbuf[2] == 'R' && rxbuf[3] == 'L') {
+            rly::MsgType t; size_t poff = 0, plen = 0;
+            if (!rly::parse_header(rxbuf, static_cast<size_t>(n), t, poff, plen)) continue;
+            if (t != rly::MsgType::BindAck) continue;
+            rly::BindAckPayload ack{};
+            if (!rly::decode_bind_ack(rxbuf + poff, plen, ack)) continue;
+            std::memcpy(relay_alloc_id_, ack.alloc_id, 8);
+            relay_active_         = true;
+            last_relay_keepalive_ = std::chrono::steady_clock::now();
+            log::info("ClientSession",
+                "Relay bound: alloc=%02x%02x%02x%02x%02x%02x%02x%02x paired=%d ttl=%us",
+                ack.alloc_id[0], ack.alloc_id[1], ack.alloc_id[2], ack.alloc_id[3],
+                ack.alloc_id[4], ack.alloc_id[5], ack.alloc_id[6], ack.alloc_id[7],
+                ack.paired, ack.ttl_seconds);
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    log::error("ClientSession", "Relay BIND timed out");
+    return false;
 }
 
 bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[32]) {

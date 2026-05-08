@@ -30,6 +30,13 @@ public:
 
     void reset_retx_budget() { retx_budget_ = MAX_RETX_PER_POLL; }
 
+    // Toggle relay mode: every send_prepared() / NACK retx wraps the
+    // wire packet in DBRL DATA and ships it to relay_addr instead of
+    // the per-client `dest`.  Set once after HostSession's BIND succeeds.
+    void set_relay_active(const net::SocketAddr& relay_addr,
+                          const uint8_t alloc_id[8]);
+    void clear_relay() { relay_active_ = false; }
+
     // Prepare a frame for sending: fragment, generate FEC, store in retx buffer.
     // Call once per frame, then send_prepared() for each destination.
     // fec_enabled=false skips FEC group accumulation/parity for this frame —
@@ -107,6 +114,13 @@ private:
     const std::vector<uint8_t>* find_retx(uint32_t key) const;
 
     net::IUdpSocket& socket_;
+
+    // Relay state.  When relay_active_, every dest passed to send_prepared
+    // is ignored at the wire layer (peer is implied by the binding) and
+    // the wire packet goes wrapped in DBRL DATA to relay_addr_.
+    bool            relay_active_ = false;
+    net::SocketAddr relay_addr_{};
+    uint8_t         relay_alloc_id_[8] = {};
     net::FrameFragmenter fragmenter_;
     net::FecEncoder fec_encoder_;
 

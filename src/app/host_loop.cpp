@@ -1,5 +1,6 @@
 #include "app/host_loop.h"
 #include "common/audio/audio_capture.h"
+#include "common/crypto/host_identity.h"   // hex_decode_32
 #include "common/codec/bitrate_controller.h"
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
@@ -67,6 +68,20 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         } else {
             session.set_rendezvous(rdv);
             log::info("HOST", "Rendezvous: %s", cfg.rendezvous_server);
+        }
+    }
+    if (cfg.relay_server && *cfg.relay_server
+        && cfg.relay_session_hex && *cfg.relay_session_hex) {
+        net::SocketAddr rly = net::resolve_host_port(cfg.relay_server);
+        uint8_t sid[32];
+        if (rly.ip == 0) {
+            log::warn("HOST", "Could not resolve relay '%s' — disabling", cfg.relay_server);
+        } else if (!crypto::hex_decode_32(cfg.relay_session_hex, sid)) {
+            log::error("HOST", "Invalid --relay-session — expected 64 lowercase hex chars");
+            return 1;
+        } else {
+            session.set_relay(rly, sid);
+            log::info("HOST", "Relay: %s (session set)", cfg.relay_server);
         }
     }
     if (!session.start(cfg.port)) {

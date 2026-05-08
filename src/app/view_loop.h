@@ -21,6 +21,9 @@ struct ViewLoopConfig {
     const char* rendezvous_server = nullptr;
     // Same hex format as --host-key; identifies which host to look up.
     const char* peer_pubkey_hex = nullptr;
+    // Optional relay endpoint + agreed session id (64 hex chars).
+    const char* relay_server  = nullptr;
+    const char* relay_session_hex = nullptr;
 };
 
 // Run the view (client) main loop.  Blocks until disconnected or window closed.

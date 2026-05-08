@@ -17,6 +17,12 @@ struct HostLoopConfig {
     // Optional rendezvous server "host:port".  When set, the host registers
     // its long-term pubkey at the rendezvous so peers can locate it by id.
     const char* rendezvous_server = nullptr;
+    // Optional relay endpoint + 32-byte session id (64 hex chars). When
+    // both are set, host BINDs at the relay and routes every client-bound
+    // packet through DBRL DATA. Manual flag for now (testing); becomes
+    // automatic when direct hole-punching times out in a later iteration.
+    const char* relay_server  = nullptr;
+    const char* relay_session_hex = nullptr;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

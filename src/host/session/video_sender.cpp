@@ -1,4 +1,6 @@
 #include "host/session/video_sender.h"
+#include "common/net/relay_protocol.h"
+#include <cstring>
 #include "common/crypto/packet_crypto.h"
 #include "common/utils/log.h"
 #include <algorithm>
@@ -109,7 +111,18 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             out_data = wire.data();
             out_len  = wire.size();
         }
-        int r = socket_.send_to(out_data, out_len, dest);
+        int r;
+        if (relay_active_) {
+            namespace rly = net::relay;
+            uint8_t wrap[rly::MAX_DATA_PACKET];
+            const size_t wn = rly::encode_data(wrap, sizeof(wrap),
+                                               relay_alloc_id_, out_data, out_len);
+            if (wn == 0) return -1;
+            (void)dest;  // ignored under relay; binding implies the peer
+            r = socket_.send_to(wrap, wn, relay_addr_);
+        } else {
+            r = socket_.send_to(out_data, out_len, dest);
+        }
         if (r < 0) {
             log::error("VideoSender", "send_to failed at packet %d/%zu", sent, prepared_wires_.size());
             return -1;
@@ -162,7 +175,18 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
             out_data = nack_send_buf_.data();
             out_len  = nack_send_buf_.size();
         }
-        int r = socket_.send_to(out_data, out_len, dest);
+        int r;
+        if (relay_active_) {
+            namespace rly = net::relay;
+            uint8_t wrap[rly::MAX_DATA_PACKET];
+            const size_t wn = rly::encode_data(wrap, sizeof(wrap),
+                                               relay_alloc_id_, out_data, out_len);
+            if (wn == 0) return -1;
+            (void)dest;  // ignored under relay; binding implies the peer
+            r = socket_.send_to(wrap, wn, relay_addr_);
+        } else {
+            r = socket_.send_to(out_data, out_len, dest);
+        }
         if (r < 0) continue;
         bytes_sent_ += r;
         packets_sent_++;
@@ -314,6 +338,13 @@ void VideoSender::on_rtt(double rtt_ms) {
             rtt_normal_count_ = 0;
         }
     }
+}
+
+void VideoSender::set_relay_active(const net::SocketAddr& relay_addr,
+                                   const uint8_t alloc_id[8]) {
+    relay_addr_   = relay_addr;
+    std::memcpy(relay_alloc_id_, alloc_id, 8);
+    relay_active_ = true;
 }
 
 } // namespace deskbeam::host

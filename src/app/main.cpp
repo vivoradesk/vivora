@@ -57,6 +57,9 @@ static void print_usage(const char* prog) {
     std::printf("  --rendezvous HP   Rendezvous server \"host:port\" (host registers, view looks up)\n");
     std::printf("  --peer HEX        (view) Peer host's pubkey to look up at the rendezvous\n");
     std::printf("                    — same hex as --host-key; --view IP becomes a fallback\n");
+    std::printf("  --relay HP        Relay server \"host:port\" — when paired with --relay-session,\n");
+    std::printf("                    routes all peer-bound traffic through the relay (DBRL DATA)\n");
+    std::printf("  --relay-session HEX  64-char hex shared 32-byte session id; both peers must match\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -85,6 +88,8 @@ int main(int argc, char* argv[]) {
     const char* host_key_hex = nullptr;
     const char* rendezvous_server = nullptr;
     const char* peer_pubkey_hex = nullptr;
+    const char* relay_server = nullptr;
+    const char* relay_session_hex = nullptr;
 
     for (int i = 1; i < argc; ++i) {
         const char* v = nullptr;
@@ -130,6 +135,10 @@ int main(int argc, char* argv[]) {
             rendezvous_server = v;
         } else if ((v = flag_value("--peer", argv, argc, i)) != nullptr) {
             peer_pubkey_hex = v;
+        } else if ((v = flag_value("--relay", argv, argc, i)) != nullptr) {
+            relay_server = v;
+        } else if ((v = flag_value("--relay-session", argv, argc, i)) != nullptr) {
+            relay_session_hex = v;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -181,6 +190,8 @@ int main(int argc, char* argv[]) {
 #endif
         lcfg.stun_server = stun_server;
         lcfg.rendezvous_server = rendezvous_server;
+        lcfg.relay_server = relay_server;
+        lcfg.relay_session_hex = relay_session_hex;
         return deskbeam::run_host_loop(platform, lcfg);
     }
 
@@ -216,6 +227,8 @@ int main(int argc, char* argv[]) {
         vcfg.host_key_hex = host_key_hex;
         vcfg.rendezvous_server = rendezvous_server;
         vcfg.peer_pubkey_hex = peer_pubkey_hex;
+        vcfg.relay_server = relay_server;
+        vcfg.relay_session_hex = relay_session_hex;
         return deskbeam::run_view_loop(platform, vcfg);
     }
 
