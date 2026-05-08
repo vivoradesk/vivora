@@ -316,13 +316,53 @@ Scope:
 - [ ] CI/CD: автоматические билды для Windows/Linux
 - [ ] Документация: setup guide, build guide, architecture docs
 
-### Фаза 4: Monetization (ongoing)
-- [ ] Web-based admin console (Pro feature)
-- [ ] Device management dashboard (Pro feature)
-- [ ] Audit logs (Pro feature)
-- [ ] Custom branding / white-label client (Pro feature)
+### Фаза 4: Monetization (0.1 launch + ongoing)
+
+#### Open / Closed разделение
+- **Open source (AGPL-3.0):**
+  - `deskbeam/deskbeam` — клиент + хост (всё ядро функциональности)
+  - `deskbeam/deskbeam-relay` — relay daemon (self-host)
+  - `deskbeam/deskbeam-rendezvous` — rendezvous server (self-host)
+- **Closed source (proprietary):**
+  - `deskbeam-cloud` — account system, license server, address book sync, managed relay auth
+  - `deskbeam-console` — web admin console для команд (будущее)
+
+#### Free tier (open source, AGPL-3.0)
+- Полное качество стрима, все фичи клиента
+- Direct IP подключения без ограничений
+- Self-hosted relay/rendezvous (любой может поднять полную инфраструктуру)
+- Локальный address book (без cloud sync)
+- Personal use only (AGPL обязывает open-source при коммерческом использовании)
+- Multi-monitor, all codecs, all features
+
+#### Pro tier — $9.90/мес или $99/год (для 0.1 launch)
+- Commercial use license (dual licensing, без AGPL обязательств)
+- Доступ к public managed relay (на инфраструктуре DeskBeam)
+- Cloud sync address book между устройствами
+- Priority support
+- Чекаут через Paddle (Merchant of Record для UA)
+
+**Ключевой принцип:** все Pro-фичи завязаны на серверную инфраструктуру (account auth, managed relay, cloud sync). Технически невозможно "обойти" Pro патчингом клиента — клиент сам ничего не блокирует, но без валидного Pro-аккаунта закрытые endpoints на сервере не отвечают.
+
+#### Технические компоненты для 0.1 launch monetization
+- [ ] License key system (JWT с подписью, проверка на клиенте offline)
+- [ ] Account backend (email + password, привязка лицензии)
+- [ ] Paddle integration + webhook для генерации license keys
+- [ ] Address book cloud sync API
+- [ ] Relay auth (только Pro-аккаунты используют public relay)
+
+#### Будущие Pro-фичи (отложено до 0.3+)
+- [ ] Web-based admin console (для команд)
+- [ ] Device management dashboard
+- [ ] Audit logs
+- [ ] LDAP / SAML SSO
+- [ ] Custom branding / white-label client
 - [ ] API для интеграций
 - [ ] Enterprise deployment tools
+
+#### Юридическая защита через AGPL
+- AGPL заставляет коммерческих пользователей либо открывать свой код под AGPL, либо покупать commercial license
+- Это стандартная dual-licensing модель (как у MongoDB, MySQL, Grafana)
 
 ---
 

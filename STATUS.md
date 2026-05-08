@@ -155,55 +155,77 @@ In priority order. Tier numbers match the historical roadmap.
 
 ---
 
-## Open question — should we run a public relay?
+## Monetization model (per docs/PROJECT_SPEC.md, updated 2026-05-08)
 
-The relay daemon proxies media traffic peer-to-peer when STUN-based hole-punching fails. Status is "code not written, decision pending."
+The 0.1 launch ships with a paid tier from day one.  Spec change moves us from "open OSS, paid console later" to a clear dual-licensing split.
 
-### Why we'd want it
+### Open / closed split
 
-NAT-traversal coverage today:
+| Component                                  | License            | Hosted by us                    |
+| ------------------------------------------ | ------------------ | ------------------------------- |
+| `deskbeam` (client + host)                 | **AGPL-3.0**       | n/a — runs on user machines     |
+| `deskbeam-rendezvous`                      | **AGPL-3.0**       | ✅ free public (Oracle Free Tier) |
+| `deskbeam-relay`                           | **AGPL-3.0**       | **Pro only** — see below         |
+| `deskbeam-cloud` (accounts, licenses, sync)| Closed proprietary | Pro infrastructure              |
+| `deskbeam-console` (web admin)             | Closed proprietary | Future (≥0.3)                   |
 
-| Scenario                                     | Today's behaviour                       |
-| -------------------------------------------- | --------------------------------------- |
-| Home WiFi ↔ home WiFi (different ISPs)        | ✅ STUN punch (~95% success)             |
-| Same NAT (one router, two devices)           | ✅ LAN candidate (step 5.1)              |
-| Mobile (4G/5G) on at least one side          | ⚠️ ~50-70% — CGNAT often symmetric       |
-| Corporate / restrictive firewall             | ❌ — UDP often blocked                   |
+Anyone can self-host the relay + rendezvous from the AGPL repo.  The DeskBeam-operated relay is gated behind a Pro account.
 
-So **~10-20% of real-world sessions fall through.** Without relay, those users see "doesn't work" and leave.
+### Free tier — AGPL, personal use
 
-### Why we hesitate
+- Full streaming quality, every client feature (multi-monitor, all codecs, HDR, etc.)
+- Direct IP connection — unlimited
+- Rendezvous via the public free server (or self-hosted)
+- LAN candidates / hole-punching — full P2 stack
+- Local address book (no cloud sync)
+- AGPL forces open-source for any commercial use → effectively personal-use-only without paying
 
-Relay carries **all** media traffic. At 1080p60 HEVC ~15 Mbps:
+### Pro tier — $9.90 / mo or $99 / year (0.1 launch)
+
+- **Commercial license** (drops the AGPL obligation — standard MongoDB / Grafana model)
+- **Access to the DeskBeam-operated public relay** (closes the symmetric-NAT / CGNAT gap without self-hosting)
+- **Cloud-synced address book** across user's devices
+- Priority support
+- Checkout via Paddle (Merchant of Record for UA — handles tax + chargebacks)
+
+**Anti-piracy posture:** Pro features are gated server-side. The AGPL client itself never blocks anything; it just can't authenticate against the Pro endpoints (managed relay, address-book sync) without a valid license token. Patching the binary buys nothing.
+
+### What this means for relay engineering
+
+The relay code is **needed** — both as the AGPL self-host artefact and as the foundation of the Pro managed relay. Two things to build:
+
+1. **`deskbeam-relay` daemon** — UDP forwarder, allocate-on-demand. Open-source, self-hostable.  Same shape as the rendezvous: small standalone binary, systemd unit, deploy script.
+2. **License auth for the managed instance** — only the Pro-operated relay checks license tokens. Self-hosted instances skip the check (no `--require-license` flag, or off by default).
+
+NAT-traversal coverage with this in place:
+
+| Scenario                                     | Today                  | With relay (Pro)        |
+| -------------------------------------------- | ---------------------- | ----------------------- |
+| Home WiFi ↔ home WiFi (different ISPs)        | ✅ STUN punch ~95%      | ✅ same                  |
+| Same NAT (one router)                        | ✅ LAN candidate        | ✅ same                  |
+| Mobile (4G/5G), one side                     | ⚠️ ~50–70% (CGNAT)      | ✅ relay covers the rest |
+| Corporate / UDP-blocked                      | ❌ broken               | ✅ relay if reachable    |
+| Self-host relay (Free tier)                  | n/a                    | ✅ same coverage         |
+
+### Bandwidth cost reminder (informs Pro pricing)
+
+Relay carries the full media stream. At 1080p60 HEVC ≈ 15 Mbps:
 
 - 1 hour ≈ 6.7 GB
-- 8 hours/day × 30 days = ~1.6 TB / month / user
+- 8 h/day × 30 days ≈ 1.6 TB / month / heavy user
 
-Egress is the cost driver:
+Provider economics (egress):
 
-| Provider              | Plan / month | Bandwidth allowance               |
-| --------------------- | ------------ | --------------------------------- |
-| **Oracle Free Tier**  | $0           | **10 TB egress** (~6 daily users) |
-| **Hetzner CCX23**     | €27          | 20 TB included, then €1/TB        |
-| **AWS / GCP**         | $$$          | $0.05–0.09/GB → ~$130/TB          |
+| Provider              | Plan / month | Bandwidth                         | Notes                                |
+| --------------------- | ------------ | --------------------------------- | ------------------------------------ |
+| Oracle Cloud Free     | $0           | 10 TB egress / mo                 | Fits the rendezvous; not enough for relay at any meaningful scale |
+| Hetzner CCX23         | €27          | 20 TB included, €1/TB after       | ~12–15 sustained streams; main candidate for Pro relay |
+| AWS / GCP             | $$$          | $0.05–0.09 / GB                   | Out of the question for streaming relay |
 
-Hetzner / Oracle are workable. Hyperscalers are out of the question.
+At $9.90/mo a Pro user has to bring in less than one Hetzner CCX23's worth of bandwidth to be cost-neutral — comfortable headroom even for heavy users.
 
-### Options
+### Roadmap impact
 
-1. **Do nothing.** Tell the 10–20% to use Tailscale / WireGuard. Cheapest, but visibly broken.
-2. **Ship code, never host.** Like WireGuard / Sunshine — power users self-host, normals don't.
-3. **Tiered hosted relay.** Free with quotas (e.g. 5 GB/month), paid for unlimited. Needs accounts + billing — large lift.
-4. **Free hosted relay on Oracle Free Tier.** No accounts, no quotas. Burns the 10 TB/month — fits ~6 daily users at 8 h. Move to paid VPS when we outgrow it.
-5. **Bundle into a future paid console tier** (matches `project_monetization` strategy).
-
-### Recommendation
-
-**Build the code now (option 2), host it on the same Oracle box as the rendezvous (option 4) until the bandwidth bites.** Then either move to Hetzner (~€27/mo for early scale) or introduce quotas (option 3) or fold it into the Pro tier (option 5).
-
-Up-front cost: $0. Code lift: ~1-2 sessions. Doors that open:
-- "Just works" experience for mobile / corporate users.
-- Code asset for the future console product.
-- Operational pattern for the eventual paid tier.
-
-Decision is the user's. The roadmap reflects "step 5.2 = pending" until called.
+- The "do we host a free public relay" question is **closed: no.** Public relay is a Pro feature.
+- The relay daemon code (open-source, AGPL) is the next chunk of P2 step 5.2.
+- A new tier (P6 — 0.1 launch monetization) covers the closed-source infra: license JWT system, account backend, Paddle integration, address-book sync API, relay license-token check.
