@@ -51,8 +51,25 @@ SCP_OPTS+=(-o StrictHostKeyChecking=accept-new)
 echo "==> Uploading binary + unit file to $HOSTPART"
 scp "${SCP_OPTS[@]}" "$BIN" "$SERVICE_FILE" "$HOSTPART:/tmp/" 1>/dev/null
 
+# Optional: also upload the license public key.  Pulled from
+# LICENSE_PK env var (path to local file).  If unset and the
+# unit file references --require-license, deployment will still
+# work but the relay will refuse to start until the file is on
+# disk under /etc/deskbeam/license.pk.
+if [[ -n "${LICENSE_PK:-}" ]]; then
+    if [[ ! -f "$LICENSE_PK" ]]; then
+        echo "LICENSE_PK=$LICENSE_PK does not exist" >&2
+        exit 1
+    fi
+    scp "${SCP_OPTS[@]}" "$LICENSE_PK" "$HOSTPART:/tmp/license.pk" 1>/dev/null
+    UPLOAD_LICENSE_PK=1
+else
+    UPLOAD_LICENSE_PK=0
+fi
+export UPLOAD_LICENSE_PK
+
 echo "==> Installing on remote"
-ssh "${SSH_OPTS[@]}" "$HOSTPART" 'bash -s' <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$HOSTPART" "UPLOAD_LICENSE_PK=$UPLOAD_LICENSE_PK bash -s" <<'REMOTE'
 set -euo pipefail
 
 # 'deskbeam' user comes from deploy-rendezvous.sh; create if missing
@@ -67,6 +84,15 @@ echo "  + /usr/local/bin/deskbeam-relay installed"
 
 sudo install -m 0644 -o root -g root /tmp/deskbeam-relay.service /etc/systemd/system/
 echo "  + /etc/systemd/system/deskbeam-relay.service installed"
+
+# Install license public key if uploaded.  /etc/deskbeam is created with
+# 0755 so the deskbeam user can read the key under ProtectSystem=strict.
+if [[ "${UPLOAD_LICENSE_PK:-0}" == "1" ]]; then
+    sudo mkdir -p /etc/deskbeam
+    sudo install -m 0644 -o root -g root /tmp/license.pk /etc/deskbeam/license.pk
+    rm -f /tmp/license.pk
+    echo "  + /etc/deskbeam/license.pk installed"
+fi
 
 if command -v ufw &>/dev/null; then
     sudo ufw allow 7100/udp >/dev/null 2>&1 || true

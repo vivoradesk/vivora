@@ -6,7 +6,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/deskbeam-relay --port 7100
+# Pro-managed mode: reject BINDs without a valid Ed25519 license token
+# verified against the public key at /etc/deskbeam/license.pk.  The
+# deploy script ensures that file is in place before starting the unit.
+# Self-host operators can drop --require-license from this line and put
+# the path back to /usr/local/bin/deskbeam-relay --port 7100.
+ExecStart=/usr/local/bin/deskbeam-relay --port 7100 --require-license /etc/deskbeam/license.pk
 Restart=on-failure
 RestartSec=2
 # Same dedicated unprivileged user the rendezvous unit creates.
