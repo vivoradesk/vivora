@@ -6,7 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/deskbeam-rendezvous --port 7000
+# --relay-endpoint advertises the Pro relay to peers so they pick it up
+# automatically (no manual --relay-session HEX64 coordination). Drop it
+# for a rdv-only self-host setup where peers wire the relay themselves.
+ExecStart=/usr/local/bin/deskbeam-rendezvous --port 7000 --relay-endpoint 89.168.124.37:7100
 Restart=on-failure
 RestartSec=2
 # Run as a dedicated unprivileged user (created by deploy-rendezvous.sh).
