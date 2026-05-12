@@ -99,6 +99,10 @@ public:
     // session_id, one binding); multi-client relay needs per-client
     // session_ids minted by the rendezvous, deferred to a later commit.
     void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
+    // Endpoint-only: configure relay, but leave session_id to be filled
+    // from the rendezvous RegisterAck.  Used when --relay is passed
+    // without --relay-session.
+    void set_relay_endpoint(const net::SocketAddr& addr) { relay_addr_ = addr; }
     // Optional 95-byte license token attached to the relay BIND.  Required
     // when the configured relay enforces --require-license; ignored by
     // self-host instances.

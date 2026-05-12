@@ -1141,6 +1141,17 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
                             lookup_lan_[i].ip   = p.lan[i].ip;
                             lookup_lan_[i].port = p.lan[i].port;
                         }
+                        // If the rendezvous advertised a relay AND the
+                        // user enabled --relay without pinning a session_id,
+                        // adopt the rendezvous-minted session_id now.  The
+                        // BIND happens later in start() once we've returned.
+                        if (p.relay_ip != 0
+                            && relay_addr_.ip != 0 && !relay_session_set_) {
+                            std::memcpy(relay_session_id_, p.session_id, 32);
+                            relay_session_set_ = true;
+                            log::info("ClientSession",
+                                "Using rendezvous-minted relay session_id");
+                        }
                         return true;
                     } else {
                         log::warn("ClientSession",

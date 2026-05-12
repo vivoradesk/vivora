@@ -57,6 +57,10 @@ public:
     // for now (testing); a future commit will trigger this automatically
     // when direct hole-punching times out.
     void set_relay(const net::SocketAddr& addr, const uint8_t session_id[32]);
+    // Endpoint-only: configure relay, but leave session_id to be filled
+    // from the rendezvous LookupResponse.  Used when --relay is passed
+    // without --relay-session.
+    void set_relay_endpoint(const net::SocketAddr& addr) { relay_addr_ = addr; }
     // Optional: provide a 95-byte license token to attach to the relay
     // BIND.  Only required when the configured relay enforces
     // --require-license (Pro-managed).  Self-host instances ignore it.

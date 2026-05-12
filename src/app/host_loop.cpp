@@ -71,18 +71,29 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             log::info("HOST", "Rendezvous: %s", cfg.rendezvous_server);
         }
     }
-    if (cfg.relay_server && *cfg.relay_server
-        && cfg.relay_session_hex && *cfg.relay_session_hex) {
+    if (cfg.relay_server && *cfg.relay_server) {
         net::SocketAddr rly = net::resolve_host_port(cfg.relay_server);
-        uint8_t sid[32];
         if (rly.ip == 0) {
             log::warn("HOST", "Could not resolve relay '%s' — disabling", cfg.relay_server);
-        } else if (!crypto::hex_decode_32(cfg.relay_session_hex, sid)) {
-            log::error("HOST", "Invalid --relay-session — expected 64 lowercase hex chars");
-            return 1;
         } else {
-            session.set_relay(rly, sid);
-            log::info("HOST", "Relay: %s (session set)", cfg.relay_server);
+            uint8_t sid[32]{};
+            bool have_sid = false;
+            if (cfg.relay_session_hex && *cfg.relay_session_hex) {
+                if (!crypto::hex_decode_32(cfg.relay_session_hex, sid)) {
+                    log::error("HOST", "Invalid --relay-session — expected 64 lowercase hex chars");
+                    return 1;
+                }
+                have_sid = true;
+            }
+            // Manual session_id pin OR wait for the rendezvous-minted one
+            // (filled in HostSession::handle_rendezvous_packet on RegisterAck).
+            if (have_sid) {
+                session.set_relay(rly, sid);
+                log::info("HOST", "Relay: %s (session pinned via --relay-session)", cfg.relay_server);
+            } else {
+                session.set_relay_endpoint(rly);
+                log::info("HOST", "Relay: %s (session will come from rendezvous)", cfg.relay_server);
+            }
             if (cfg.license_file && *cfg.license_file) {
                 std::ifstream lf(cfg.license_file, std::ios::binary);
                 uint8_t token[95];

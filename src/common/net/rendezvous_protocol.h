@@ -70,12 +70,25 @@ static_assert(sizeof(RegisterPayload) == 32 + 4 + 8 * MAX_LAN_CANDIDATES,
 // RegisterAck: tells the host what reflexive endpoint the rendezvous
 // recorded.  Host can compare against its own STUN-discovered address and
 // log a warning on mismatch (catches multi-NAT hairpinning weirdness).
+//
+// Optional relay assignment.  When the rendezvous server is configured
+// with --relay-endpoint, every RegisterAck also carries the relay
+// endpoint plus a server-minted 32-byte session_id that's specific to
+// this host registration.  Both peers (host here, and the client when
+// it later does Lookup) get the same session_id, so no manual
+// --relay-session HEX64 coordination is needed any more.
+//
+// Wire shape:
+//   relay_ip = 0 → bare 8-byte payload (legacy, no relay info)
+//   relay_ip != 0 → 8 + 38 = 46 bytes total
 struct RegisterAckPayload {
     uint32_t reflexive_ip;     // network byte order
     uint16_t reflexive_port;   // host byte order
     uint16_t ttl_seconds;      // when registration expires unless refreshed
+    uint32_t relay_ip = 0;     // 0 means "no relay configured by this rdv"
+    uint16_t relay_port = 0;
+    uint8_t  session_id[32] = {};
 };
-static_assert(sizeof(RegisterAckPayload) == 8, "RegisterAckPayload must be packed");
 
 // Lookup: client wants to reach the host identified by pubkey.
 struct LookupPayload {
@@ -95,9 +108,12 @@ struct LookupResponsePayload {
     uint8_t  found;
     uint8_t  lan_count;                                 // 0..MAX_LAN_CANDIDATES
     LanCandidate lan[MAX_LAN_CANDIDATES];               // valid: [0..lan_count)
+    // Optional relay info — same shape as RegisterAckPayload's tail.
+    // relay_ip = 0 → wire payload is the legacy 72-byte form (no relay).
+    uint32_t relay_ip = 0;
+    uint16_t relay_port = 0;
+    uint8_t  session_id[32] = {};
 };
-static_assert(sizeof(LookupResponsePayload) == 40 + 8 * MAX_LAN_CANDIDATES,
-              "LookupResponsePayload must be packed");
 
 // PunchHint: when a Lookup arrives, the rendezvous proactively tells the
 // host the client's reflexive endpoint.  Both sides then start sending

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <chrono>
+#include <thread>
 #include <vector>
 
 namespace deskbeam::host {
@@ -886,6 +887,21 @@ void HostSession::handle_rendezvous_packet(const uint8_t* data, size_t len,
                   (p.reflexive_ip >>  0) & 0xff, (p.reflexive_ip >>  8) & 0xff,
                   (p.reflexive_ip >> 16) & 0xff, (p.reflexive_ip >> 24) & 0xff,
                   p.reflexive_port, p.ttl_seconds);
+        // If the user enabled relay mode (--relay) without manually
+        // pinning a session_id, fill the session_id from this RegisterAck
+        // and BIND now — this is the path that makes --relay-session
+        // HEX64 unnecessary in normal Pro flows.  Self-host setups
+        // without --relay are unaffected: we never auto-route media
+        // through an unrelated relay just because rdv mentioned one.
+        if (p.relay_ip != 0
+            && relay_addr_.ip != 0 && !relay_session_set_
+            && !relay_active_) {
+            std::memcpy(relay_session_id_, p.session_id, 32);
+            relay_session_set_ = true;
+            log::info("HostSession",
+                "Using rendezvous-minted relay session_id (no manual --relay-session needed)");
+            relay_bind_blocking();
+        }
         break;
     }
     case rdv::MsgType::PunchHint: {

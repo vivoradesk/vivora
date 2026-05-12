@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <random>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -51,6 +52,10 @@ struct Registration {
     TimePoint                 expires_at; // wall-clock cutoff
     uint8_t                   lan_count = 0;
     deskbeam::net::rdv::LanCandidate lan[deskbeam::net::rdv::MAX_LAN_CANDIDATES]{};
+    // Relay session id minted on first Register, kept stable across
+    // keepalives so subsequent client lookups land on the same id.  Both
+    // the host (via RegisterAck) and clients (via LookupResponse) get it.
+    uint8_t                   session_id[32]{};
 };
 
 // Hash a pubkey by treating it as four 64-bit words — cheap, reasonable
@@ -75,8 +80,13 @@ std::string ip_to_string(uint32_t ip_be) {
 
 void usage(const char* argv0) {
     std::fprintf(stderr,
-        "usage: %s [--port PORT]\n"
-        "  --port PORT     UDP port to listen on (default %u)\n",
+        "usage: %s [--port PORT] [--relay-endpoint HOST:PORT]\n"
+        "  --port PORT              UDP port to listen on (default %u)\n"
+        "  --relay-endpoint HP      Advertise relay HOST:PORT to peers in\n"
+        "                           RegisterAck and LookupResponse so they can\n"
+        "                           use Pro relay without manual --relay flags.\n"
+        "                           Optional — omit for self-host setups where\n"
+        "                           peers wire up the relay themselves.\n",
         argv0, DEFAULT_PORT);
 }
 
@@ -92,9 +102,16 @@ int main(int argc, char** argv) {
     namespace rdv = deskbeam::net::rdv;
 
     uint16_t port = DEFAULT_PORT;
+    deskbeam::net::SocketAddr relay_endpoint{};
     for (int i = 1; i < argc; ++i) {
         if ((std::strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
             port = static_cast<uint16_t>(std::atoi(argv[++i]));
+        } else if ((std::strcmp(argv[i], "--relay-endpoint") == 0) && i + 1 < argc) {
+            relay_endpoint = deskbeam::net::resolve_host_port(argv[++i]);
+            if (relay_endpoint.ip == 0) {
+                std::fprintf(stderr, "could not resolve --relay-endpoint %s\n", argv[i]);
+                return 1;
+            }
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;
@@ -123,8 +140,16 @@ int main(int argc, char** argv) {
         return 1;
     }
     sock->set_recvbuf(1 << 20);   // 1 MiB — comfortable headroom for bursts
-    log::info(TAG, "deskbeam-rendezvous listening on UDP :%u (TTL=%ds)",
-              port, REGISTRATION_TTL);
+    if (relay_endpoint.ip != 0) {
+        log::info(TAG, "deskbeam-rendezvous listening on UDP :%u (TTL=%ds, relay=%s:%u)",
+                  port, REGISTRATION_TTL,
+                  ip_to_string(relay_endpoint.ip).c_str(), relay_endpoint.port);
+    } else {
+        log::info(TAG, "deskbeam-rendezvous listening on UDP :%u (TTL=%ds)",
+                  port, REGISTRATION_TTL);
+    }
+    std::random_device rdv_rd;
+    std::mt19937_64    rdv_rng(rdv_rd());
 
     using PubkeyArr = std::array<uint8_t, 32>;
     std::unordered_map<PubkeyArr, Registration, PubkeyHash> registry;
@@ -205,11 +230,22 @@ int main(int argc, char** argv) {
             PubkeyArr key;
             std::memcpy(key.data(), reg.pubkey, 32);
             Registration& r = registry[key];
+            const bool first_seen = (r.session_id[0] == 0 && r.session_id[1] == 0
+                                  && r.session_id[2] == 0 && r.session_id[3] == 0);
             const bool fresh = (r.endpoint != sender);
             r.endpoint   = sender;
             r.expires_at = now + std::chrono::seconds(REGISTRATION_TTL);
             r.lan_count  = reg.lan_count;
             std::memcpy(r.lan, reg.lan, sizeof(r.lan));
+            // Mint a stable session_id on first Register; keep it across
+            // keepalives so subsequent client lookups land on the same id
+            // and the host's relay binding doesn't need to roll.
+            if (first_seen) {
+                for (int j = 0; j < 4; ++j) {
+                    const uint64_t r64 = rdv_rng();
+                    std::memcpy(r.session_id + j * 8, &r64, 8);
+                }
+            }
             ++total_register;
             // Build / refresh the reverse code → pubkey index.  Two distinct
             // pubkeys with the same code are a real collision and we keep
@@ -239,6 +275,11 @@ int main(int argc, char** argv) {
             ack.reflexive_ip   = sender.ip;
             ack.reflexive_port = sender.port;
             ack.ttl_seconds    = REGISTRATION_TTL;
+            if (relay_endpoint.ip != 0) {
+                ack.relay_ip   = relay_endpoint.ip;
+                ack.relay_port = relay_endpoint.port;
+                std::memcpy(ack.session_id, r.session_id, 32);
+            }
             const size_t out_len = rdv::encode_register_ack(txbuf, sizeof(txbuf), ack);
             if (out_len) sock->send_to(txbuf, out_len, sender);
             break;
@@ -283,6 +324,11 @@ int main(int argc, char** argv) {
                 resp.found     = 1;
                 resp.lan_count = rit->second.lan_count;
                 std::memcpy(resp.lan, rit->second.lan, sizeof(resp.lan));
+                if (relay_endpoint.ip != 0) {
+                    resp.relay_ip   = relay_endpoint.ip;
+                    resp.relay_port = relay_endpoint.port;
+                    std::memcpy(resp.session_id, rit->second.session_id, 32);
+                }
                 rdv::PunchHintPayload hint{};
                 hint.client_ip   = sender.ip;
                 hint.client_port = sender.port;
@@ -320,6 +366,11 @@ int main(int argc, char** argv) {
                 resp.found     = 1;
                 resp.lan_count = it->second.lan_count;
                 std::memcpy(resp.lan, it->second.lan, sizeof(resp.lan));
+                if (relay_endpoint.ip != 0) {
+                    resp.relay_ip   = relay_endpoint.ip;
+                    resp.relay_port = relay_endpoint.port;
+                    std::memcpy(resp.session_id, it->second.session_id, 32);
+                }
                 // Tell the host about the inbound client so both sides can
                 // start punching simultaneously.
                 rdv::PunchHintPayload hint{};

@@ -95,11 +95,18 @@ size_t encode_register(uint8_t* buf, size_t buf_len, const RegisterPayload& p) {
 }
 
 size_t encode_register_ack(uint8_t* buf, size_t buf_len, const RegisterAckPayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::RegisterAck, 8);
+    // Bare 8 B if no relay; 8 + 4 + 2 + 32 = 46 B with relay.
+    const size_t plen = (p.relay_ip != 0) ? 46u : 8u;
+    const size_t total = encode_header(buf, buf_len, MsgType::RegisterAck, plen);
     if (total == 0) return 0;
     put_u32_le(buf + HEADER_SIZE + 0, p.reflexive_ip);
     put_u16_le(buf + HEADER_SIZE + 4, p.reflexive_port);
     put_u16_le(buf + HEADER_SIZE + 6, p.ttl_seconds);
+    if (p.relay_ip != 0) {
+        put_u32_le(buf + HEADER_SIZE +  8, p.relay_ip);
+        put_u16_le(buf + HEADER_SIZE + 12, p.relay_port);
+        std::memcpy(buf + HEADER_SIZE + 14, p.session_id, 32);
+    }
     return total;
 }
 
@@ -111,23 +118,28 @@ size_t encode_lookup(uint8_t* buf, size_t buf_len, const LookupPayload& p) {
 }
 
 size_t encode_lookup_resp(uint8_t* buf, size_t buf_len, const LookupResponsePayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::LookupResponse, sizeof(p));
+    // Legacy form (no relay): 40 + 32 = 72 bytes.
+    // With relay tail: 72 + 4 + 2 + 32 = 110 bytes.
+    constexpr size_t LEGACY_LEN = 40 + 8 * MAX_LAN_CANDIDATES;
+    const size_t plen = (p.relay_ip != 0) ? LEGACY_LEN + 38 : LEGACY_LEN;
+    const size_t total = encode_header(buf, buf_len, MsgType::LookupResponse, plen);
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.pubkey, 32);
     put_u32_le(buf + HEADER_SIZE + 32, p.host_ip);
     put_u16_le(buf + HEADER_SIZE + 36, p.host_port);
     buf[HEADER_SIZE + 38] = p.found;
     buf[HEADER_SIZE + 39] = p.lan_count;
-    // The LAN tail layout matches put_lan_tail's: count + 3 reserved + N×8.
-    // We've already written `found` + `lan_count` in slots 38/39, so the
-    // 3 reserved bytes here would overlap.  Skip the helper and write the
-    // candidates directly starting at offset 40.
     size_t off = HEADER_SIZE + 40;
     for (uint8_t i = 0; i < MAX_LAN_CANDIDATES; ++i) {
         put_u32_le(buf + off + 0, p.lan[i].ip);
         put_u16_le(buf + off + 4, p.lan[i].port);
         put_u16_le(buf + off + 6, 0);
         off += 8;
+    }
+    if (p.relay_ip != 0) {
+        put_u32_le(buf + off +  0, p.relay_ip);
+        put_u16_le(buf + off +  4, p.relay_port);
+        std::memcpy(buf + off + 6, p.session_id, 32);
     }
     return total;
 }
@@ -164,10 +176,18 @@ bool decode_register(const uint8_t* p, size_t len, RegisterPayload& out) {
 }
 
 bool decode_register_ack(const uint8_t* p, size_t len, RegisterAckPayload& out) {
-    if (len != 8) return false;
+    if (len != 8 && len != 46) return false;
     out.reflexive_ip   = get_u32_le(p + 0);
     out.reflexive_port = get_u16_le(p + 4);
     out.ttl_seconds    = get_u16_le(p + 6);
+    out.relay_ip   = 0;
+    out.relay_port = 0;
+    std::memset(out.session_id, 0, 32);
+    if (len == 46) {
+        out.relay_ip   = get_u32_le(p +  8);
+        out.relay_port = get_u16_le(p + 12);
+        std::memcpy(out.session_id, p + 14, 32);
+    }
     return true;
 }
 
@@ -178,7 +198,9 @@ bool decode_lookup(const uint8_t* p, size_t len, LookupPayload& out) {
 }
 
 bool decode_lookup_resp(const uint8_t* p, size_t len, LookupResponsePayload& out) {
-    if (len != sizeof(out)) return false;
+    constexpr size_t LEGACY_LEN = 40 + 8 * MAX_LAN_CANDIDATES;     // 72
+    constexpr size_t WITH_RELAY = LEGACY_LEN + 38;                  // 110
+    if (len != LEGACY_LEN && len != WITH_RELAY) return false;
     std::memcpy(out.pubkey, p, 32);
     out.host_ip   = get_u32_le(p + 32);
     out.host_port = get_u16_le(p + 36);
@@ -191,6 +213,14 @@ bool decode_lookup_resp(const uint8_t* p, size_t len, LookupResponsePayload& out
         out.lan[i].port     = get_u16_le(p + off + 4);
         out.lan[i].reserved = 0;
         off += 8;
+    }
+    out.relay_ip   = 0;
+    out.relay_port = 0;
+    std::memset(out.session_id, 0, 32);
+    if (len == WITH_RELAY) {
+        out.relay_ip   = get_u32_le(p + off +  0);
+        out.relay_port = get_u16_le(p + off +  4);
+        std::memcpy(out.session_id, p + off + 6, 32);
     }
     return true;
 }
