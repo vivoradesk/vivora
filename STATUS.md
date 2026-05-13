@@ -95,8 +95,9 @@ These are **not** on the active roadmap — listed so we know what to say when a
 | Hole-punching (STUN + PunchHint)         | ✅ tested inter-ISP (1123ms handshake) |
 | Same-NAT short-circuit (LAN candidates)  | ✅ tested (11ms handshake same WiFi) |
 | Relay daemon (`deskbeam-relay`)          | ✅ AGPL self-host code, smoke-tested localhost |
-| Relay client/host integration            | ✅ manual mode (`--relay` + `--relay-session`); auto-fallback pending |
-| Relay license auth (Pro-managed)         | ⏳ next — `--require-license` + JWT verify |
+| Relay client/host integration            | ✅ `--relay HOST:PORT`; auto-fallback after direct timeout pending |
+| Relay license auth (Pro-managed)         | ✅ Ed25519-signed 95B tokens, `--require-license` on relay |
+| Rendezvous-minted relay session_id       | ✅ rdv `--relay-endpoint` advertises endpoint+session_id; peers auto-adopt |
 
 ### Production deploy artefacts
 
