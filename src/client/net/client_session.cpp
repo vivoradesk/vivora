@@ -168,16 +168,15 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
         audio_local_port_ = 0;
     }
 
-    // Relay path: when explicitly configured, BIND now and from this point
-    // on every host-bound packet goes through transport_send → relay.
-    // Done before HELLO so the handshake itself rides the relay.
-    if (relay_session_set_ && relay_addr_.ip != 0) {
-        if (!relay_bind_blocking()) {
-            log::error("ClientSession",
-                "Relay required but BIND failed — refusing to start");
-            return false;
-        }
-    }
+    // Relay is configured (--relay) but we don't BIND yet.  The auto-
+    // fallback in poll() switches to relay only when the direct path
+    // doesn't ACK within RELAY_FALLBACK_MS.  This way:
+    //   - Direct connections never spend a relay slot (saves bandwidth
+    //     and a license-token check on the managed relay).
+    //   - Bad NAT pairs (CGNAT, restrictive corporate FW) fail over
+    //     after ~5 s with one extra round trip for the BIND.
+    // If relay isn't configured at all, the client just times out as
+    // before — same shape as today's behaviour with no --relay flag.
 
     // Same-NAT short-circuit.  If our reflexive matches the host's, we're
     // both behind the same router and the public-IP punch path requires
@@ -367,6 +366,29 @@ void ClientSession::poll() {
     if (state_ == SessionState::Connecting) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - connect_start_).count();
+        // Relay auto-fallback: if direct hasn't ACKed in RELAY_FALLBACK_MS
+        // and a relay was configured (--relay), BIND to the relay now and
+        // keep retrying HELLO through it.  Reset the connect_start_ so
+        // we get a fresh CONNECT_TIMEOUT_MS budget for the relay attempt.
+        if (elapsed > RELAY_FALLBACK_MS
+            && relay_session_set_ && !relay_active_
+            && relay_addr_.ip != 0) {
+            log::warn("ClientSession",
+                "No HELLO_ACK in %lldms — falling back to relay",
+                static_cast<long long>(elapsed));
+            if (relay_bind_blocking()) {
+                // Reset Noise state and HELLO timers so the next send_hello
+                // starts a clean handshake on the relay path.
+                handshake_.init_initiator(host_static_pk_);
+                handshake_complete_ = false;
+                connect_start_   = Clock::now();
+                last_hello_time_ = {};
+                send_hello();
+            } else {
+                log::error("ClientSession", "Relay BIND failed during fallback");
+            }
+            return;
+        }
         if (elapsed > CONNECT_TIMEOUT_MS) {
             log::error("ClientSession", "Connection timed out");
             state_ = SessionState::Disconnected;

@@ -24,6 +24,11 @@ public:
     static constexpr int64_t HELLO_RETRY_MS = 500;
     static constexpr int64_t CONNECT_TIMEOUT_MS = 5000;
     static constexpr int64_t DISCONNECT_TIMEOUT_MS = 5000;
+    // After this much HELLO-without-ACK time, if a relay was configured
+    // but isn't yet active, BIND to the relay and continue HELLO retries
+    // through the relay path.  Leaves ~2 s of CONNECT_TIMEOUT_MS budget
+    // for the relay attempt before we give up entirely.
+    static constexpr int64_t RELAY_FALLBACK_MS = 3000;
 
     // Pin the host's long-term Curve25519 public key. MUST be called before
     // start() — Noise_NK refuses to run without a known responder static.
