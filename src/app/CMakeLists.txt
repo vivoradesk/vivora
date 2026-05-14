@@ -1,9 +1,10 @@
 if(UNIX AND NOT APPLE)
     # Linux client uses QOpenGLWidget (lives in Qt6::OpenGLWidgets, separate
     # from QtOpenGL which is the legacy QGLWidget module).
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets
+                                        Qml Quick QuickControls2)
 else()
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2)
 endif()
 # qt_standard_project_setup() landed in Qt 6.3.  Ubuntu 22.04 ships Qt 6.2,
 # so fall back to the equivalent CMake settings if the helper isn't there.
@@ -18,11 +19,44 @@ endif()
 
 add_executable(deskbeam
     main.cpp
+    legacy_cli.cpp
     host_loop.cpp
     view_loop.cpp
+    gui/gui_main.cpp
+    gui/app_controller.cpp
+    gui/settings.cpp
+    gui/address_book.cpp
+    gui/tray.cpp
+    ${CMAKE_SOURCE_DIR}/qml/qml.qrc
 )
 
-target_link_libraries(deskbeam PRIVATE deskbeam_common Qt6::Core Qt6::Widgets)
+target_link_libraries(deskbeam PRIVATE
+    deskbeam_common
+    Qt6::Core Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2
+)
+
+# Static Qt 6.x pulls Qt6Network in transitively from Qt6::Qml; QtNetwork
+# in turn references OpenSSL 3 (TLS backend).  This particular pre-built
+# Qt has the OpenSSL 1.1 import lib (libcrypto64MD.lib) baked into its
+# link config but the source code references OpenSSL 3 symbols
+# (OSSL_PARAM_*).  Mismatch.  Link our own OpenSSL 3 static libs first
+# so the missing OSSL_PARAM symbols resolve, and pass /FORCE:MULTIPLE
+# to swallow the duplicate-symbol errors from the stale 1.1 reference —
+# we never call the QSslSocket APIs that would actually exercise either
+# path so the runtime behaviour doesn't matter.
+if(WIN32)
+    set(_DESKBEAM_OPENSSL_DIR "C:/OpenSSL-WinUniversal/lib/VC/x64/MT")
+    if(EXISTS "${_DESKBEAM_OPENSSL_DIR}/libssl_static.lib")
+        target_link_libraries(deskbeam PRIVATE
+            "${_DESKBEAM_OPENSSL_DIR}/libssl_static.lib"
+            "${_DESKBEAM_OPENSSL_DIR}/libcrypto_static.lib"
+            crypt32
+        )
+        target_link_options(deskbeam PRIVATE "/FORCE:MULTIPLE" "/IGNORE:4006" "/IGNORE:4088")
+    else()
+        message(WARNING "OpenSSL static libs not found at ${_DESKBEAM_OPENSSL_DIR}")
+    endif()
+endif()
 
 # Client networking (cross-platform)
 target_sources(deskbeam PRIVATE

@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/qml">
+        <file>main.qml</file>
+        <file>AddressBookView.qml</file>
+        <file>SettingsDialog.qml</file>
+        <file>AddPeerDialog.qml</file>
+    </qresource>
+</RCC>
