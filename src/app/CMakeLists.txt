@@ -10,12 +10,14 @@ endif()
 # so fall back to the equivalent CMake settings if the helper isn't there.
 if(COMMAND qt_standard_project_setup)
     qt_standard_project_setup()
-else()
-    set(CMAKE_AUTOMOC ON)
-    set(CMAKE_AUTOUIC ON)
-    set(CMAKE_AUTORCC ON)
-    set(CMAKE_INCLUDE_CURRENT_DIR ON)
 endif()
+# qt_standard_project_setup() turns on AUTOMOC/AUTOUIC but is fuzzy on
+# AUTORCC across Qt versions — set it explicitly so .qrc files (the QML
+# bundle) are always compiled into the binary.
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 add_executable(deskbeam
     main.cpp
@@ -34,6 +36,81 @@ target_link_libraries(deskbeam PRIVATE
     deskbeam_common
     Qt6::Core Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2
 )
+
+# Static Qt: every QML plugin is a separate static library.  Q_IMPORT_PLUGIN
+# (in gui_main.cpp) anchors the metadata symbol but the plugin .lib itself
+# also has to be on the link line.  qt_import_qml_plugins() only works when
+# the QML is registered via qt_add_qml_module(); we use a plain .qrc so we
+# list the libs explicitly.  Paths come from the prebuilt Qt 6.9 install.
+if(WIN32)
+    set(_DESKBEAM_QT_QML_DIR  "C:/qt6/build/qtbase/qml")
+    set(_DESKBEAM_QT_LIB_DIR  "C:/qt6/build/qtbase/lib")
+    set(_DESKBEAM_QT_DECL_DIR "C:/qt6/build/qtdeclarative/src")
+    set(_DESKBEAM_QT_BASE_DIR "C:/qt6/build/qtbase/src")
+    # Static QML resources (.qmltypes, the .qml files of the Basic style,
+    # SG shaders, etc.) are compiled into individual qrc_*_init.cpp.obj
+    # files that aren't packed into any .lib — qmake/CMake adds them
+    # straight to the executable's link line.  We have to do the same
+    # manually since we don't use qt_add_qml_module.
+    file(GLOB _DB_SG_SHADER_OBJS
+        "${_DESKBEAM_QT_DECL_DIR}/quick/CMakeFiles/Quick_resources_*.dir/Release/.qt/rcc/qrc_*_init.cpp.obj")
+    set(_DESKBEAM_QML_RES_OBJS
+        ${_DB_SG_SHADER_OBJS}
+        "${_DESKBEAM_QT_DECL_DIR}/qml/CMakeFiles/Qml_resources_1.dir/Release/.qt/rcc/qrc_qmake_QML_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/qmlmeta/CMakeFiles/QmlMeta_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/qmlmodels/CMakeFiles/QmlModels_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_Models_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/qmlworkerscript/CMakeFiles/QmlWorkerScript_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_WorkerScript_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quick/window/CMakeFiles/quickwindow_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Window_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quicklayouts/CMakeFiles/QuickLayouts_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Layouts_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quicktemplates/CMakeFiles/QuickTemplates2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Templates_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/CMakeFiles/QuickControls2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/CMakeFiles/qtquickcontrols2plugin_resources_1.dir/Release/.qt/rcc/qrc_indirectBasic_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrolsimpl/CMakeFiles/QuickControls2Impl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_impl_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_2.dir/Release/.qt/rcc/qrc_QuickControls2Basic_raw_qml_0_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_3.dir/Release/.qt/rcc/qrc_qtquickcontrols2basicstyle_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickcontrols/basic/impl/CMakeFiles/QuickControls2BasicStyleImpl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_impl_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickdialogs/quickdialogs/CMakeFiles/QuickDialogs2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Dialogs_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Dialogs_quickimpl_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_2.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImpl_raw_qml_0_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_3.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImpl_init.cpp.obj"
+        "${_DESKBEAM_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_4.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImplShaders_init.cpp.obj"
+        "${_DESKBEAM_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_1.dir/Release/.qt/rcc/qrc_qpdf_init.cpp.obj"
+        "${_DESKBEAM_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_2.dir/Release/.qt/rcc/qrc_gui_shaders_init.cpp.obj"
+    )
+    # Each QML plugin .lib is just metadata + the Q_PLUGIN_METADATA hook;
+    # the actual qml_register_types_X / qInitResources_X / theme/init
+    # symbols live in companion non-plugin libs (Qt6QuickLayouts.lib etc.).
+    # Both halves must be on the link line.
+    target_link_libraries(deskbeam PRIVATE
+        "${_DESKBEAM_QT_QML_DIR}/QtQml/qmlplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQml/Models/modelsplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQml/WorkerScript/workerscriptplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/qtquick2plugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Window/quickwindowplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Layouts/qquicklayoutsplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Templates/qtquicktemplates2plugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Controls/qtquickcontrols2plugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Controls/impl/qtquickcontrols2implplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Controls/Basic/qtquickcontrols2basicstyleplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Controls/Basic/impl/qtquickcontrols2basicstyleimplplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Dialogs/qtquickdialogsplugin.lib"
+        "${_DESKBEAM_QT_QML_DIR}/QtQuick/Dialogs/quickimpl/qtquickdialogs2quickimplplugin.lib"
+
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QmlModels.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QmlWorkerScript.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickLayouts.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickTemplates2.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickControls2.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickControls2Impl.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickControls2Basic.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickControls2BasicStyleImpl.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickDialogs2.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickDialogs2QuickImpl.lib"
+        "${_DESKBEAM_QT_LIB_DIR}/Qt6QuickDialogs2Utils.lib"
+        ${_DESKBEAM_QML_RES_OBJS}
+    )
+endif()
 
 # Static Qt 6.x pulls Qt6Network in transitively from Qt6::Qml; QtNetwork
 # in turn references OpenSSL 3 (TLS backend).  This particular pre-built
