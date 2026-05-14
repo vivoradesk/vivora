@@ -56,6 +56,21 @@ if(WIN32)
     else()
         message(WARNING "OpenSSL static libs not found at ${_DESKBEAM_OPENSSL_DIR}")
     endif()
+
+    # Qt6's openssl TLS plugin tries to dlopen OpenSSL 1.1 at runtime
+    # (legacy hardcoded import).  Copy the matching DLLs next to the
+    # exe so QApplication startup doesn't blow up.  Long-term we want to
+    # rebuild Qt6 without the openssl TLS plugin (Schannel-only) and
+    # drop these copies entirely.
+    set(_DESKBEAM_OPENSSL11_BIN "C:/OpenSSL/bin")
+    foreach(_dll libcrypto-1_1-x64.dll libssl-1_1-x64.dll)
+        if(EXISTS "${_DESKBEAM_OPENSSL11_BIN}/${_dll}")
+            add_custom_command(TARGET deskbeam POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_DESKBEAM_OPENSSL11_BIN}/${_dll}"
+                        "$<TARGET_FILE_DIR:deskbeam>/${_dll}")
+        endif()
+    endforeach()
 endif()
 
 # Client networking (cross-platform)
