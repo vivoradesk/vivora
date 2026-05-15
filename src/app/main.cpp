@@ -1,5 +1,8 @@
 #include "app/legacy_cli.h"
+
+#ifdef DESKBEAM_WINDOWS
 #include "app/gui/gui_main.h"
+#endif
 
 #include <cstring>
 
@@ -7,9 +10,9 @@
 //
 // CLI mode is selected by the presence of --host or --view in argv (the
 // existing scripted / server-style use case).  Anything else — including
-// no args at all — launches the GUI.  Both paths share the same
-// underlying HostSession / ClientSession code; only the way they're
-// driven differs.
+// no args at all — launches the GUI on Windows.  On Linux / macOS where
+// the GUI shell hasn't landed yet, no-arg falls back to printing CLI
+// help so the binary stays useful.
 int main(int argc, char* argv[]) {
     bool cli_mode = false;
     for (int i = 1; i < argc; ++i) {
@@ -21,7 +24,11 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
+#ifdef DESKBEAM_WINDOWS
     return cli_mode
         ? deskbeam::run_legacy_cli(argc, argv)
         : deskbeam::gui::run_gui(argc, argv);
+#else
+    return deskbeam::run_legacy_cli(argc, argv);
+#endif
 }

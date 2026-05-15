@@ -1,8 +1,9 @@
 if(UNIX AND NOT APPLE)
-    # Linux client uses QOpenGLWidget (lives in Qt6::OpenGLWidgets, separate
-    # from QtOpenGL which is the legacy QGLWidget module).
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets
-                                        Qml Quick QuickControls2)
+    # Linux is CLI-only for now (P5 GUI is Windows-first).  Ubuntu 22.04
+    # jammy ships only Qt 6.2 base — no qt6-declarative-dev — so requiring
+    # Qml/Quick/QuickControls2 here would force every Linux contributor to
+    # build Qt from source.  Pull them in once we wire the Linux GUI.
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
 else()
     find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2)
 endif()
@@ -24,18 +25,31 @@ add_executable(deskbeam
     legacy_cli.cpp
     host_loop.cpp
     view_loop.cpp
-    gui/gui_main.cpp
-    gui/app_controller.cpp
-    gui/settings.cpp
-    gui/address_book.cpp
-    gui/tray.cpp
-    ${CMAKE_SOURCE_DIR}/qml/qml.qrc
 )
+if(WIN32)
+    # GUI is Windows-only for Phase 5.  Linux/Mac get the CLI binary
+    # below — the GUI sources include QtQuick/QML which Ubuntu 22.04
+    # doesn't ship.  Lifted out cross-platform once the Linux GUI lands.
+    target_sources(deskbeam PRIVATE
+        gui/gui_main.cpp
+        gui/app_controller.cpp
+        gui/host_worker.cpp
+        gui/settings.cpp
+        gui/address_book.cpp
+        gui/tray.cpp
+        ${CMAKE_SOURCE_DIR}/qml/qml.qrc
+    )
+endif()
 
 target_link_libraries(deskbeam PRIVATE
     deskbeam_common
-    Qt6::Core Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Core Qt6::Widgets
 )
+if(WIN32)
+    target_link_libraries(deskbeam PRIVATE
+        Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    )
+endif()
 
 # Static Qt: every QML plugin is a separate static library.  Q_IMPORT_PLUGIN
 # (in gui_main.cpp) anchors the metadata symbol but the plugin .lib itself

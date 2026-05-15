@@ -200,12 +200,35 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     auto last_fec_flush_time     = TimePoint{};
 
     while (true) {
+        // GUI cooperative stop.  CLI never sets this and uses Ctrl+C.
+        if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) {
+            log::info("HOST", "Stop requested by controller");
+            break;
+        }
+
         session.poll();
 
-        // Exit when all clients disconnect after we've had at least one.
-        if (session.state() == host::SessionState::Disconnected && had_clients) {
+        // Auto-exit on "all clients disconnected" is CLI-only behaviour:
+        // headless host process is one-shot per session.  GUI host stays
+        // up indefinitely, polled by AppController, so we suppress the
+        // auto-exit when stop_flag is wired.
+        if (session.state() == host::SessionState::Disconnected
+            && had_clients && !cfg.stop_flag) {
             log::info("HOST", "All clients disconnected");
             break;
+        }
+
+        // Publish state for the GUI poll.  Cheap atomic stores; cost is
+        // negligible compared to the encode kernel below.
+        if (cfg.client_count_out) {
+            cfg.client_count_out->store(
+                static_cast<int>(session.client_count()),
+                std::memory_order_relaxed);
+        }
+        if (cfg.state_out) {
+            cfg.state_out->store(
+                session.state() == host::SessionState::Connected ? 1 : 0,
+                std::memory_order_relaxed);
         }
 
         // Handle new client connections.

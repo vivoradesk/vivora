@@ -1,6 +1,7 @@
 #include "app/gui/app_controller.h"
 
 #include "app/gui/address_book.h"
+#include "app/gui/host_worker.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
 
@@ -14,8 +15,33 @@
 namespace deskbeam::gui {
 
 AppController::AppController(QObject* parent) : QObject(parent) {
-    settings_ = std::make_unique<Settings>(this);
-    peers_    = std::make_unique<AddressBook>(this);
+    settings_   = std::make_unique<Settings>(this);
+    peers_      = std::make_unique<AddressBook>(this);
+    hostWorker_ = std::make_unique<HostWorker>(this);
+    connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
+        sharing_     = false;
+        clientCount_ = 0;
+        emit sharingChanged();
+        emit clientCountChanged();
+        if (tray_) tray_->setSharing(sharing_, clientCount_);
+        log::info("AppController", "Host worker stopped");
+    });
+    connect(hostWorker_.get(), &HostWorker::initFailed, this,
+            [this](QString reason) {
+        log::error("AppController", "Host init failed: %s",
+                   reason.toUtf8().constData());
+        if (tray_) tray_->notify("DeskBeam: host failed to start", reason);
+    });
+    pollTimer_.setInterval(500);
+    connect(&pollTimer_, &QTimer::timeout, this, [this] {
+        if (!hostWorker_->running()) return;
+        const int n = hostWorker_->clientCount();
+        if (n != clientCount_) {
+            clientCount_ = n;
+            emit clientCountChanged();
+            if (tray_) tray_->setSharing(sharing_, clientCount_);
+        }
+    });
     loadIdentity();
 
     // Honour "Start sharing on launch" — stub for Phase A.  Phase A.1
@@ -51,23 +77,38 @@ void AppController::loadIdentity() {
 
 void AppController::startSharing() {
     if (sharing_) return;
-    // Phase A stub — Phase A.1 will actually run the host worker.
+    HostWorkerConfig wc;
+    wc.port               = 9876;
+    wc.manual_bitrate_bps = settings_->bitrateMbps() * 1'000'000u;
+    wc.codec              = settings_->codecIndex() == 1
+        ? deskbeam::VideoCodec::HEVC : deskbeam::VideoCodec::H264;
+    wc.encoder_kind       = deskbeam::EncoderKind::Auto;
+    wc.stun_server        = settings_->stunServer().toStdString();
+    wc.rendezvous_server  = settings_->rendezvous().toStdString();
+    wc.relay_server       = settings_->relay().toStdString();
+    wc.license_file       = settings_->licenseFile().toStdString();
+    wc.display_index      = settings_->displayIndex();
+
     sharing_     = true;
     clientCount_ = 0;
-    log::info("AppController", "Start sharing (stub — Phase A.1 hooks the real worker)");
     emit sharingChanged();
     emit clientCountChanged();
     if (tray_) tray_->setSharing(sharing_, clientCount_);
+    pollTimer_.start();
+
+    log::info("AppController", "Start sharing (port=%u, codec=%s, rdv='%s')",
+              wc.port,
+              wc.codec == deskbeam::VideoCodec::HEVC ? "hevc" : "h264",
+              wc.rendezvous_server.c_str());
+    hostWorker_->start(wc);
 }
 
 void AppController::stopSharing() {
     if (!sharing_) return;
-    sharing_     = false;
-    clientCount_ = 0;
-    log::info("AppController", "Stop sharing");
-    emit sharingChanged();
-    emit clientCountChanged();
-    if (tray_) tray_->setSharing(sharing_, clientCount_);
+    log::info("AppController", "Stop sharing requested");
+    pollTimer_.stop();
+    hostWorker_->stop();
+    // sharing_/clientCount_ get reset on the worker's stopped() signal.
 }
 
 void AppController::connectToPeer(const QString& peerCodeOrHex) {

@@ -5,11 +5,13 @@
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include <memory>
 
 namespace deskbeam::gui {
 
 class Tray;
+class HostWorker;
 
 // Top-level QML bridge.  Owns the Settings, AddressBook, Tray and (in
 // Phase A.1) the actual host / view session workers.  Exposed to QML as
@@ -74,7 +76,13 @@ private:
 
     std::unique_ptr<Settings>    settings_;
     std::unique_ptr<AddressBook> peers_;
+    std::unique_ptr<HostWorker>  hostWorker_;
     Tray*                        tray_ = nullptr;
+
+    // Polls hostWorker_'s atomic counters into Q_PROPERTYs.  Cheap
+    // (~3 atomic loads per tick); 500ms is fast enough that the tray
+    // tooltip + UI feel responsive without burning a thread.
+    QTimer  pollTimer_;
 
     bool    sharing_     = false;
     int     clientCount_ = 0;

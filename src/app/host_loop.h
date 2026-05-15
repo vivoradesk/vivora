@@ -2,6 +2,7 @@
 
 #include "app/host_platform.h"
 #include "host/encode/video_encoder.h"
+#include <atomic>
 #include <cstdint>
 
 namespace deskbeam {
@@ -11,6 +12,16 @@ struct HostLoopConfig {
     uint32_t manual_bitrate_bps = 0;   // 0 = auto from resolution
     EncoderKind encoder_kind = EncoderKind::Auto;
     VideoCodec  codec = VideoCodec::HEVC;
+    // GUI mode hooks.  When non-null:
+    //   stop_flag       — loop exits the next iteration when set true.
+    //                     Also disables the CLI-mode auto-exit on
+    //                     "all clients disconnected" (GUI keeps listening).
+    //   client_count_out — written every iteration with current attached
+    //                     client count, so the UI can poll it cheaply.
+    //   state_out       — 0 = idle/listening, 1 = at least one client connected.
+    std::atomic<bool>* stop_flag        = nullptr;
+    std::atomic<int>*  client_count_out = nullptr;
+    std::atomic<int>*  state_out        = nullptr;
     // STUN server "host:port" for reflexive-address discovery.  Empty string
     // disables STUN (LAN-only). Hostnames are resolved via getaddrinfo.
     const char* stun_server = nullptr;
