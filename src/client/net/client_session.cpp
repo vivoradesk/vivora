@@ -180,13 +180,30 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 
     // Same-NAT short-circuit.  If our reflexive matches the host's, we're
     // both behind the same router and the public-IP punch path requires
-    // hairpin NAT — usually broken on consumer routers.  Try the first
-    // LAN candidate the host advertised instead.  Reflexive falls through
-    // unchanged when the IPs differ (regular two-NAT case).
+    // hairpin NAT — usually broken on consumer routers.  Try the LAN
+    // candidate that's on the same /24 as one of OUR local addresses
+    // (i.e. the candidate that's actually routable from us); fall back
+    // to the first if none match.  Without the subnet match Windows
+    // hosts often advertise Hyper-V / WSL adapters first (172.23.x,
+    // 192.168.14.x, etc.) and we'd punch into a black hole.
     if (lookup_lan_count_ > 0
         && reflexive_addr_.ip != 0
         && reflexive_addr_.ip == host_addr_.ip) {
-        const net::SocketAddr lan = lookup_lan_[0];
+        net::SocketAddr lan = lookup_lan_[0];
+        const auto my_local = net::enumerate_local_ipv4(8);
+        for (size_t i = 0; i < lookup_lan_count_; ++i) {
+            const uint32_t cand_ip = lookup_lan_[i].ip;
+            for (uint32_t my_ip : my_local) {
+                // Compare /24 (low 24 bits in host order = top 3 octets;
+                // ip stored little-endian byte=octet so first 3 octets
+                // are bits 0..23).
+                if ((cand_ip & 0x00FFFFFFu) == (my_ip & 0x00FFFFFFu)) {
+                    lan = lookup_lan_[i];
+                    goto picked;
+                }
+            }
+        }
+    picked:
         log::info("ClientSession",
             "Same-NAT detected (both at %u.%u.%u.%u) — trying LAN candidate %u.%u.%u.%u:%u",
             (reflexive_addr_.ip >>  0) & 0xff, (reflexive_addr_.ip >>  8) & 0xff,

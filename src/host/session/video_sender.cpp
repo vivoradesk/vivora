@@ -112,13 +112,17 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             out_len  = wire.size();
         }
         int r;
-        if (relay_active_) {
+        // Wrap in DBRL only when the destination peer is the relay-routed
+        // sentinel (HostSession marker for clients that arrived via the
+        // relay).  Direct LAN peers go straight to dest, even when the
+        // host is BIND'd at the relay for other potential clients.
+        // See HostSession::transport_send for the same pattern.
+        if (relay_active_ && dest == relay_addr_) {
             namespace rly = net::relay;
             uint8_t wrap[rly::MAX_DATA_PACKET];
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            (void)dest;  // ignored under relay; binding implies the peer
             r = socket_.send_to(wrap, wn, relay_addr_);
         } else {
             r = socket_.send_to(out_data, out_len, dest);
@@ -176,13 +180,12 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
             out_len  = nack_send_buf_.size();
         }
         int r;
-        if (relay_active_) {
+        if (relay_active_ && dest == relay_addr_) {
             namespace rly = net::relay;
             uint8_t wrap[rly::MAX_DATA_PACKET];
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            (void)dest;  // ignored under relay; binding implies the peer
             r = socket_.send_to(wrap, wn, relay_addr_);
         } else {
             r = socket_.send_to(out_data, out_len, dest);

@@ -78,7 +78,7 @@ void AppController::loadIdentity() {
 void AppController::startSharing() {
     if (sharing_) return;
     HostWorkerConfig wc;
-    wc.port               = 9876;
+    wc.port               = static_cast<uint16_t>(settings_->hostPort());
     wc.manual_bitrate_bps = settings_->bitrateMbps() * 1'000'000u;
     wc.codec              = settings_->codecIndex() == 1
         ? deskbeam::VideoCodec::HEVC : deskbeam::VideoCodec::H264;

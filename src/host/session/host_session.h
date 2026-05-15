@@ -36,6 +36,7 @@ struct ClientInfo {
     uint16_t  probe_id       = 0;
     uint32_t  probe_bw_bps   = 0;
     bool      probe_pending  = false;
+    bool      probe_scheduled = false;   // true once probe is queued; cleared after first run
     TimePoint probe_sent_time;
 
     // Adaptive framerate feedback from this client (Phase A/B: stored

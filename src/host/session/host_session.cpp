@@ -189,6 +189,22 @@ void HostSession::poll() {
                 log::warn("HostSession", "BW probe timeout for client");
             }
         }
+
+        // Deferred BW probe: ~250ms after handshake completion, send the
+        // 1000-packet bandwidth measurement burst.  We cannot send it
+        // synchronously inside handle_hello() because the burst dominates
+        // the WiFi radio for ~50-100ms and reliably wipes out the
+        // HELLO_ACK that was sent moments earlier — clients then time
+        // out on direct LAN and fall over to relay even when direct
+        // would work for the real stream.
+        if (client.handshake_complete && !client.probe_scheduled) {
+            auto since_connect = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - client.connected_time).count();
+            if (since_connect >= 250) {
+                send_bw_probe(client);
+                client.probe_scheduled = true;
+            }
+        }
     }
 
     // Remove timed-out clients.
@@ -534,6 +550,7 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client.idr_needed     = true;
     client.probe_bw_bps   = 0;
     client.probe_pending  = false;
+    client.probe_scheduled = false;   // re-arm deferred probe on each HELLO
 
     // Derive transport cipher pairs — main (video/control) and audio — from
     // the same Noise HKDF.  The handshake object can go away now; keys are
@@ -562,8 +579,12 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
                   client_audio_port);
     }
 
-    // Send BW probe to the new client.
-    send_bw_probe(client);
+    // BW probe is delayed by ~250ms (see poll()).  Sending it here would
+    // blast 1000×1200B at the WiFi radio immediately after HELLO_ACK,
+    // which on busy 2.4GHz channels has been observed to fully drown
+    // out the HELLO_ACK itself — Linux client never receives msg2,
+    // assumes timeout and falls over to relay even when direct LAN
+    // would have worked perfectly fine for the actual stream.
 
     log::info("HostSession", "Client connected from %u.%u.%u.%u:%u (%zu total)",
         (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
@@ -770,7 +791,15 @@ void HostSession::set_relay_license(const uint8_t token[95]) {
 
 int HostSession::transport_send(const uint8_t* data, size_t len, const net::SocketAddr& peer) {
     if (!socket_) return -1;
-    if (relay_active_) {
+    // Wrap in DBRL DATA only when the peer is the relay endpoint itself
+    // (i.e. this client reached us through the relay so the relay's
+    // ip:port is the only path back to it).  Direct-LAN clients have a
+    // real ip:port stored in client.addr; we send them straight via
+    // the wire even when relay_active_ is true (host BIND'd at startup
+    // for OTHER potential clients).  Without this check transport_send
+    // funnelled every direct client through the relay too, silently
+    // breaking the entire direct-LAN path.
+    if (relay_active_ && peer == relay_addr_) {
         namespace rly = net::relay;
         uint8_t buf[rly::MAX_DATA_PACKET];
         const size_t n = rly::encode_data(buf, sizeof(buf), relay_alloc_id_, data, len);
