@@ -55,6 +55,10 @@ bool VaapiEncoder::init(const Config& cfg) {
         log::error(TAG, "av_hwdevice_ctx_create(%s) failed: %d", cfg_.drm_node, rc);
         return false;
     }
+    log::info(TAG, "VAAPI device opened: %s (codec=%s, %dx%d @ %dfps)",
+              cfg_.drm_node,
+              cfg_.codec == VideoCodec::HEVC ? "hevc" : "h264",
+              cfg_.width, cfg_.height, cfg_.fps);
 
     // 2. Build a hwframes pool — NV12 surfaces sized for the encoder.
     hw_frames_ctx_ = av_hwframe_ctx_alloc(hw_device_ctx_);
@@ -99,10 +103,21 @@ bool VaapiEncoder::init(const Config& cfg) {
     if (!ctx_->hw_frames_ctx) { log::error(TAG, "buffer_ref failed"); return false; }
 
     // VAAPI driver-specific tuning.  These keys are recognised by both
-    // hevc_vaapi and h264_vaapi.  low_power is intentionally OFF — the LP
-    // HEVC path on Intel iHD chokes on some resolutions ("Failed to end
-    // picture encode issue: 24" + assertion in vaapi_encode_h265.c).
+    // hevc_vaapi and h264_vaapi.
     av_opt_set(ctx_->priv_data, "rc_mode", "CBR", 0);
+
+    // low_power=1 is REQUIRED on Intel Gen11+ iGPUs (UHD Xe, Iris Xe,
+    // Arc) for H.264 — the full-quality VAEntrypointEncSlice was
+    // dropped, leaving only VAEntrypointEncSliceLP.  Without this
+    // flag ffmpeg silently falls back to software encode and we get
+    // 100-300ms per frame instead of 5-10.  Verify with
+    //   vainfo --device /dev/dri/renderD128 | grep H264
+    // — if you only see ":  VAEntrypointEncSliceLP" then LP is mandatory.
+    //
+    // HEVC LP on Intel iHD used to crash on some resolutions but appears
+    // stable on driver >= 22.3 (vainfo shows VAProfileHEVCMain EncSliceLP).
+    // If we see regressions we'll need a driver-version gate.
+    av_opt_set_int(ctx_->priv_data, "low_power", 1, 0);
 
     rc = avcodec_open2(ctx_, codec, nullptr);
     if (rc < 0) {

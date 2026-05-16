@@ -340,7 +340,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             platform.request_idr();
             session.clear_idr_needed();
             force_encode = true;
-            log::info("HOST", "IDR requested for new client");
+            // Trigger origin is logged at the source (HostSession logs
+            // "Client requested IDR (frame loss recovery)" for the loss
+            // path; "First client connected" / "New client connected"
+            // for the handshake path).  Keep this line neutral so a
+            // recovery storm doesn't look like a client-flap storm in
+            // the host log.
+            log::info("HOST", "Forwarding IDR request to encoder");
         }
 
         // Adaptive framerate gate: skip this iteration's capture if it
