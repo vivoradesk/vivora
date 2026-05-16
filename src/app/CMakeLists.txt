@@ -34,6 +34,7 @@ if(WIN32)
         gui/gui_main.cpp
         gui/app_controller.cpp
         gui/host_worker.cpp
+        gui/view_session.cpp
         gui/settings.cpp
         gui/address_book.cpp
         gui/tray.cpp

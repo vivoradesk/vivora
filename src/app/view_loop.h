@@ -1,6 +1,9 @@
 #pragma once
 
 #include "app/view_platform.h"
+#include "client/net/client_session.h"
+#include "common/utils/types.h"
+#include <atomic>
 #include <cstdint>
 
 namespace deskbeam {
@@ -25,10 +28,73 @@ struct ViewLoopConfig {
     const char* relay_server  = nullptr;
     const char* relay_session_hex = nullptr;
     const char* license_file = nullptr;
+    // GUI mode hook: when non-null, iter() exits the loop at the next
+    // chance.  CLI ignores it (uses Ctrl+C / window-close instead).
+    std::atomic<bool>* stop_flag = nullptr;
 };
 
-// Run the view (client) main loop.  Blocks until disconnected or window closed.
-// Platform-specific decode/render is delegated to |platform|.
+// Iterable view-loop state machine.  Split out of the legacy
+// while(true) so the GUI can drive one iteration per QTimer tick
+// from the main thread (where StreamWindow lives), while the CLI
+// keeps its own tight while-loop via run_view_loop() below.
+//
+// Lifecycle:
+//   ViewLoopState s;
+//   if (!s.init(platform, cfg)) ...   // returns false if setup fails
+//   while (s.iter()) {}               // false = clean exit / disconnect
+//   int rc = s.exit_code();
+class ViewLoopState {
+public:
+    ViewLoopState();
+    ~ViewLoopState();
+
+    // Do one-time setup: parse keys, configure session, STUN, rendezvous,
+    // relay, start the UDP socket, wire input callback.  Returns false on
+    // any fatal misconfiguration; check exit_code() to map to a process
+    // exit status.
+    bool init(ViewPlatform& platform, const ViewLoopConfig& cfg);
+
+    // Run one iteration of the view loop body.  Returns false when the
+    // user closed the window, the session disconnected, or stop_flag
+    // was set.  Cleanup (session.stop, platform.shutdown) is deferred
+    // to the destructor so callers can re-query exit_code afterwards.
+    bool iter();
+
+    int exit_code() const { return exit_code_; }
+
+    // Live stats for the GUI; updated in iter().
+    uint64_t frames_decoded() const { return frames_decoded_; }
+    double   rtt_ms() const;
+    client::SessionState state() const;
+
+private:
+    static constexpr int MIN_IDR_INTERVAL_MS = 600;
+
+    // Set once in init(); read on every iter().
+    ViewPlatform*     platform_ = nullptr;
+    const ViewLoopConfig* cfg_  = nullptr;
+
+    // Session is constructed in init(); freed on destruction.
+    client::ClientSession session_;
+
+    // Loop-local state lifted from the original function locals.
+    bool      got_keyframe_      = false;
+    uint64_t  frames_decoded_    = 0;
+    uint64_t  last_drops_        = 0;
+    TimePoint last_idr_request_{};
+    TimePoint last_log_time_{};
+    uint64_t  last_log_frames_   = 0;
+    uint64_t  last_arrived_count_ = 0;
+    float     last_arrived_fps_  = 0.0f;
+    bool      decoder_ready_     = false;
+    bool      audio_started_     = false;
+    int       exit_code_         = 0;
+    bool      torn_down_         = false;
+
+    void teardown();
+};
+
+// CLI-side thin wrapper.  Blocks until ViewLoopState::iter() returns false.
 int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg);
 
 } // namespace deskbeam

@@ -12,9 +12,14 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     // MTA first breaks those subsystems.  The Media Foundation decoder
     // calls CoInitializeEx itself on its own thread if needed.
 
-    // Decoder creation deferred to init_decoder() — codec is only known
-    // after the HELLO_ACK handshake.
-    app_ = std::make_unique<QApplication>(argc, argv);
+    // Reuse an existing QApplication when the GUI host has already
+    // bootstrapped one in this process (in-process Connect from the
+    // tray app).  CLI path still constructs its own.  Qt forbids two
+    // QApplications per process; this check is what lets the host UI
+    // and a view session coexist in the same deskbeam.exe.
+    if (!QApplication::instance()) {
+        app_ = std::make_unique<QApplication>(argc, argv);
+    }
     window_ = std::make_unique<deskbeam::StreamWindow>();
     window_->setWindowTitle(QString("DeskBeam — %1:%2").arg(host_ip).arg(port));
     window_->show();

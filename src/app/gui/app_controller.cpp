@@ -4,6 +4,9 @@
 #include "app/gui/host_worker.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
+#ifdef DESKBEAM_WINDOWS
+#include "app/gui/view_session.h"
+#endif
 
 #include "common/crypto/host_identity.h"
 #include "common/utils/log.h"
@@ -114,13 +117,45 @@ void AppController::stopSharing() {
 void AppController::connectToPeer(const QString& peerCodeOrHex) {
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
-    // Phase A stub — increments view count for UI feedback.  Phase A.1
-    // will spawn the actual ClientSession worker and open a stream
-    // window when the handshake succeeds.
-    activeViews_++;
+#ifdef DESKBEAM_WINDOWS
+    GuiViewConfig vc;
+    vc.host_ip            = "";  // rendezvous resolves
+    vc.port               = static_cast<uint16_t>(settings_->hostPort());
+    vc.stun_server        = settings_->stunServer().toStdString();
+    vc.rendezvous_server  = settings_->rendezvous().toStdString();
+    vc.peer_pubkey_hex    = peerCodeOrHex.toStdString();
+    vc.relay_server       = settings_->relay().toStdString();
+    vc.license_file       = settings_->licenseFile().toStdString();
+
+    auto vs = std::make_unique<ViewSession>(this);
+    ViewSession* vs_ptr = vs.get();
+    connect(vs_ptr, &ViewSession::finished, this, [this, vs_ptr] {
+        for (auto it = viewSessions_.begin(); it != viewSessions_.end(); ++it) {
+            if (it->get() == vs_ptr) {
+                viewSessions_.erase(it);
+                activeViews_ = static_cast<int>(viewSessions_.size());
+                emit activeViewsChanged();
+                break;
+            }
+        }
+        log::info("AppController", "View session ended (%d remaining)", activeViews_);
+    });
+    if (!vs->start(vc)) {
+        log::error("AppController", "ViewSession::start failed");
+        if (tray_) tray_->notify("DeskBeam",
+            QString("Could not connect to %1").arg(peerCodeOrHex));
+        return;
+    }
+    viewSessions_.push_back(std::move(vs));
+    activeViews_ = static_cast<int>(viewSessions_.size());
     emit activeViewsChanged();
-    if (tray_) tray_->notify("DeskBeam",
-        QString("Connecting to %1 — stub mode (Phase A.1 hooks the worker)").arg(peerCodeOrHex));
+    // Pre-populate the address book so the peer shows up under Recent
+    // once the session lands (real pubkey resolution happens later).
+    peers_->touch(peerCodeOrHex, peerCodeOrHex);
+#else
+    (void)peerCodeOrHex;
+    log::warn("AppController", "Connect not yet implemented on this platform");
+#endif
 }
 
 void AppController::disconnectView(int /*viewId*/) {

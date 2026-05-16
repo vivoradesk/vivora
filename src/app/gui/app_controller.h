@@ -7,11 +7,13 @@
 #include <QString>
 #include <QTimer>
 #include <memory>
+#include <vector>
 
 namespace deskbeam::gui {
 
 class Tray;
 class HostWorker;
+class ViewSession;
 
 // Top-level QML bridge.  Owns the Settings, AddressBook, Tray and (in
 // Phase A.1) the actual host / view session workers.  Exposed to QML as
@@ -77,6 +79,9 @@ private:
     std::unique_ptr<Settings>    settings_;
     std::unique_ptr<AddressBook> peers_;
     std::unique_ptr<HostWorker>  hostWorker_;
+    // One ViewSession per "Connect to peer" click.  Owned here so the
+    // stream window survives even when QML drops its reference.
+    std::vector<std::unique_ptr<ViewSession>> viewSessions_;
     Tray*                        tray_ = nullptr;
 
     // Polls hostWorker_'s atomic counters into Q_PROPERTYs.  Cheap
