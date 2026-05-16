@@ -36,7 +36,13 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
 }
 
 void LinuxHostPlatform::shutdown() {
+    // Order matters: flag first so any on_pw_frame already past cap_.stop()
+    // bails out before touching encoder state; then capture stop signals
+    // PipeWire; then we re-acquire enc_mu_ to serialise against any in-
+    // flight callback that already got past the flag check; then free.
+    shutting_down_.store(true, std::memory_order_release);
     cap_.stop();
+    std::lock_guard<std::mutex> lk(enc_mu_);
     enc_.shutdown();
 }
 
@@ -89,6 +95,11 @@ void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame
     // already converted from BGRx) — no need to snapshot the 4-bpp BGRx
     // buffer here, which used to cost 9 MB/frame and starve capture.
     std::lock_guard<std::mutex> lk(enc_mu_);
+    // Re-check the shutdown flag now that we hold the lock; without this
+    // a callback already past the early bail-out at the top could race
+    // through to encode_bgrx after shutdown() set the flag but before
+    // it acquired enc_mu_ for the encoder teardown.
+    if (shutting_down_.load(std::memory_order_acquire)) return;
     if (!enc_.encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
     deskbeam::host::VaapiEncoder::Packet pkt;
     while (enc_.get_packet(pkt)) {

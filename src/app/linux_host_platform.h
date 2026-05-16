@@ -5,6 +5,7 @@
 #include "host/capture/pipewire_capture.h"
 #include "host/encode/vaapi_encoder.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -62,6 +63,15 @@ private:
     };
     std::mutex enc_mu_;
     std::queue<QueuedPacket> queued_pkts_;
+
+    // Set by shutdown() before tearing down the encoder.  PipeWire's
+    // pw_thread_loop_stop() only signals the loop to exit but doesn't
+    // synchronously join in-flight callbacks; an on_pw_frame already
+    // dispatched can resume after cap_.stop() returned, race against
+    // enc_.shutdown(), and segfault inside sws_scale on a freed
+    // sw_frame_.  on_pw_frame checks this flag (under enc_mu_) and
+    // bails before touching the encoder.
+    std::atomic<bool> shutting_down_{false};
 
     // Outgoing packet view returned from get_encoded_packet — buffer
     // owned by us so the EncodedPacketView's data ptr stays valid until
