@@ -2,6 +2,7 @@
 
 #include "app/gui/address_book.h"
 #include "app/gui/app_controller.h"
+#include "app/gui/app_icon.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
 
@@ -128,6 +129,11 @@ int run_gui(int argc, char** argv) {
     // Stay alive when the main window closes; the tray "Quit" entry is
     // the only path that actually ends the process.
     QApplication::setQuitOnLastWindowClosed(false);
+
+    // Brand icon for taskbar / Alt-Tab / Explorer / window title bar.
+    // QML windows pick it up via QGuiApplication::windowIcon by default
+    // so nothing else needs wiring up.
+    QApplication::setWindowIcon(make_app_icon());
 
     // Pin QtQuick.Controls to the Basic style.  By default it auto-loads
     // the platform-native style (QtQuick.Controls.Windows on Windows,

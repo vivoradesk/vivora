@@ -1,19 +1,19 @@
 #include "app/gui/tray.h"
 
+#include "app/gui/app_icon.h"
+
 #include <QAction>
 #include <QApplication>
 #include <QIcon>
 #include <QMenu>
-#include <QStyle>
 
 namespace deskbeam::gui {
 
 Tray::Tray(QObject* parent) : QObject(parent) {
     tray_ = new QSystemTrayIcon(this);
-    // Placeholder icon — picked from the platform style so it shows
-    // *something* on every OS without having to ship a graphic yet.  Will
-    // be replaced by a proper SVG in resources/ later.
-    tray_->setIcon(QApplication::style()->standardIcon(QStyle::SP_ComputerIcon));
+    // Procedurally drawn brand icon — see app_icon.cpp.  Idle = grey-blue
+    // until setSharing() flips us to the green sharing variant.
+    tray_->setIcon(make_tray_idle_icon());
     tray_->setToolTip("DeskBeam");
 
     menu_ = new QMenu();
@@ -53,7 +53,12 @@ void Tray::setSharing(bool sharing, int clientCount) {
                 .arg(clientCount).arg(clientCount == 1 ? "" : "s");
     }
     tray_->setToolTip(tip);
-    // Could swap the icon here for a "live" variant — placeholder for now.
+    // Visible state change — green sharing variant when at least one
+    // viewer is active, grey-blue idle otherwise.  setIcon is cheap
+    // (Qt caches the pixmap set) so it's safe to call on every flip.
+    tray_->setIcon(sharing && clientCount > 0
+                   ? make_tray_sharing_icon()
+                   : make_tray_idle_icon());
 }
 
 void Tray::notify(const QString& title, const QString& body) {

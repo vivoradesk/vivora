@@ -38,6 +38,7 @@ if(WIN32)
         gui/settings.cpp
         gui/address_book.cpp
         gui/tray.cpp
+        gui/app_icon.cpp
         ${CMAKE_SOURCE_DIR}/qml/qml.qrc
     )
 endif()
