@@ -142,6 +142,16 @@ public:
     SessionState state() const { return state_; }
     size_t client_count() const { return clients_.size(); }
 
+    // Seconds since the host last received a mouse / keyboard event from
+    // ANY client.  0 if no input has ever been received this session.
+    // GUI uses this for the idle-timeout warning + auto-disconnect feature.
+    int64_t seconds_since_last_input() const;
+
+    // Force-disconnect every currently-attached client.  Socket stays
+    // open and new clients can still connect.  Triggered by the idle
+    // timeout from host_loop.
+    void disconnect_all_clients();
+
     // True if ANY client needs an IDR (new connect or explicit request).
     bool idr_needed() const;
     void clear_idr_needed();
@@ -217,6 +227,11 @@ private:
     // Connected clients keyed by address.
     std::map<net::SocketAddr, ClientInfo> clients_;
     bool new_client_flag_ = false;
+
+    // Last input event (mouse / keyboard) from any client, in
+    // monotonic clock domain.  Default-constructed value means "no
+    // input yet this session".  Updated in handle_input.
+    TimePoint last_input_time_{};
     VideoCodec codec_ = VideoCodec::HEVC;
 
     uint32_t pending_screen_w_ = 0;

@@ -30,6 +30,8 @@ struct HostWorkerConfig {
     std::string           relay_session_hex;
     std::string           license_file;
     uint32_t              display_index     = 0;   // mac/linux only
+    int                   idle_timeout_min  = 0;   // 0 disables
+    int                   idle_warning_sec  = 30;
 };
 
 // Owns a HostPlatform and runs run_host_loop on its own QThread.  The GUI
@@ -63,6 +65,12 @@ signals:
     void stopped();
     // Platform init failed (no DXGI device, encoder unavailable, etc.).
     void initFailed(QString reason);
+    // Idle warning fired — clients have been silent for idle_timeout_min
+    // and we'll force-disconnect them in `seconds_until_disconnect`
+    // seconds unless they send input first.  AppController surfaces
+    // this as a tray toast.  Always delivered on the GUI thread (queued
+    // connection across the QThread boundary).
+    void idleWarning(int seconds_until_disconnect);
 
 private:
     void runOnWorkerThread();

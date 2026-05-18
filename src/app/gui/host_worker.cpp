@@ -104,6 +104,19 @@ void HostWorker::runOnWorkerThread() {
     lcfg.stop_flag          = &stop_flag_;
     lcfg.client_count_out   = &client_count_;
     lcfg.state_out          = &state_;
+    lcfg.idle_timeout_min   = cfg_.idle_timeout_min;
+    lcfg.idle_warning_sec   = cfg_.idle_warning_sec;
+    // Bounce the idle warning through a queued connection so the toast
+    // is raised on the GUI thread.  Lambda capture is fine — the worker
+    // thread outlives the run_host_loop call.
+    lcfg.on_idle_warning    = [this](int seconds_until_disconnect) {
+        // Marshal onto the GUI thread before emitting the signal so
+        // the AppController's slot (which raises a QSystemTrayIcon
+        // toast) runs in the right Qt thread context.
+        QMetaObject::invokeMethod(this, [this, seconds_until_disconnect] {
+            emit idleWarning(seconds_until_disconnect);
+        }, Qt::QueuedConnection);
+    };
 
     deskbeam::run_host_loop(*platform_, lcfg);
 

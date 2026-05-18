@@ -13,6 +13,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 namespace deskbeam {
 
@@ -178,6 +179,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
     bool had_clients = false;
+    // Idle-timeout state — first crossing fires the warning callback,
+    // second crossing (warn + warning_sec) force-disconnects.  Reset
+    // whenever the client count drops to zero (we always grant a
+    // freshly-attached client a full idle budget).
+    bool idle_warned = false;
 
     // Adaptive framerate throttle.  Clients send PerfReport once per second
     // with their sustainable target_fps; the host paces capture+encode to
@@ -262,6 +268,47 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                           n, new_br / 1000);
             }
             had_clients = true;
+        }
+
+        // Lazy-encoder gate: when nobody's attached, skip the entire
+        // capture / encode / wire path — DXGI Duplicate1, the VAAPI /
+        // NVENC / AMF / QSV kernels, FEC, and the FPS-paced send all
+        // sit idle.  We still tick session.poll() at full speed (so a
+        // fresh HELLO is picked up within ~10ms) and call platform.on_idle
+        // so DXGI can release the previous frame.  GUI host stays "Listening"
+        // in the UI but uses near-zero GPU until the first client lands.
+        if (session.client_count() == 0) {
+            // Resetting idle bookkeeping here means a client that
+            // disconnects and reconnects gets a fresh idle budget.
+            idle_warned = false;
+            platform.on_idle();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        // Idle-timeout (GUI Phase B): warn and then force-disconnect
+        // clients that haven't sent any input in `idle_timeout_min`.
+        // Disabled when idle_timeout_min == 0 (CLI default).
+        if (cfg.idle_timeout_min > 0) {
+            const int64_t idle_sec = session.seconds_since_last_input();
+            const int64_t warn_at  = static_cast<int64_t>(cfg.idle_timeout_min) * 60;
+            const int64_t disc_at  = warn_at + cfg.idle_warning_sec;
+            if (!idle_warned && idle_sec >= warn_at) {
+                idle_warned = true;
+                if (cfg.on_idle_warning) {
+                    cfg.on_idle_warning(cfg.idle_warning_sec);
+                }
+                log::info("HOST", "Idle %llds — warning issued, disconnect in %ds",
+                          (long long)idle_sec, cfg.idle_warning_sec);
+            }
+            if (idle_warned && idle_sec >= disc_at) {
+                log::info("HOST", "Idle %llds — force-disconnecting clients",
+                          (long long)idle_sec);
+                session.disconnect_all_clients();
+                idle_warned = false;
+                continue;   // skip this tick's encode work; loop top will
+                            // see client_count==0 and take the lazy path
+            }
         }
 
         // Keep bitrate controller aware of client count so it can

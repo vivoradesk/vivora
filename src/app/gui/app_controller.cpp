@@ -35,6 +35,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                    reason.toUtf8().constData());
         if (tray_) tray_->notify("DeskBeam: host failed to start", reason);
     });
+    connect(hostWorker_.get(), &HostWorker::idleWarning, this,
+            [this](int secs) {
+        log::info("AppController", "Idle warning — disconnect in %ds", secs);
+        if (tray_) tray_->notify("DeskBeam: idle",
+            QString("No input from your viewer for %1 min — "
+                    "disconnecting in %2s.")
+                .arg(settings_->idleTimeoutMin()).arg(secs));
+    });
     pollTimer_.setInterval(500);
     connect(&pollTimer_, &QTimer::timeout, this, [this] {
         if (!hostWorker_->running()) return;
@@ -91,6 +99,8 @@ void AppController::startSharing() {
     wc.relay_server       = settings_->relay().toStdString();
     wc.license_file       = settings_->licenseFile().toStdString();
     wc.display_index      = settings_->displayIndex();
+    wc.idle_timeout_min   = settings_->idleTimeoutMin();
+    wc.idle_warning_sec   = settings_->idleWarningSec();
 
     sharing_     = true;
     clientCount_ = 0;

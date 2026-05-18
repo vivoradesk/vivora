@@ -4,6 +4,7 @@
 #include "host/encode/video_encoder.h"
 #include <atomic>
 #include <cstdint>
+#include <functional>
 
 namespace deskbeam {
 
@@ -38,6 +39,16 @@ struct HostLoopConfig {
     // Required by Pro-managed relay (--require-license); ignored by
     // self-host instances.
     const char* license_file = nullptr;
+
+    // Idle-timeout (GUI Phase B).  When clients sit silent for
+    // `idle_timeout_min` minutes, host_loop fires `on_idle_warning`
+    // (typically a tray toast).  If they stay silent another
+    // `idle_warning_sec` seconds, host_loop force-disconnects every
+    // attached client.  idle_timeout_min == 0 disables the whole
+    // feature (CLI default).
+    int  idle_timeout_min = 0;
+    int  idle_warning_sec = 30;
+    std::function<void(int seconds_until_disconnect)> on_idle_warning;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

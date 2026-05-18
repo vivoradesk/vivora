@@ -552,6 +552,12 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client.probe_pending  = false;
     client.probe_scheduled = false;   // re-arm deferred probe on each HELLO
 
+    // Seed the idle timer at handshake completion.  Without this a
+    // client that connects and never sends any input (looks at a static
+    // screen) leaves last_input_time_ at epoch zero, seconds_since_
+    // last_input() returns 0, and the GUI idle-timeout never fires.
+    last_input_time_ = now;
+
     // Derive transport cipher pairs — main (video/control) and audio — from
     // the same Noise HKDF.  The handshake object can go away now; keys are
     // committed to CipherStates.
@@ -771,7 +777,28 @@ void HostSession::handle_input(const uint8_t* payload, size_t len) {
     protocol::InputEvent event;
     if (protocol::InputEvent::deserialize(payload, len, event)) {
         if (input_injector_) input_injector_->inject(event);
+        // Touch last-input for the idle-timeout feature.  Updated for
+        // every event, not just successful injection, because client
+        // intent is what matters — we'd otherwise mistake an injection
+        // failure for an idle session.
+        last_input_time_ = Clock::now();
     }
+}
+
+int64_t HostSession::seconds_since_last_input() const {
+    if (last_input_time_.time_since_epoch().count() == 0) return 0;
+    return std::chrono::duration_cast<std::chrono::seconds>(
+        Clock::now() - last_input_time_).count();
+}
+
+void HostSession::disconnect_all_clients() {
+    if (clients_.empty()) return;
+    log::info("HostSession", "Force-disconnecting %zu client(s) (idle timeout)",
+              clients_.size());
+    clients_.clear();
+    state_ = SessionState::Disconnected;
+    // Socket stays open — new HELLOs from fresh clients will land in
+    // handle_hello and reconnect normally.
 }
 
 std::string HostSession::host_public_key_hex() const {
