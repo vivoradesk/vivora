@@ -160,12 +160,9 @@ ApplicationWindow {
                         // Connect by the most stable identifier we have.
                         App.connectToPeer(pubkey.length > 0 ? pubkey : code)
                     }
-                    onPeerRenameRequested: (row) => {
-                        addPeerLoader.pendingPubkey = ""
-                        addPeerLoader.pendingCode   = ""
-                        addPeerLoader.active = true
-                        // (Phase C: pre-fill with current alias for editing.)
-                    }
+                    // Rename / Forget now live inside the view's right-click
+                    // context menu (Phase C).  No host-side wiring needed
+                    // because AddressBook backend mutators are Q_INVOKABLE.
                 }
             }
         }

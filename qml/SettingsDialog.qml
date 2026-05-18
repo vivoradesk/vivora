@@ -105,6 +105,22 @@ Window {
                 text: App.settings.stunServer
                 onEditingFinished: App.settings.stunServer = text
             }
+
+            Label { text: "Host UDP port:" }
+            RowLayout {
+                Layout.fillWidth: true
+                SpinBox {
+                    Layout.fillWidth: true
+                    from: 1024; to: 65535; value: App.settings.hostPort
+                    editable: true
+                    onValueModified: App.settings.hostPort = value
+                }
+                Label {
+                    text: "(viewer must use --port " + App.settings.hostPort + ")"
+                    opacity: 0.6
+                    font.italic: true
+                }
+            }
             Item { Layout.columnSpan: 2; Layout.fillHeight: true }
         }
 
