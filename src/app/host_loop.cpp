@@ -179,6 +179,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
     bool had_clients = false;
+    // Phase B+: encoder lifecycle.  We track the previous tick's
+    // client count to fire start_encoder() exactly once on the 0→N
+    // transition and stop_encoder() exactly once on N→0.  Platforms
+    // that haven't opted in to lazy encoding (Linux / macOS today)
+    // have no-op start/stop_encoder so this is harmless.
+    int  prev_client_count = 0;
     // Idle-timeout state — first crossing fires the warning callback,
     // second crossing (warn + warning_sec) force-disconnects.  Reset
     // whenever the client count drops to zero (we always grant a
@@ -235,6 +241,27 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             cfg.state_out->store(
                 session.state() == host::SessionState::Connected ? 1 : 0,
                 std::memory_order_relaxed);
+        }
+
+        // Phase B+: encoder lifecycle on client_count transitions.
+        // Runs BEFORE the new-client block so set_bitrate / request_idr
+        // calls below land on a live encoder.  On a start_encoder()
+        // failure we bail out the client — better than leaving a half-
+        // initialised session that the next bitrate tick will crash on.
+        {
+            const int now_count = static_cast<int>(session.client_count());
+            if (prev_client_count == 0 && now_count > 0) {
+                if (!platform.start_encoder()) {
+                    log::error("HOST", "start_encoder() failed — dropping connecting client");
+                    session.disconnect_all_clients();
+                    prev_client_count = 0;
+                    continue;
+                }
+            }
+            if (prev_client_count > 0 && now_count == 0) {
+                platform.stop_encoder();
+            }
+            prev_client_count = now_count;
         }
 
         // Handle new client connections.

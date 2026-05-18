@@ -19,38 +19,35 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     auto res = capture_->get_resolution();
     deskbeam::log::info("HOST", "Capture: %ux%u", res.width, res.height);
 
-    uint32_t bitrate = manual_bitrate_bps;
-    if (bitrate == 0)
-        bitrate = deskbeam::codec::default_bitrate_for(res.width, res.height, 60);
-
-    encoder_ = deskbeam::IVideoEncoder::create(kind);
-    if (!encoder_) {
-        deskbeam::log::error("HOST", "No matching video encoder available");
-        return false;
-    }
-    deskbeam::EncoderConfig cfg;
-    cfg.width = res.width;
-    cfg.height = res.height;
-    cfg.fps = 60;
-    cfg.bitrate_bps = bitrate;
-    // idr_period serves as AMF GOP_SIZE — auto-IDR cadence when no client
-    // request comes in. NVENC/QSV ignore it (intra refresh). With the
-    // crypto-decrypt zero-payload bug fixed (2026-04-29), client IdrRequest
-    // packets actually reach the host now, so recovery latency is ~50-100ms
-    // via request_idr() instead of having to wait for the next GOP boundary.
-    // Auto-IDR is now just a deep safety net for the worst case of total
-    // bidirectional loss — keep it long to minimise the steady-state
-    // 100KB-IDR trickle on the wire. 1800 = 30s @ 60fps.
-    cfg.idr_period = 1800;
-    cfg.codec = codec;
-    if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
-
-    if (!encoder_->init(cfg, dxgi_ ? dxgi_->get_device() : nullptr)) {
-        deskbeam::log::error("HOST", "Failed to init encoder");
-        return false;
+    // HDR carriage: H.264 is 8-bit only, but DXGI hands us FP16 surfaces
+    // when the source display is HDR.  AMF "falls back" to 8-bit by
+    // CopyResource'ing FP16 bytes into a BGRA surface — which just
+    // bit-reinterprets the FP16 channel pairs as BGRA pixels and
+    // produces green garbage on the wire.  Promote to HEVC Main10
+    // whenever capture is FP16 so HDR survives end-to-end; the client
+    // already negotiates the host's actual codec via the handshake, so
+    // it picks HEVC automatically.
+    auto effective_codec = codec;
+    if (effective_codec == deskbeam::VideoCodec::H264
+        && dxgi_ && dxgi_->get_capture_format() == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+        deskbeam::log::warn("HOST",
+            "HDR capture (FP16) detected — promoting requested H.264 to "
+            "HEVC Main10 so 10-bit colour survives the encode");
+        effective_codec = deskbeam::VideoCodec::HEVC;
     }
 
-    // Force initial mouse movement for DXGI.
+    // Save the encoder config — start_encoder() rebuilds the encoder
+    // from these whenever a viewer attaches.  Bitrate auto-derives from
+    // resolution if the user didn't pin one.
+    saved_kind_      = kind;
+    saved_codec_     = effective_codec;
+    live_bitrate_bps_ = manual_bitrate_bps != 0
+        ? manual_bitrate_bps
+        : deskbeam::codec::default_bitrate_for(res.width, res.height, 60);
+
+    // Force initial mouse movement so DXGI produces its first frame
+    // immediately (otherwise the duplication blocks until the user
+    // happens to wiggle the mouse).  Cheap.
     INPUT mi = {};
     mi.type = INPUT_MOUSE;
     mi.mi.dwFlags = MOUSEEVENTF_MOVE;
@@ -60,18 +57,76 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     return true;
 }
 
+bool WindowsHostPlatform::start_encoder() {
+    if (encoder_) return true;   // already running
+
+    encoder_ = deskbeam::IVideoEncoder::create(saved_kind_);
+    if (!encoder_) {
+        deskbeam::log::error("HOST", "No matching video encoder available");
+        return false;
+    }
+    auto res = capture_->get_resolution();
+    deskbeam::EncoderConfig cfg;
+    cfg.width       = res.width;
+    cfg.height      = res.height;
+    cfg.fps         = 60;
+    cfg.bitrate_bps = live_bitrate_bps_;
+    // idr_period serves as AMF GOP_SIZE — auto-IDR cadence when no
+    // client request comes in. NVENC/QSV ignore it (intra refresh).
+    // Auto-IDR is now just a deep safety net; client IdrRequest fires
+    // recovery in 50-100ms.  1800 = 30s @ 60fps keeps the 100KB-IDR
+    // trickle off the wire.
+    cfg.idr_period  = 1800;
+    cfg.codec       = saved_codec_;
+    if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
+
+    if (!encoder_->init(cfg, dxgi_ ? dxgi_->get_device() : nullptr)) {
+        deskbeam::log::error("HOST", "Failed to init encoder");
+        encoder_.reset();
+        return false;
+    }
+    deskbeam::log::info("HOST", "Encoder started (%s, %u kbps)",
+                        saved_codec_ == deskbeam::VideoCodec::HEVC ? "hevc" : "h264",
+                        live_bitrate_bps_ / 1000);
+    return true;
+}
+
+void WindowsHostPlatform::stop_encoder() {
+    if (!encoder_) return;
+    encoder_.reset();
+    // Drop the staged frame too — its content is from a previous session
+    // and may not match the next encoder's input format if config changes.
+    staging_valid_ = false;
+    deskbeam::log::info("HOST", "Encoder stopped (no clients attached)");
+}
+
 uint32_t WindowsHostPlatform::capture_width()  const { return capture_->get_resolution().width; }
 uint32_t WindowsHostPlatform::capture_height() const { return capture_->get_resolution().height; }
 
-void WindowsHostPlatform::set_bitrate(uint32_t bps) { encoder_->set_bitrate(bps); }
-void WindowsHostPlatform::request_idr() { encoder_->request_idr(); }
+void WindowsHostPlatform::set_bitrate(uint32_t bps) {
+    // Remember the value even when the encoder is torn down so the
+    // next start_encoder() picks up the latest rate.
+    live_bitrate_bps_ = bps;
+    if (encoder_) encoder_->set_bitrate(bps);
+}
+void WindowsHostPlatform::request_idr() {
+    if (encoder_) encoder_->request_idr();
+}
 deskbeam::VideoCodec WindowsHostPlatform::actual_codec() const {
-    return encoder_ ? encoder_->get_config().codec : deskbeam::VideoCodec::HEVC;
+    // Answer from saved config when encoder is torn down — host_loop
+    // queries this before the first viewer attaches.
+    return encoder_ ? encoder_->get_config().codec : saved_codec_;
 }
 
 bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                                               bool& content_changed,
                                               bool force) {
+    // Phase B+: lazy encoder.  host_loop's lazy gate normally prevents
+    // us from getting here without an active encoder, but guard anyway
+    // — a race between client disconnect + this tick would crash on
+    // the encoder_->encode() call below otherwise.
+    if (!encoder_) return false;
+
     deskbeam::CapturedFrame frame;
     // Non-blocking capture: if DXGI doesn't have a fresh frame, return
     // immediately so the host_loop can fire heartbeat / yield. A 16ms
@@ -164,6 +219,7 @@ bool WindowsHostPlatform::take_cursor_shape(CursorShapeView& out) {
 }
 
 bool WindowsHostPlatform::get_encoded_packet(EncodedPacketView& out) {
+    if (!encoder_) return false;
     deskbeam::EncodedPacket pkt;
     if (!encoder_->get_packet(pkt))
         return false;

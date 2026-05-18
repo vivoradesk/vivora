@@ -34,11 +34,27 @@ public:
     bool get_cursor_state(CursorState& out) override;
     bool take_cursor_shape(CursorShapeView& out) override;
 
+    // Phase B+ encoder lifecycle.  init() does only capture setup;
+    // start_encoder builds the actual NVENC/AMF/QSV session, stop_encoder
+    // tears it down.  Capture (DXGI Duplicate1 handle + staging_tex_)
+    // stays alive across the gap so reconnect skips its setup cost.
+    bool start_encoder() override;
+    void stop_encoder() override;
+
 private:
     std::unique_ptr<deskbeam::IScreenCapture> capture_;
     deskbeam::DxgiCapture* dxgi_ = nullptr;
     std::unique_ptr<deskbeam::IVideoEncoder> encoder_;
     std::vector<uint8_t> pkt_buf_;
+
+    // Saved encoder config so start_encoder() can rebuild after a
+    // stop_encoder() teardown.  Bitrate is mutable across the session
+    // (BitrateController updates it on RTT/loss changes) — we keep a
+    // running copy here that set_bitrate() updates whether or not the
+    // encoder is currently live.
+    deskbeam::EncoderKind saved_kind_  = deskbeam::EncoderKind::Auto;
+    deskbeam::VideoCodec  saved_codec_ = deskbeam::VideoCodec::HEVC;
+    uint32_t              live_bitrate_bps_ = 0;
 
     // Owned mirror of the most recently captured DXGI texture, fed to the
     // encoder by re_encode_last() when the screen is static and capture

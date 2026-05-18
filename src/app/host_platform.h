@@ -69,6 +69,23 @@ struct HostPlatform {
     // Cleanup.
     virtual void shutdown() {}
 
+    // Encoder lifecycle for the lazy-encoder path (Phase B+).
+    //   start_encoder() is called when the first viewer attaches.
+    //   stop_encoder()  is called when the last viewer drops.
+    // Between these calls the platform should release the encoder
+    // session (NVENC slot / AMF context / VAAPI surfaces — the
+    // expensive GPU state), so a host that's been "Listening" all
+    // day uses near-zero GPU until somebody connects.  Capture
+    // handles stay open across the gap so reconnect is fast.
+    //
+    // Default implementations are no-ops, preserving the always-on
+    // behaviour for platforms that haven't been wired up yet.
+    // start_encoder() returns false on a fatal init failure (e.g. no
+    // GPU encoder slot available); host_loop should disconnect the
+    // pending client when that happens.
+    virtual bool start_encoder() { return true; }
+    virtual void stop_encoder() {}
+
     // Cursor sync (Windows DXGI for now; default no-op elsewhere).
     struct CursorState {
         float    x_norm   = 0.0f;   // 0..1 relative to host screen
