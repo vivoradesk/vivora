@@ -8,9 +8,14 @@
 #include "common/utils/log.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QLockFile>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QUrl>
 #include <QtPlugin>
@@ -39,8 +44,41 @@ Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
 
 namespace deskbeam::gui {
 
+// Single-instance enforcement.  QLockFile sits in a writable per-user
+// location; the running instance also listens on a QLocalServer that
+// the second-launch process pings to ask "please raise your window".
+//
+// Both keys are stable per user — no version suffix.  If the lock-
+// file format changes in a future release we'll bump the basename.
+namespace {
+
+QString lock_file_path() {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (dir.isEmpty()) {
+        // Windows / older macOS don't define a runtime location; fall
+        // back to AppLocalData which always exists.
+        dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    }
+    QDir().mkpath(dir);
+    return dir + "/deskbeam.lock";
+}
+
+// QLocalServer / QLocalSocket map to:
+//   Windows: named pipe \\.\pipe\<name>
+//   POSIX:   Unix domain socket in $TMPDIR
+// One name per user is fine — the lock file already serialises us.
+constexpr const char* IPC_SERVER_NAME = "deskbeam-instance";
+constexpr const char* IPC_RAISE_CMD   = "raise\n";
+
+} // namespace
+
 int run_gui(int argc, char** argv) {
     QApplication app(argc, argv);
+
+    // Settings has to know the org/app name to derive QStandardPaths
+    // entries (incl. lock file path); set them before any Settings touch.
+    QCoreApplication::setOrganizationName("DeskBeam");
+    QCoreApplication::setApplicationName("DeskBeam");
 
 #ifdef DESKBEAM_WINDOWS
     deskbeam::net::WinsockInit wsa;
@@ -49,6 +87,37 @@ int run_gui(int argc, char** argv) {
         return 1;
     }
 #endif
+
+    // Single-instance check.  If another deskbeam.exe is already
+    // running for this user, ping it via the local IPC server so it
+    // raises its tray window, then exit cleanly.  Without this the
+    // second launch would silently fight over the same QSettings,
+    // host identity, and rendezvous registration.
+    auto lock = std::make_unique<QLockFile>(lock_file_path());
+    lock->setStaleLockTime(0);  // don't auto-remove — the IPC check below covers crash recovery
+    if (!lock->tryLock(100)) {
+        // Could be live or stale.  Try the IPC ping first; if it lands
+        // we know someone is alive and we just hand off.
+        QLocalSocket sock;
+        sock.connectToServer(IPC_SERVER_NAME);
+        if (sock.waitForConnected(500)) {
+            sock.write(IPC_RAISE_CMD);
+            sock.waitForBytesWritten(500);
+            sock.disconnectFromServer();
+            log::info("GUI", "Existing DeskBeam instance found — asked it to raise its window");
+            return 0;
+        }
+        // No live owner — must be a stale lock from a crashed process.
+        // Remove it and try once more.  removeStaleLockFile() checks
+        // the recorded PID and only deletes when that process is gone,
+        // so this is safe against a real concurrent launch.
+        if (lock->removeStaleLockFile() && lock->tryLock(100)) {
+            log::warn("GUI", "Removed stale instance lock and acquired ours");
+        } else {
+            log::error("GUI", "Another instance is holding the lock but not answering IPC — refusing to start");
+            return 1;
+        }
+    }
 
     // Hard requirement — without a tray we lose the "always on" promise.
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
@@ -71,6 +140,32 @@ int run_gui(int argc, char** argv) {
     Tray          tray;
     controller.setTray(&tray);
 
+    // Local-socket server: a second deskbeam.exe launch will connect
+    // here and send "raise\n" to bring the existing window forward.
+    // removeServer() clears a stale Unix socket / pipe handle left by
+    // a previous crashed process before we try to bind.
+    QLocalServer ipc_server;
+    QLocalServer::removeServer(IPC_SERVER_NAME);
+    if (!ipc_server.listen(IPC_SERVER_NAME)) {
+        log::warn("GUI", "QLocalServer listen failed: %s — single-instance raise won't work",
+                  ipc_server.errorString().toUtf8().constData());
+    } else {
+        QObject::connect(&ipc_server, &QLocalServer::newConnection,
+                         &controller, [&ipc_server, &controller] {
+            while (auto* client = ipc_server.nextPendingConnection()) {
+                QObject::connect(client, &QLocalSocket::disconnected,
+                                 client, &QLocalSocket::deleteLater);
+                if (client->waitForReadyRead(200)) {
+                    const QByteArray cmd = client->readAll().trimmed();
+                    if (cmd == "raise") {
+                        controller.showMainWindow();
+                    }
+                }
+                client->disconnectFromServer();
+            }
+        });
+    }
+
     QQmlApplicationEngine engine;
     // Expose the controller (and via its properties — Settings, AddressBook)
     // to QML as the singleton-like object `App`.  We don't bother with a
@@ -84,7 +179,12 @@ int run_gui(int argc, char** argv) {
     }
 
     log::info("GUI", "DeskBeam GUI ready");
-    return app.exec();
+    const int rc = app.exec();
+    // lock released in destructor; explicit reset here keeps the order
+    // obvious — AppController teardown happens first (stops host /
+    // view workers), then we drop the lock so the next launch can grab it.
+    lock.reset();
+    return rc;
 }
 
 } // namespace deskbeam::gui
