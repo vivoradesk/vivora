@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Vivora.app/Contents/Info.plist template.
+  CMake should configure_file() this into the built .app bundle once the
+  macOS GUI is wired up (see project_phase5_gui_state — Mac GUI pending).
+
+  After bundle ID is registered with Apple Developer:
+    - sign:    codesign -s "Developer ID Application: <Team>" Vivora.app
+    - notarize: xcrun notarytool submit ...
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <key>CFBundleExecutable</key>
+    <string>vivora</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>dev.vivora.app</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleName</key>
+    <string>Vivora</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>Vivora</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>@PROJECT_VERSION@</string>
+
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- ScreenCaptureKit permission prompt rationale. -->
+    <key>NSScreenCaptureDescription</key>
+    <string>Vivora captures the screen so remote viewers can see your desktop.</string>
+
+    <!-- Microphone is not requested; loopback audio comes from CoreAudio. -->
+
+    <!-- Accessibility prompt for the CGEvent input injection path. -->
+    <key>NSAccessibilityDescription</key>
+    <string>Vivora forwards remote keyboard and mouse input to your Mac.</string>
+
+    <!-- Network reachability + local network discovery (rendezvous + relay). -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Vivora connects to peers on your local network for low-latency direct streaming.</string>
+
+    <!-- Tray-only behaviour: hide from Dock + Cmd-Tab. -->
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>

@@ -78,7 +78,11 @@ int run_gui(int argc, char** argv) {
 
     // Settings has to know the org/app name to derive QStandardPaths
     // entries (incl. lock file path); set them before any Settings touch.
+    // OrganizationDomain controls reverse-DNS path on macOS (~/Library/
+    // Preferences/dev.vivora.Vivora.plist) and the QSettings registry
+    // key on Windows; align with the bundle id prefix dev.vivora.*.
     QCoreApplication::setOrganizationName("Vivora");
+    QCoreApplication::setOrganizationDomain("vivora.dev");
     QCoreApplication::setApplicationName("Vivora");
 
 #ifdef VIVORA_WINDOWS

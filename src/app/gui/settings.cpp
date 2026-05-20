@@ -49,6 +49,7 @@ Settings::Settings(QObject* parent)
     // QCoreApplication org/name fields are also used by other places
     // (peer pin file, etc.); set them once at app startup for clarity.
     QCoreApplication::setOrganizationName("Vivora");
+    QCoreApplication::setOrganizationDomain("vivora.dev");
     QCoreApplication::setApplicationName("Vivora");
 }
 

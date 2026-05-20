@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  vivora.exe application manifest.  CMake should embed this via target_sources
+  with the .rc that compiles into the binary, once we wire up the installer
+  flow (Phase 5).
+
+  Identity name MUST match the MSI ProductName for taskbar grouping to
+  collapse the running instance under the pinned installer entry.
+  AssemblyVersion is bumped per release; ProductVersion separately for
+  marketing.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+    <assemblyIdentity
+        type="win32"
+        name="dev.vivora.app"
+        version="0.1.0.0"
+        processorArchitecture="amd64"/>
+
+    <description>Vivora — low-latency remote desktop</description>
+
+    <!-- Per-monitor v2 DPI awareness (matches the QApplication default). -->
+    <application xmlns="urn:schemas-microsoft-com:asm.v3">
+        <windowsSettings>
+            <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+            <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+            <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+        </windowsSettings>
+    </application>
+
+    <!-- Common controls v6 — required by some QML widgets for native theming. -->
+    <dependency>
+        <dependentAssembly>
+            <assemblyIdentity
+                type="win32"
+                name="Microsoft.Windows.Common-Controls"
+                version="6.0.0.0"
+                processorArchitecture="*"
+                publicKeyToken="6595b64144ccf1df"
+                language="*"/>
+        </dependentAssembly>
+    </dependency>
+
+    <!-- asInvoker — no UAC elevation required for normal use. -->
+    <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+        <security>
+            <requestedPrivileges>
+                <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+            </requestedPrivileges>
+        </security>
+    </trustInfo>
+</assembly>

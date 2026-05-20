@@ -193,7 +193,7 @@ public:
             if (cb_copy) cb_copy(samples, frames, rate, channels);
         };
 
-        queue_ = dispatch_queue_create("com.vivora.audio_capture", DISPATCH_QUEUE_SERIAL);
+        queue_ = dispatch_queue_create("dev.vivora.audio_capture", DISPATCH_QUEUE_SERIAL);
         stream_ = [[SCStream alloc] initWithFilter:filter
                                      configuration:cfg
                                           delegate:output_];

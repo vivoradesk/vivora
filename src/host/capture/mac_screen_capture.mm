@@ -261,7 +261,7 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
     impl_->output.latestPtsUs = &impl_->latest_pts_us;
     impl_->output.framesDelivered = &impl_->frames_delivered;
 
-    impl_->queue = dispatch_queue_create("com.vivora.capture", DISPATCH_QUEUE_SERIAL);
+    impl_->queue = dispatch_queue_create("dev.vivora.capture", DISPATCH_QUEUE_SERIAL);
 
     impl_->stream = [[SCStream alloc] initWithFilter:filter
                                         configuration:cfg

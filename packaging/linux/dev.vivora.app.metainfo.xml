@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metainfo for Vivora.
+  Required by Flathub / GNOME Software / KDE Discover.  AppImage builds
+  can ship this alongside the .desktop file.  The reverse-DNS filename
+  (dev.vivora.app.metainfo.xml) matches the desktop file's X-AppId.
+-->
+<component type="desktop-application">
+    <id>dev.vivora.app</id>
+    <name>Vivora</name>
+    <summary>Low-latency open-source remote desktop</summary>
+
+    <metadata_license>CC0-1.0</metadata_license>
+    <project_license>AGPL-3.0-or-later</project_license>
+
+    <description>
+        <p>
+            Vivora is an open-source remote desktop client and host focused on
+            minimal latency.  Hardware GPU encoders (NVENC, AMF, QSV, VAAPI),
+            a custom UDP protocol with adaptive FEC, and a fully zero-copy
+            GPU pipeline give it Parsec-class stream quality without the
+            closed-source cost.
+        </p>
+    </description>
+
+    <launchable type="desktop-id">dev.vivora.app.desktop</launchable>
+
+    <url type="homepage">https://vivora.dev</url>
+    <url type="bugtracker">https://github.com/vivoradesk/vivora/issues</url>
+    <url type="vcs-browser">https://github.com/vivoradesk/vivora</url>
+
+    <developer_name>Vivora Contributors</developer_name>
+
+    <provides>
+        <binary>vivora</binary>
+    </provides>
+
+    <categories>
+        <category>Network</category>
+        <category>RemoteAccess</category>
+    </categories>
+
+    <content_rating type="oars-1.1"/>
+</component>

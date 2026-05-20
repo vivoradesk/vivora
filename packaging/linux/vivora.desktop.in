@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vivora
+GenericName=Remote Desktop
+Comment=Low-latency open-source remote desktop
+Exec=vivora
+Icon=dev.vivora.app
+Terminal=false
+Categories=Network;RemoteAccess;Utility;
+Keywords=remote;desktop;streaming;
+StartupNotify=false
+StartupWMClass=Vivora
+# Reverse-DNS app id, matches the macOS bundle id + the AppImage metadata file.
+X-AppId=dev.vivora.app
