@@ -7,3 +7,13 @@ build-linux/
 license.sk
 license.pk
 token.bin
+
+# FFmpeg distribution binaries — too large for GitHub (>100MB each)
+# and not used by our build.  Contributors download them separately
+# into third_party/ff/ for ad-hoc tests (see "Play with: ffplay ..."
+# log hints in encode_test.cpp / transport_test.cpp).
+third_party/ff/*.exe
+
+# Claude Code local state — personal permissions + scheduler lock.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
