@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Noise_NK_25519_ChaChaPoly_BLAKE2b — a Noise handshake pattern where the
 // responder's static public key is known to the initiator in advance.
@@ -122,7 +122,7 @@ public:
     //   - Initiator calls this once to produce msg1.
     //   - Responder calls this after read_message(msg1) to produce msg2.
     // `payload` is application data piggy-backed on the handshake — used by
-    // DeskBeam to carry HELLO_MAGIC / HELLO_ACK in the same round-trip.
+    // Vivora to carry HELLO_MAGIC / HELLO_ACK in the same round-trip.
     // `out` must have room for `payload_len + HANDSHAKE_OVERHEAD` bytes.
     // Returns wire length on success, 0 on error.
     size_t write_message(const uint8_t* payload, size_t payload_len,
@@ -145,7 +145,7 @@ public:
     bool finalize(CipherState& send_cs, CipherState& recv_cs);
 
     // Variant that derives an auxiliary cipher pair in the same HKDF step.
-    // Used to key DeskBeam's audio socket without running a second Noise
+    // Used to key Vivora's audio socket without running a second Noise
     // handshake: the main HKDF chain is extended with two extra output
     // blocks (T3/T4) so the audio cipher is cryptographically independent
     // from the video cipher but shares the same forward-secret material.
@@ -170,4 +170,4 @@ private:
     int  step_ = 0;
 };
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

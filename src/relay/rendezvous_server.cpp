@@ -1,4 +1,4 @@
-// deskbeam-rendezvous: standalone UDP signalling server.
+// vivora-rendezvous: standalone UDP signalling server.
 //
 // Maintains a per-process in-memory map from host long-term public key to
 // the host's reflexive (NAT-translated) UDP endpoint as observed at the
@@ -48,10 +48,10 @@ using Clock     = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
 
 struct Registration {
-    deskbeam::net::SocketAddr endpoint;   // reflexive (the source addr the rdv saw)
+    vivora::net::SocketAddr endpoint;   // reflexive (the source addr the rdv saw)
     TimePoint                 expires_at; // wall-clock cutoff
     uint8_t                   lan_count = 0;
-    deskbeam::net::rdv::LanCandidate lan[deskbeam::net::rdv::MAX_LAN_CANDIDATES]{};
+    vivora::net::rdv::LanCandidate lan[vivora::net::rdv::MAX_LAN_CANDIDATES]{};
     // Relay session id minted on first Register, kept stable across
     // keepalives so subsequent client lookups land on the same id.  Both
     // the host (via RegisterAck) and clients (via LookupResponse) get it.
@@ -98,16 +98,16 @@ void sigint_handler(int) { g_running = 0; }
 } // namespace
 
 int main(int argc, char** argv) {
-    using namespace deskbeam;
-    namespace rdv = deskbeam::net::rdv;
+    using namespace vivora;
+    namespace rdv = vivora::net::rdv;
 
     uint16_t port = DEFAULT_PORT;
-    deskbeam::net::SocketAddr relay_endpoint{};
+    vivora::net::SocketAddr relay_endpoint{};
     for (int i = 1; i < argc; ++i) {
         if ((std::strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
             port = static_cast<uint16_t>(std::atoi(argv[++i]));
         } else if ((std::strcmp(argv[i], "--relay-endpoint") == 0) && i + 1 < argc) {
-            relay_endpoint = deskbeam::net::resolve_host_port(argv[++i]);
+            relay_endpoint = vivora::net::resolve_host_port(argv[++i]);
             if (relay_endpoint.ip == 0) {
                 std::fprintf(stderr, "could not resolve --relay-endpoint %s\n", argv[i]);
                 return 1;
@@ -141,11 +141,11 @@ int main(int argc, char** argv) {
     }
     sock->set_recvbuf(1 << 20);   // 1 MiB — comfortable headroom for bursts
     if (relay_endpoint.ip != 0) {
-        log::info(TAG, "deskbeam-rendezvous listening on UDP :%u (TTL=%ds, relay=%s:%u)",
+        log::info(TAG, "vivora-rendezvous listening on UDP :%u (TTL=%ds, relay=%s:%u)",
                   port, REGISTRATION_TTL,
                   ip_to_string(relay_endpoint.ip).c_str(), relay_endpoint.port);
     } else {
-        log::info(TAG, "deskbeam-rendezvous listening on UDP :%u (TTL=%ds)",
+        log::info(TAG, "vivora-rendezvous listening on UDP :%u (TTL=%ds)",
                   port, REGISTRATION_TTL);
     }
     std::random_device rdv_rd;

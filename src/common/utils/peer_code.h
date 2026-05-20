@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <string>
 
-namespace deskbeam::peer_code {
+namespace vivora::peer_code {
 
 // Maximum length of a peer code, including the trailing null.  Layout is
 // "adjective-noun-NNNN\0" where each word is up to 7 chars, so the worst
@@ -33,4 +33,4 @@ bool is_well_formed(const char* s);
 // layer to auto-detect whether --peer wants a hex pin or a code lookup.
 bool looks_like_hex_pubkey(const char* s);
 
-} // namespace deskbeam::peer_code
+} // namespace vivora::peer_code

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace deskbeam::net::relay {
+namespace vivora::net::relay {
 
 namespace {
 inline void put_u16_le(uint8_t* buf, uint16_t v) {
@@ -125,4 +125,4 @@ bool decode_data(const uint8_t* p, size_t len,
     return true;
 }
 
-} // namespace deskbeam::net::relay
+} // namespace vivora::net::relay

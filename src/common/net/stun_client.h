@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 // Minimal STUN client (RFC 5389 / 8489 subset). Sends a Binding Request on the
 // caller-supplied UDP socket and parses the response's XOR-MAPPED-ADDRESS (or
@@ -35,4 +35,4 @@ public:
                                              const uint8_t* expected_tid);
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net

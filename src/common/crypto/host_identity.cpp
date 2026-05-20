@@ -17,7 +17,7 @@
 #  include <unistd.h>
 #endif
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 namespace {
 
@@ -69,7 +69,7 @@ std::string default_host_key_path() {
 #if defined(_WIN32)
     char appdata[MAX_PATH] = {};
     if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, appdata))) {
-        return join_path(join_path(appdata, "DeskBeam"), "host_key");
+        return join_path(join_path(appdata, "Vivora"), "host_key");
     }
     return "host_key";  // Fallback: current dir.  Better than nothing.
 #elif defined(__APPLE__)
@@ -80,7 +80,7 @@ std::string default_host_key_path() {
     if (!home) return "host_key";
     std::string p = join_path(home, "Library");
     p = join_path(p, "Application Support");
-    p = join_path(p, "DeskBeam");
+    p = join_path(p, "Vivora");
     return join_path(p, "host_key");
 #else
     const char* xdg = std::getenv("XDG_CONFIG_HOME");
@@ -95,7 +95,7 @@ std::string default_host_key_path() {
         if (!home) return "host_key";
         base = join_path(home, ".config");
     }
-    base = join_path(base, "deskbeam");
+    base = join_path(base, "vivora");
     return join_path(base, "host_key");
 #endif
 }
@@ -174,4 +174,4 @@ bool hex_decode_32(const std::string& hex, uint8_t out[32]) {
     return true;
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

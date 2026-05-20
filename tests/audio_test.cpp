@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <vector>
 
-using namespace deskbeam::audio;
+using namespace vivora::audio;
 
 static void make_sine(std::vector<float>& buf, int rate, int channels,
                       int ms, float freq) {

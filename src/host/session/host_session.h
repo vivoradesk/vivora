@@ -15,7 +15,7 @@
 #include <functional>
 #include <string>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 enum class SessionState { WaitingForClient, Connected, Disconnected };
 
@@ -278,4 +278,4 @@ private:
     static constexpr size_t RECV_BUF_SIZE = 2048;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host

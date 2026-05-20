@@ -6,7 +6,7 @@
 #include <random>
 #include <thread>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 static const char* TAG = "STUN";
 
@@ -156,4 +156,4 @@ SocketAddr StunClient::discover(const SocketAddr& stun_server,
     return result;
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net

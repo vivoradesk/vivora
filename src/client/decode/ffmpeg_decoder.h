@@ -13,7 +13,7 @@ struct SwsContext;
 struct AVBufferRef;
 }
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 // Software H.264/HEVC decoder via libavcodec.  Output is always YUV420P
 // 8-bit — `get_frame` runs sws_scale internally if the stream comes in
@@ -98,4 +98,4 @@ private:
     bool            is_hdr_    = false;
 };
 
-} // namespace deskbeam::client
+} // namespace vivora::client

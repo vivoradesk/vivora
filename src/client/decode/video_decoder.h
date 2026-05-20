@@ -6,15 +6,15 @@
 #include <memory>
 #include <vector>
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include <d3d11.h>
 #include <wrl/client.h>
 #endif
 
-namespace deskbeam {
+namespace vivora {
 
 struct DecodedFrame {
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     // GPU texture (NV12 or P010).  ComPtr holds the reference so the
     // frame self-releases on destruction — fixes prior MfDecoder leak
     // where frames left in the output queue at shutdown left dangling
@@ -53,4 +53,4 @@ public:
     static std::unique_ptr<IVideoDecoder> create();
 };
 
-} // namespace deskbeam
+} // namespace vivora

@@ -3,7 +3,7 @@
 
 #include <algorithm>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 static inline int16_t seq_diff(uint16_t a, uint16_t b) {
     return static_cast<int16_t>(a - b);
@@ -195,4 +195,4 @@ size_t JitterBuffer::buffered_frames() const {
     return stored_;
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DeskBeam VERSION 0.1.0 LANGUAGES C CXX)
+project(Vivora VERSION 0.1.0 LANGUAGES C CXX)
 
 if(APPLE)
     enable_language(OBJCXX)
@@ -20,15 +20,15 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Options
-option(DESKBEAM_BUILD_TESTS "Build tests" ON)
+option(VIVORA_BUILD_TESTS "Build tests" ON)
 
 # Platform detection
 if(WIN32)
-    add_compile_definitions(DESKBEAM_WINDOWS)
+    add_compile_definitions(VIVORA_WINDOWS)
 elseif(UNIX AND NOT APPLE)
-    add_compile_definitions(DESKBEAM_LINUX)
+    add_compile_definitions(VIVORA_LINUX)
 elseif(APPLE)
-    add_compile_definitions(DESKBEAM_MACOS)
+    add_compile_definitions(VIVORA_MACOS)
 endif()
 
 # Third-party dependencies (audio: libopus + speex resampler)
@@ -47,7 +47,7 @@ add_subdirectory(src/relay)
 # add_subdirectory(src/host)   # sources used directly by src/app and tests
 # add_subdirectory(src/client) # sources used directly by src/app and tests
 
-if(DESKBEAM_BUILD_TESTS)
+if(VIVORA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

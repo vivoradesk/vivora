@@ -1,4 +1,4 @@
-add_library(deskbeam_common STATIC
+add_library(vivora_common STATIC
     utils/log.cpp
     utils/metrics.cpp
     utils/peer_code.cpp
@@ -23,17 +23,17 @@ add_library(deskbeam_common STATIC
     crypto/peer_pin.cpp
 )
 
-target_link_libraries(deskbeam_common PUBLIC opus speex_resampler monocypher)
+target_link_libraries(vivora_common PUBLIC opus speex_resampler monocypher)
 
 if(WIN32)
-    target_sources(deskbeam_common PRIVATE
+    target_sources(vivora_common PRIVATE
         net/winsock_socket.cpp
         audio/wasapi_loopback.cpp
         audio/wasapi_output.cpp
     )
-    target_link_libraries(deskbeam_common PUBLIC ws2_32 ole32 avrt bcrypt shell32)
+    target_link_libraries(vivora_common PUBLIC ws2_32 ole32 avrt bcrypt shell32)
 else()
-    target_sources(deskbeam_common PRIVATE net/posix_socket.cpp)
+    target_sources(vivora_common PRIVATE net/posix_socket.cpp)
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -41,20 +41,20 @@ if(UNIX AND NOT APPLE)
     # pulse-shim resolves both transparently on PW-based distros).
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(PULSE REQUIRED libpulse-simple)
-    target_sources(deskbeam_common PRIVATE
+    target_sources(vivora_common PRIVATE
         audio/pulse_audio_output.cpp
         audio/pulse_audio_capture.cpp
     )
-    target_include_directories(deskbeam_common PUBLIC ${PULSE_INCLUDE_DIRS})
-    target_link_libraries(deskbeam_common PUBLIC ${PULSE_LIBRARIES})
+    target_include_directories(vivora_common PUBLIC ${PULSE_INCLUDE_DIRS})
+    target_link_libraries(vivora_common PUBLIC ${PULSE_LIBRARIES})
 endif()
 
 if(APPLE)
-    target_sources(deskbeam_common PRIVATE
+    target_sources(vivora_common PRIVATE
         audio/mac_audio_capture.mm
         audio/mac_audio_output.mm
     )
-    target_link_libraries(deskbeam_common PUBLIC
+    target_link_libraries(vivora_common PUBLIC
         "-framework Foundation"
         "-framework CoreMedia"
         "-framework CoreAudio"
@@ -64,8 +64,8 @@ if(APPLE)
     )
 endif()
 
-target_include_directories(deskbeam_common PUBLIC
+target_include_directories(vivora_common PUBLIC
     ${CMAKE_SOURCE_DIR}/src
 )
 
-target_compile_features(deskbeam_common PUBLIC cxx_std_17)
+target_compile_features(vivora_common PUBLIC cxx_std_17)

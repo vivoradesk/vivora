@@ -10,7 +10,7 @@ ApplicationWindow {
     minimumWidth: 420
     minimumHeight: 480
     visible: true
-    title: "DeskBeam"
+    title: "Vivora"
 
     // The app stays running in the tray; closing the window only hides it.
     // The Quit menu entry (in the tray) is the explicit way out.

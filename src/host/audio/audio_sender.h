@@ -9,7 +9,7 @@
 #include <mutex>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 // Consumes device-native PCM from AudioCapture, resamples to 48kHz stereo,
 // Opus-encodes 10ms frames, and sends each as PacketType::Audio to every
@@ -75,4 +75,4 @@ private:
     std::chrono::steady_clock::time_point last_log_time_{};
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host

@@ -1,5 +1,5 @@
 #pragma once
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "app/host_platform.h"
 #include "host/capture/mac_screen_capture.h"
@@ -8,10 +8,10 @@
 #include <cstdint>
 #include <vector>
 
-class MacHostPlatform : public deskbeam::HostPlatform {
+class MacHostPlatform : public vivora::HostPlatform {
 public:
     bool init(uint32_t display_index, uint32_t manual_bitrate_bps,
-              deskbeam::VideoCodec codec);
+              vivora::VideoCodec codec);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -32,8 +32,8 @@ public:
     bool take_cursor_shape(CursorShapeView& out) override;
 
 private:
-    deskbeam::host::MacScreenCapture capture_;
-    deskbeam::host::MacVideoToolboxEncoder encoder_;
+    vivora::host::MacScreenCapture capture_;
+    vivora::host::MacVideoToolboxEncoder encoder_;
     std::vector<uint8_t> pkt_buf_;
 
     // Cursor tracking state.
@@ -56,4 +56,4 @@ private:
     std::uintptr_t last_image_id_  = 0;
 };
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

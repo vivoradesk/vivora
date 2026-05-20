@@ -1,7 +1,7 @@
 #include "common/utils/metrics.h"
 #include "common/utils/log.h"
 
-namespace deskbeam {
+namespace vivora {
 
 ScopedTimer::ScopedTimer(const char* tag, const char* operation)
     : tag_(tag), operation_(operation), start_(Clock::now()) {}
@@ -15,4 +15,4 @@ double ScopedTimer::elapsed_ms() const {
     return std::chrono::duration<double, std::milli>(elapsed).count();
 }
 
-} // namespace deskbeam
+} // namespace vivora

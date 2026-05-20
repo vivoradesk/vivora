@@ -5,7 +5,7 @@
 #include <mutex>
 #include <vector>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Ring-based jitter buffer keyed by 16-bit sequence with adaptive target.
 //
@@ -93,4 +93,4 @@ private:
     static constexpr int    SHRINK_FULL_SLACK   = 3;       // stored > target + 3
 };
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
@@ -9,7 +9,7 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 
-namespace deskbeam {
+namespace vivora {
 
 static const char* TAG = "CAPTURE";
 
@@ -412,6 +412,6 @@ std::unique_ptr<IScreenCapture> IScreenCapture::create() {
     return std::make_unique<DxgiCapture>();
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

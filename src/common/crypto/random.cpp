@@ -14,7 +14,7 @@
 #  include <unistd.h>
 #endif
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 bool random_bytes(uint8_t* out, size_t len) {
     if (len == 0) return true;
@@ -65,4 +65,4 @@ bool random_bytes(uint8_t* out, size_t len) {
 #endif
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

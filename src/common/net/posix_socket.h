@@ -1,10 +1,10 @@
 #pragma once
 
-#if defined(DESKBEAM_MACOS) || defined(DESKBEAM_LINUX)
+#if defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
 
 #include "common/net/socket.h"
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 class PosixUdpSocket : public IUdpSocket {
 public:
@@ -24,6 +24,6 @@ private:
     int sock_ = -1;
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net
 
 #endif

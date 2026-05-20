@@ -1,6 +1,6 @@
 #include "app/legacy_cli.h"
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include "app/gui/gui_main.h"
 #endif
 
@@ -24,11 +24,11 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     return cli_mode
-        ? deskbeam::run_legacy_cli(argc, argv)
-        : deskbeam::gui::run_gui(argc, argv);
+        ? vivora::run_legacy_cli(argc, argv)
+        : vivora::gui::run_gui(argc, argv);
 #else
-    return deskbeam::run_legacy_cli(argc, argv);
+    return vivora::run_legacy_cli(argc, argv);
 #endif
 }

@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 static const CLSID kClsidMMDeviceEnumerator =
     {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
@@ -239,4 +239,4 @@ std::unique_ptr<AudioOutput> create_default_audio_output() {
     return std::make_unique<WasapiOutput>();
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

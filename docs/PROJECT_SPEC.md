@@ -1,8 +1,8 @@
-# DeskBeam — Open-Source Low-Latency Remote Desktop
+# Vivora — Open-Source Low-Latency Remote Desktop
 
 ## Project Vision
 
-DeskBeam — open-source remote desktop решение нового поколения, фокус на минимальную задержку и максимальное качество видеопотока. Цель — создать продукт, который по качеству стрима конкурирует с Parsec (4-8ms pipeline latency на LAN), но при этом open-source и self-hosted как RustDesk.
+Vivora — open-source remote desktop решение нового поколения, фокус на минимальную задержку и максимальное качество видеопотока. Цель — создать продукт, который по качеству стрима конкурирует с Parsec (4-8ms pipeline latency на LAN), но при этом open-source и self-hosted как RustDesk.
 
 **Ключевое отличие от конкурентов:** zero-copy GPU pipeline, аппаратное кодирование, кастомный UDP-протокол — всё то, чего критически не хватает RustDesk (110K+ GitHub stars, но стриминг-пайплайн слабый: лимит битрейта ~600KB/s, реальный FPS часто вдвое ниже заявленного, задержки 100-1500ms даже на LAN).
 
@@ -320,12 +320,12 @@ Scope:
 
 #### Open / Closed разделение
 - **Open source (AGPL-3.0):**
-  - `deskbeam/deskbeam` — клиент + хост (всё ядро функциональности)
-  - `deskbeam/deskbeam-relay` — relay daemon (self-host)
-  - `deskbeam/deskbeam-rendezvous` — rendezvous server (self-host)
+  - `vivoradesk/vivora` — клиент + хост (всё ядро функциональности)
+  - `vivoradesk/vivora-relay` — relay daemon (self-host)
+  - `vivoradesk/vivora-rendezvous` — rendezvous server (self-host)
 - **Closed source (proprietary):**
-  - `deskbeam-cloud` — account system, license server, address book sync, managed relay auth
-  - `deskbeam-console` — web admin console для команд (будущее)
+  - `vivora-cloud` — account system, license server, address book sync, managed relay auth
+  - `vivora-console` — web admin console для команд (будущее)
 
 #### Free tier (open source, AGPL-3.0)
 - Полное качество стрима, все фичи клиента
@@ -337,7 +337,7 @@ Scope:
 
 #### Pro tier — $9.90/мес или $99/год (для 0.1 launch)
 - Commercial use license (dual licensing, без AGPL обязательств)
-- Доступ к public managed relay (на инфраструктуре DeskBeam)
+- Доступ к public managed relay (на инфраструктуре Vivora)
 - Cloud sync address book между устройствами
 - Priority support
 - Чекаут через Paddle (Merchant of Record для UA)
@@ -369,7 +369,7 @@ Scope:
 ## Структура проекта
 
 ```
-deskbeam/
+vivora/
 ├── CMakeLists.txt
 ├── README.md
 ├── LICENSE
@@ -447,7 +447,7 @@ Overlay в клиенте (toggle по горячей клавише) долже
 
 ## Конкурентный контекст
 
-| Feature | DeskBeam (цель) | RustDesk | Parsec | Sunshine+Moonlight |
+| Feature | Vivora (цель) | RustDesk | Parsec | Sunshine+Moonlight |
 |---------|-------------------|----------|--------|--------------------|
 | Pipeline latency (LAN) | < 10ms | 50-200ms | 4-8ms | 10-15ms |
 | Max FPS | 120 | 60 (реально 30) | 240 | 120 |
@@ -476,11 +476,11 @@ Overlay в клиенте (toggle по горячей клавише) долже
 
 ## Naming
 
-- **DeskBeam** — финальное название проекта
-- Desk = remote desktop, Beam = луч/передача/стриминг
-- GitHub: github.com/deskbeam ✅
-- Домен: deskbeam.dev ✅
-- Email: hello@deskbeam.dev (через Cloudflare Email Routing)
+- **Vivora** — финальное название проекта
+- Мелодичное, уникальное в tech-нише, легко произносится на любом языке
+- GitHub: github.com/vivoradesk ✅
+- Домен: vivora.dev ✅
+- Email: hello@vivora.dev (через Cloudflare Email Routing)
 
 ---
 

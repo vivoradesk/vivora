@@ -1,6 +1,6 @@
 [Unit]
-Description=DeskBeam rendezvous signalling server
-Documentation=https://github.com/deskbeam/deskbeam
+Description=Vivora rendezvous signalling server
+Documentation=https://github.com/vivora/vivora
 After=network-online.target
 Wants=network-online.target
 
@@ -9,12 +9,12 @@ Type=simple
 # --relay-endpoint advertises the Pro relay to peers so they pick it up
 # automatically (no manual --relay-session HEX64 coordination). Drop it
 # for a rdv-only self-host setup where peers wire the relay themselves.
-ExecStart=/usr/local/bin/deskbeam-rendezvous --port 7000 --relay-endpoint 89.168.124.37:7100
+ExecStart=/usr/local/bin/vivora-rendezvous --port 7000 --relay-endpoint 89.168.124.37:7100
 Restart=on-failure
 RestartSec=2
 # Run as a dedicated unprivileged user (created by deploy-rendezvous.sh).
-User=deskbeam
-Group=deskbeam
+User=vivora
+Group=vivora
 
 # Lockdown — the server has no business touching the filesystem, opening
 # new sockets beyond its own UDP listener, or talking to anyone on the
@@ -41,10 +41,10 @@ MemoryHigh=64M
 MemoryMax=128M
 TasksMax=32
 
-# Crash logs land in journalctl -u deskbeam-rendezvous.
+# Crash logs land in journalctl -u vivora-rendezvous.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=deskbeam-rendezvous
+SyslogIdentifier=vivora-rendezvous
 
 [Install]
 WantedBy=multi-user.target

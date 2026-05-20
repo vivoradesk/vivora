@@ -1,9 +1,9 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/fallback_encoder.h"
 #include "common/utils/log.h"
 
-namespace deskbeam {
+namespace vivora {
 
 static const char* TAG = "ENCODE";
 
@@ -95,6 +95,6 @@ bool FallbackEncoder::try_switch_to_fallback() {
     return true;
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

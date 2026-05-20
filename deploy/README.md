@@ -1,6 +1,6 @@
-# DeskBeam deploy
+# Vivora deploy
 
-Production deployment artefacts for the DeskBeam services that aren't
+Production deployment artefacts for the Vivora services that aren't
 shipped inside the user-facing app binary.
 
 ## Rendezvous server
@@ -30,19 +30,19 @@ Cross-build the binary for Linux x86_64 (or use the WSL2 build), then:
 ```
 
 The script uploads the binary + systemd unit, creates an unprivileged
-`deskbeam` user, installs to `/usr/local/bin`, opens UDP/7000 in `ufw`,
+`vivora` user, installs to `/usr/local/bin`, opens UDP/7000 in `ufw`,
 and `systemctl enable --now`s the service.
 
 ### DNS
 
 Point an A-record at the VPS IP.  Convention: `rdv.<your-domain>`.
-Clients pass it as `--rendezvous rdv.deskbeam.dev:7000`.
+Clients pass it as `--rendezvous rdv.vivora.dev:7000`.
 
 ### Operations
 
-- Logs:    `journalctl -u deskbeam-rendezvous -f`
-- Status:  `systemctl status deskbeam-rendezvous`
-- Stop:    `sudo systemctl stop deskbeam-rendezvous`
+- Logs:    `journalctl -u vivora-rendezvous -f`
+- Status:  `systemctl status vivora-rendezvous`
+- Stop:    `sudo systemctl stop vivora-rendezvous`
 - Update:  rerun `deploy-rendezvous.sh` (it overwrites the binary, then
            systemd restarts the unit on the next failure / reload).
 
@@ -64,7 +64,7 @@ DBRL DATA packets between them.  See `src/relay/relay_server.cpp`.
 ```
 
 Same shape as the rendezvous deploy: scp binary + systemd unit, reuse
-the `deskbeam` system user, open UDP/7100 in ufw, enable + (re)start
+the `vivora` system user, open UDP/7100 in ufw, enable + (re)start
 the service.
 
 After a fresh box receives both deploys (`deploy-rendezvous.sh` then
@@ -86,8 +86,8 @@ flag (separate commit) — self-hosted instances stay open by default.
 
 ### Operations
 
-- Logs:    `journalctl -u deskbeam-relay -f`
-- Status:  `systemctl status deskbeam-relay`
+- Logs:    `journalctl -u vivora-relay -f`
+- Status:  `systemctl status vivora-relay`
 - Update:  rerun `deploy-relay.sh` (auto-restarts the unit)
 
 State is fully in-memory.  Bindings expire after 60 s if no keepalive;

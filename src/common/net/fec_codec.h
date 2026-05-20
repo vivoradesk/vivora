@@ -6,7 +6,7 @@
 #include <deque>
 #include <unordered_map>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 // Extract a unique 32-bit key from a data packet's wire bytes:
 // (seq_no << 16) | frag_index. Works for both fragmented and non-fragmented.
@@ -158,4 +158,4 @@ private:
     static constexpr size_t MAX_GROUPS = 64;
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net

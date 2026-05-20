@@ -1,10 +1,10 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "app/gui/view_session.h"
 
 #include "common/utils/log.h"
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 ViewSession::ViewSession(QObject* parent) : QObject(parent) {
     // ~60Hz drive (16ms).  ViewLoopState::iter() has its own internal
@@ -83,6 +83,6 @@ void ViewSession::onTick() {
     }
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

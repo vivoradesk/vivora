@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 namespace {
 constexpr uint8_t MAGIC[4] = { 'D', 'B', 'L', 'T' };
@@ -66,4 +66,4 @@ bool verify_license(const uint8_t token[LICENSE_TOKEN_SIZE],
     return true;
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

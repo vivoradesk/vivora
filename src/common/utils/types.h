@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <chrono>
 
-namespace deskbeam {
+namespace vivora {
 
 using Clock = std::chrono::steady_clock;
 using TimePoint = Clock::time_point;
@@ -21,4 +21,4 @@ struct Rect {
     uint32_t height = 0;
 };
 
-} // namespace deskbeam
+} // namespace vivora

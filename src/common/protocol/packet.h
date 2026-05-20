@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace deskbeam::protocol {
+namespace vivora::protocol {
 
 enum class PacketType : uint8_t {
     Video       = 0x01,
@@ -66,4 +66,4 @@ struct Packet {
     static Packet deserialize(const uint8_t* data, size_t len);
 };
 
-} // namespace deskbeam::protocol
+} // namespace vivora::protocol

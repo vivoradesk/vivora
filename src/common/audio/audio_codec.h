@@ -7,7 +7,7 @@
 struct OpusEncoder;
 struct OpusDecoder;
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Fixed transport parameters across the whole pipeline. Resampler on both
 // sides converts device-native rates to/from these.
@@ -57,4 +57,4 @@ private:
     OpusDecoder* dec_ = nullptr;
 };
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/input/input_injector.h"
 
@@ -6,7 +6,7 @@
 #define NOMINMAX
 #include <windows.h>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 
@@ -172,6 +172,6 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     return std::make_unique<WinInputInjector>();
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

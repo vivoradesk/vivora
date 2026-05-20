@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #define NOMINMAX
 #include <windows.h>
 #include <wingdi.h>

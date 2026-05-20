@@ -4,7 +4,7 @@
 #include <cstring>
 #include <vector>
 
-namespace deskbeam::protocol {
+namespace vivora::protocol {
 
 // Real (pre-encoder-padding) frame dimensions advertised by the host.
 // Encoders like QSV align frame size to 16 pixels, so a 1920x1080 stream
@@ -43,4 +43,4 @@ struct StreamInfoMessage {
     }
 };
 
-} // namespace deskbeam::protocol
+} // namespace vivora::protocol

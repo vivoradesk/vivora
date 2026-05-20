@@ -7,7 +7,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 AddressBook::AddressBook(QObject* parent) : QAbstractListModel(parent) {
     load();
@@ -130,4 +130,4 @@ void AddressBook::save() const {
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

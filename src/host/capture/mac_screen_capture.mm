@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "host/capture/mac_screen_capture.h"
 #include "common/utils/log.h"
@@ -10,7 +10,7 @@
 
 #include <mutex>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 constexpr const char* TAG = "MAC_CAPTURE";
@@ -58,7 +58,7 @@ static SCShareableContent* fetch_shareable_content_sync() {
     return result; // +1 retain, caller releases
 }
 } // namespace
-} // namespace deskbeam::host
+} // namespace vivora::host
 
 // Obj-C delegate that receives sample buffers.
 @interface DBSCStreamOutput : NSObject <SCStreamOutput, SCStreamDelegate>
@@ -113,13 +113,13 @@ static SCShareableContent* fetch_shareable_content_sync() {
 
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error {
     (void)stream;
-    deskbeam::log::warn(deskbeam::host::TAG, "SCStream stopped: %s",
+    vivora::log::warn(vivora::host::TAG, "SCStream stopped: %s",
         error ? [[error localizedDescription] UTF8String] : "no error");
 }
 
 @end
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 struct MacScreenCapture::Impl {
     SCStream* stream = nil;
@@ -261,7 +261,7 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
     impl_->output.latestPtsUs = &impl_->latest_pts_us;
     impl_->output.framesDelivered = &impl_->frames_delivered;
 
-    impl_->queue = dispatch_queue_create("com.deskbeam.capture", DISPATCH_QUEUE_SERIAL);
+    impl_->queue = dispatch_queue_create("com.vivora.capture", DISPATCH_QUEUE_SERIAL);
 
     impl_->stream = [[SCStream alloc] initWithFilter:filter
                                         configuration:cfg
@@ -337,6 +337,6 @@ CVPixelBufferRef MacScreenCapture::try_get_frame(uint64_t* out_pts_us) {
     return pb;  // caller takes ownership
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

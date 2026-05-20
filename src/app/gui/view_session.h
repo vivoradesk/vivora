@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "app/view_loop.h"
 #include "app/windows_view_platform.h"
@@ -13,7 +13,7 @@
 #include <memory>
 #include <string>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Durable, GUI-owned twin of ViewLoopConfig.  We hold std::string
 // backing storage because ViewLoopConfig stores raw `const char*`
@@ -75,6 +75,6 @@ private:
     bool                              finished_emitted_ = false;
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

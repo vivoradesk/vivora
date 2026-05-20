@@ -21,7 +21,7 @@
 #include <QUrl>
 #include <QtPlugin>
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include "common/net/winsock_socket.h"
 #endif
 
@@ -43,7 +43,7 @@ Q_IMPORT_PLUGIN(QtQuickControls2BasicStyleImplPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogsPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Single-instance enforcement.  QLockFile sits in a writable per-user
 // location; the running instance also listens on a QLocalServer that
@@ -61,14 +61,14 @@ QString lock_file_path() {
         dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     }
     QDir().mkpath(dir);
-    return dir + "/deskbeam.lock";
+    return dir + "/vivora.lock";
 }
 
 // QLocalServer / QLocalSocket map to:
 //   Windows: named pipe \\.\pipe\<name>
 //   POSIX:   Unix domain socket in $TMPDIR
 // One name per user is fine — the lock file already serialises us.
-constexpr const char* IPC_SERVER_NAME = "deskbeam-instance";
+constexpr const char* IPC_SERVER_NAME = "vivora-instance";
 constexpr const char* IPC_RAISE_CMD   = "raise\n";
 
 } // namespace
@@ -78,18 +78,18 @@ int run_gui(int argc, char** argv) {
 
     // Settings has to know the org/app name to derive QStandardPaths
     // entries (incl. lock file path); set them before any Settings touch.
-    QCoreApplication::setOrganizationName("DeskBeam");
-    QCoreApplication::setApplicationName("DeskBeam");
+    QCoreApplication::setOrganizationName("Vivora");
+    QCoreApplication::setApplicationName("Vivora");
 
-#ifdef DESKBEAM_WINDOWS
-    deskbeam::net::WinsockInit wsa;
+#ifdef VIVORA_WINDOWS
+    vivora::net::WinsockInit wsa;
     if (!wsa.ok) {
         log::error("GUI", "Failed to init Winsock");
         return 1;
     }
 #endif
 
-    // Single-instance check.  If another deskbeam.exe is already
+    // Single-instance check.  If another vivora.exe is already
     // running for this user, ping it via the local IPC server so it
     // raises its tray window, then exit cleanly.  Without this the
     // second launch would silently fight over the same QSettings,
@@ -105,7 +105,7 @@ int run_gui(int argc, char** argv) {
             sock.write(IPC_RAISE_CMD);
             sock.waitForBytesWritten(500);
             sock.disconnectFromServer();
-            log::info("GUI", "Existing DeskBeam instance found — asked it to raise its window");
+            log::info("GUI", "Existing Vivora instance found — asked it to raise its window");
             return 0;
         }
         // No live owner — must be a stale lock from a crashed process.
@@ -146,7 +146,7 @@ int run_gui(int argc, char** argv) {
     Tray          tray;
     controller.setTray(&tray);
 
-    // Local-socket server: a second deskbeam.exe launch will connect
+    // Local-socket server: a second vivora.exe launch will connect
     // here and send "raise\n" to bring the existing window forward.
     // removeServer() clears a stale Unix socket / pipe handle left by
     // a previous crashed process before we try to bind.
@@ -184,7 +184,7 @@ int run_gui(int argc, char** argv) {
         return 1;
     }
 
-    log::info("GUI", "DeskBeam GUI ready");
+    log::info("GUI", "Vivora GUI ready");
     const int rc = app.exec();
     // lock released in destructor; explicit reset here keeps the order
     // obvious — AppController teardown happens first (stops host /
@@ -193,4 +193,4 @@ int run_gui(int argc, char** argv) {
     return rc;
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

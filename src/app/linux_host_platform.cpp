@@ -1,21 +1,21 @@
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "app/linux_host_platform.h"
 #include "common/utils/log.h"
 #include <chrono>
 
 bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
-                             deskbeam::VideoCodec codec) {
+                             vivora::VideoCodec codec) {
     codec_       = codec;
     bitrate_bps_ = manual_bitrate_bps;
-    if (!cap_.init([this](const deskbeam::host::PipeWireCapture::Frame& f) {
+    if (!cap_.init([this](const vivora::host::PipeWireCapture::Frame& f) {
             on_pw_frame(f);
         })) {
-        deskbeam::log::error("HOST", "PipeWire capture init failed");
+        vivora::log::error("HOST", "PipeWire capture init failed");
         return false;
     }
     if (!cap_.start()) {
-        deskbeam::log::error("HOST", "PipeWire capture start failed");
+        vivora::log::error("HOST", "PipeWire capture start failed");
         return false;
     }
 
@@ -23,15 +23,15 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
     // return real values when host_loop reads them for bitrate sizing.
     // Without this, the bitrate controller initialises with 0×0 → ~50 kbps
     // ceiling and the stream falls apart on the first packet loss.
-    deskbeam::log::info("HOST", "Linux host platform up — waiting for first capture frame");
+    vivora::log::info("HOST", "Linux host platform up — waiting for first capture frame");
     std::unique_lock<std::mutex> lk(first_frame_mu_);
     if (!first_frame_cv_.wait_for(lk, std::chrono::seconds(10),
                                   [this] { return first_frame_seen_; })) {
-        deskbeam::log::error("HOST",
+        vivora::log::error("HOST",
             "Timed out waiting for first PipeWire frame (10s) — capture didn't start");
         return false;
     }
-    deskbeam::log::info("HOST", "Capture is %ux%u — host loop can start", cap_w_, cap_h_);
+    vivora::log::info("HOST", "Capture is %ux%u — host loop can start", cap_w_, cap_h_);
     return true;
 }
 
@@ -58,12 +58,12 @@ void LinuxHostPlatform::request_idr() {
     if (enc_ready_) enc_.request_idr();
 }
 
-void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame& f) {
+void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& f) {
     // Lazy encoder init on first frame — capture decides the size.
     if (!enc_ready_) {
         cap_w_ = f.width;
         cap_h_ = f.height;
-        deskbeam::host::VaapiEncoder::Config ec;
+        vivora::host::VaapiEncoder::Config ec;
         ec.width  = static_cast<int>(f.width);
         ec.height = static_cast<int>(f.height);
         ec.fps    = 60;
@@ -75,7 +75,7 @@ void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame
         // resolutions; H.264 is the safer default until that's resolved.
         ec.codec = codec_;
         if (!enc_.init(ec)) {
-            deskbeam::log::error("HOST", "VAAPI encoder init failed");
+            vivora::log::error("HOST", "VAAPI encoder init failed");
             return;
         }
         enc_ready_ = true;
@@ -101,7 +101,7 @@ void LinuxHostPlatform::on_pw_frame(const deskbeam::host::PipeWireCapture::Frame
     // it acquired enc_mu_ for the encoder teardown.
     if (shutting_down_.load(std::memory_order_acquire)) return;
     if (!enc_.encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
-    deskbeam::host::VaapiEncoder::Packet pkt;
+    vivora::host::VaapiEncoder::Packet pkt;
     while (enc_.get_packet(pkt)) {
         queued_pkts_.push({std::move(pkt), /*heartbeat=*/false});
     }
@@ -125,7 +125,7 @@ bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
     if (!enc_ready_) return false;
     if (!enc_.reencode_last(pts_us)) return false;
     bool produced = false;
-    deskbeam::host::VaapiEncoder::Packet pkt;
+    vivora::host::VaapiEncoder::Packet pkt;
     while (enc_.get_packet(pkt)) {
         queued_pkts_.push({std::move(pkt), /*heartbeat=*/true});
         produced = true;
@@ -144,7 +144,7 @@ bool LinuxHostPlatform::get_cursor_state(CursorState& out) {
 }
 
 bool LinuxHostPlatform::take_cursor_shape(CursorShapeView& out) {
-    deskbeam::host::PipeWireCapture::CursorShape s;
+    vivora::host::PipeWireCapture::CursorShape s;
     if (!cap_.take_new_cursor_shape(s)) return false;
     out.id        = s.id;
     out.width     = s.width;
@@ -168,4 +168,4 @@ bool LinuxHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     return true;
 }
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

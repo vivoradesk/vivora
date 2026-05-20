@@ -1,9 +1,9 @@
-// Minimal smoke test for the deskbeam-relay binary.  Spins up two virtual
+// Minimal smoke test for the vivora-relay binary.  Spins up two virtual
 // peers (A, B) on loopback, BINDs each, sends a DATA packet from A, and
 // verifies B receives the forwarded payload.  No external dependencies,
 // no networking beyond the local loopback.
 //
-// Usage: deskbeam-relay --port 7100 must be running on localhost:7100.
+// Usage: vivora-relay --port 7100 must be running on localhost:7100.
 
 #include "common/net/relay_protocol.h"
 #include "common/net/socket.h"
@@ -18,19 +18,19 @@
 #include <winsock2.h>
 #endif
 
-namespace rly = deskbeam::net::relay;
+namespace rly = vivora::net::relay;
 using Clock = std::chrono::steady_clock;
 
-static deskbeam::net::SocketAddr loopback(uint16_t port) {
-    deskbeam::net::SocketAddr a;
-    a.ip   = deskbeam::net::parse_ip("127.0.0.1");
+static vivora::net::SocketAddr loopback(uint16_t port) {
+    vivora::net::SocketAddr a;
+    a.ip   = vivora::net::parse_ip("127.0.0.1");
     a.port = port;
     return a;
 }
 
 // Receive with a budget — returns bytes read or 0 on timeout.
-static int recv_until(deskbeam::net::IUdpSocket& s, uint8_t* buf, size_t cap,
-                      deskbeam::net::SocketAddr& sender, int timeout_ms) {
+static int recv_until(vivora::net::IUdpSocket& s, uint8_t* buf, size_t cap,
+                      vivora::net::SocketAddr& sender, int timeout_ms) {
     const auto deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
     while (Clock::now() < deadline) {
         int n = s.recv_from(buf, cap, sender);
@@ -45,8 +45,8 @@ int main() {
     WSADATA wsa{}; if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { std::printf("WSA fail\n"); return 1; }
 #endif
 
-    auto sA = deskbeam::net::IUdpSocket::create();
-    auto sB = deskbeam::net::IUdpSocket::create();
+    auto sA = vivora::net::IUdpSocket::create();
+    auto sB = vivora::net::IUdpSocket::create();
     if (!sA->bind(0) || !sB->bind(0)) { std::printf("bind fail\n"); return 1; }
     sA->set_nonblocking(true);
     sB->set_nonblocking(true);
@@ -66,7 +66,7 @@ int main() {
     // BIND A
     size_t n = rly::encode_bind(buf, sizeof(buf), bA);
     sA->send_to(buf, n, relay_addr);
-    deskbeam::net::SocketAddr sender;
+    vivora::net::SocketAddr sender;
     int got = recv_until(*sA, buf, sizeof(buf), sender, 2000);
     if (got <= 0) { std::printf("FAIL: A no BIND_ACK\n"); return 1; }
     rly::MsgType t; size_t off = 0, plen = 0;

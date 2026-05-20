@@ -12,7 +12,7 @@
 #include <cstring>
 #include <vector>
 
-using namespace deskbeam::net;
+using namespace vivora::net;
 
 namespace {
 

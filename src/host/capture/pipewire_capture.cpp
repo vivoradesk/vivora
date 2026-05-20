@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "host/capture/pipewire_capture.h"
 #include "common/utils/log.h"
@@ -25,7 +25,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 
@@ -59,7 +59,7 @@ std::string restore_token_path() {
     if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg) base = xdg;
     else if (const char* home = std::getenv("HOME"); home && *home) base = std::string(home) + "/.local/state";
     else return {};
-    std::string dir = base + "/deskbeam";
+    std::string dir = base + "/vivora";
     ::mkdir(base.c_str(), 0700);
     ::mkdir(dir.c_str(),  0700);
     return dir + "/portal_restore_token";
@@ -591,7 +591,7 @@ bool PipeWireCapture::init(FrameCallback cb) {
         dbus_message_iter_init_append(msg, &args);
         const char* sh_c = impl_->session_handle.c_str();
         dbus_message_iter_append_basic(&args, DBUS_TYPE_OBJECT_PATH, &sh_c);
-        const char* parent = "";  // no parent window — DeskBeam is headless on host
+        const char* parent = "";  // no parent window — Vivora is headless on host
         dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &parent);
         dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sv}", &dict);
         dict_append_str(&dict, "handle_token", handle_token.c_str());
@@ -672,7 +672,7 @@ bool PipeWireCapture::init(FrameCallback cb) {
 
     // ── 5. PipeWire client setup ──
     pw_init(nullptr, nullptr);
-    impl_->loop = pw_thread_loop_new("deskbeam-capture", nullptr);
+    impl_->loop = pw_thread_loop_new("vivora-capture", nullptr);
     if (!impl_->loop) { log::error(TAG, "pw_thread_loop_new failed"); return false; }
 
     pw_thread_loop_lock(impl_->loop);
@@ -697,7 +697,7 @@ bool PipeWireCapture::init(FrameCallback cb) {
         PW_KEY_MEDIA_CATEGORY, "Capture",
         PW_KEY_MEDIA_ROLE,     "Screen",
         nullptr);
-    impl_->stream = pw_stream_new(impl_->core, "deskbeam-capture", props);
+    impl_->stream = pw_stream_new(impl_->core, "vivora-capture", props);
     if (!impl_->stream) {
         pw_thread_loop_unlock(impl_->loop);
         log::error(TAG, "pw_stream_new failed");
@@ -777,6 +777,6 @@ void PipeWireCapture::stop() {
     if (impl_->loop) pw_thread_loop_stop(impl_->loop);
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

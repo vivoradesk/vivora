@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "common/utils/types.h"
 #include <CoreVideo/CoreVideo.h>
@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 struct MacDisplayInfo {
     uint32_t index = 0;          // index as passed to init()
@@ -71,6 +71,6 @@ private:
     bool hdr_active_ = false;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

@@ -6,7 +6,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace deskbeam {
+namespace vivora {
 
 struct ViewLoopConfig {
     const char* host_ip = nullptr;
@@ -97,4 +97,4 @@ private:
 // CLI-side thin wrapper.  Blocks until ViewLoopState::iter() returns false.
 int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg);
 
-} // namespace deskbeam
+} // namespace vivora

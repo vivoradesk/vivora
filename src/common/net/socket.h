@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 struct SocketAddr {
     uint32_t ip = 0;      // network byte order
@@ -65,4 +65,4 @@ public:
     static std::unique_ptr<IUdpSocket> create();
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net

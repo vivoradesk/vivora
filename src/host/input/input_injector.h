@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 // Platform-independent input injector interface.
 class InputInjector {
@@ -21,4 +21,4 @@ public:
     static std::unique_ptr<InputInjector> create();
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host

@@ -3,7 +3,7 @@
 #include <cstring>
 #include <chrono>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 void FrameAssembler::finalize_frame(uint16_t /*seq*/, PendingFrame& pf) {
     // All fragments except the last carry exactly DATA_PER_FRAGMENT bytes;
@@ -253,4 +253,4 @@ void FrameAssembler::expire_stale() {
     if (any_dropped) try_deliver();
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net

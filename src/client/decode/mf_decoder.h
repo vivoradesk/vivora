@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "client/decode/video_decoder.h"
 #include <wrl/client.h>
@@ -10,7 +10,7 @@
 struct IMFTransform;
 struct IMFDXGIDeviceManager;
 
-namespace deskbeam {
+namespace vivora {
 
 using Microsoft::WRL::ComPtr;
 
@@ -44,6 +44,6 @@ private:
     std::queue<DecodedFrame> output_frames_;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

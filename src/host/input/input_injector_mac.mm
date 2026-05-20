@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "host/input/input_injector.h"
 #include "common/utils/log.h"
@@ -7,7 +7,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #include <algorithm>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 
@@ -282,6 +282,6 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     return std::make_unique<MacInputInjector>();
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

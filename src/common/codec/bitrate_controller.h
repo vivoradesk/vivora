@@ -5,7 +5,7 @@
 #include <cstdint>
 #include "common/utils/log.h"
 
-namespace deskbeam::codec {
+namespace vivora::codec {
 
 // Hard limits for any computed/applied bitrate.
 struct BitrateBounds {
@@ -349,4 +349,4 @@ private:
     uint32_t estimated_bw_bps_ = 0;
 };
 
-} // namespace deskbeam::codec
+} // namespace vivora::codec

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace deskbeam {
+namespace vivora {
 
 // Parse the legacy `--host` / `--view` flag form and run the matching
 // host_loop / view_loop until exit.  Returns the process exit code.
@@ -8,4 +8,4 @@ namespace deskbeam {
 // main() launches the GUI shell instead.
 int run_legacy_cli(int argc, char** argv);
 
-} // namespace deskbeam
+} // namespace vivora

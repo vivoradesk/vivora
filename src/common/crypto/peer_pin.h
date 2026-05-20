@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Trust-on-first-use pinning for rendezvous-resolved peer codes.
 //
@@ -40,4 +40,4 @@ PinResult check_or_pin_peer(const std::string& code,
                             const uint8_t pubkey[32],
                             const std::string& path = "");
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

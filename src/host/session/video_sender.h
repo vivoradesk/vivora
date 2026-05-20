@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 // Fragments an encoded frame and sends all packets over UDP.
 // Keeps a ring buffer of recently-sent fragments so they can be retransmitted
@@ -215,4 +215,4 @@ private:
     std::vector<uint8_t> nack_send_buf_;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host

@@ -6,9 +6,9 @@
 #include <cstring>
 #include <vector>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
-using namespace deskbeam::audio;
+using namespace vivora::audio;
 
 AudioReceiver::AudioReceiver() = default;
 AudioReceiver::~AudioReceiver() { stop(); }
@@ -191,4 +191,4 @@ void AudioReceiver::thread_proc() {
     }
 }
 
-} // namespace deskbeam::client
+} // namespace vivora::client

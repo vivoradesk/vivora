@@ -1,13 +1,13 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/capture/screen_capture.h"
 #include <d3d11.h>
 #include <dxgi1_5.h>
 #include <wrl/client.h>
 
-namespace deskbeam {
+namespace vivora {
 
 using Microsoft::WRL::ComPtr;
 
@@ -81,6 +81,6 @@ private:
     bool    sticky_cursor_visible_ = true;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

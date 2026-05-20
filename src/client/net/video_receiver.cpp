@@ -1,6 +1,6 @@
 #include "client/net/video_receiver.h"
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 int VideoReceiver::poll() {
     uint8_t buf[RECV_BUF_SIZE];
@@ -44,4 +44,4 @@ int VideoReceiver::poll() {
     return count;
 }
 
-} // namespace deskbeam::client
+} // namespace vivora::client

@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace deskbeam::peer_code {
+namespace vivora::peer_code {
 
 namespace {
 
@@ -133,4 +133,4 @@ bool looks_like_hex_pubkey(const char* s) {
     return true;
 }
 
-} // namespace deskbeam::peer_code
+} // namespace vivora::peer_code

@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "app/view_platform.h"
 #include "client/render/d3d_renderer.h"
@@ -14,7 +14,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace deskbeam {
+namespace vivora {
 
 class StreamWindow : public QWidget {
     Q_OBJECT
@@ -121,6 +121,6 @@ private:
     void position_hud();
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

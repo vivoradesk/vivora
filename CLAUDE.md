@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DeskBeam is an open-source, low-latency remote desktop application. The goal is Parsec-level streaming quality (4-8ms pipeline latency on LAN) with a self-hosted, open-source model. Written in C++17 (C++20 where appropriate) with Qt 6/QML for UI.
+Vivora is an open-source, low-latency remote desktop application. The goal is Parsec-level streaming quality (4-8ms pipeline latency on LAN) with a self-hosted, open-source model. Written in C++17 (C++20 where appropriate) with Qt 6/QML for UI.
 
 ## Build System
 
@@ -22,7 +22,7 @@ ctest --test-dir build
 
 ## Architecture
 
-A single `deskbeam` executable that runs in either host or client mode (selected at launch), plus a standalone relay server. All modes share the common protocol/codec/utils code.
+A single `vivora` executable that runs in either host or client mode (selected at launch), plus a standalone relay server. All modes share the common protocol/codec/utils code.
 
 **Host pipeline:** Screen Capture (DXGI) -> GPU Encoder (NVENC/AMF/QSV) -> Custom UDP Protocol -> Network. Zero-copy: frame stays in GPU memory from capture through encoding (ID3D11Texture2D -> NVENC directly). Input injection receives events via separate reliable UDP channel and uses SendInput API.
 

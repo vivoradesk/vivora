@@ -18,7 +18,7 @@
 #define kAudioObjectPropertyElementMain kAudioObjectPropertyElementMaster
 #endif
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 namespace {
 constexpr const char* TAG = "MAC_AUDIO_OUT";
@@ -278,6 +278,6 @@ std::unique_ptr<AudioOutput> create_default_audio_output() {
     return std::make_unique<MacAudioOutput>();
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
 #endif // __APPLE__

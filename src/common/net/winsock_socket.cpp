@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "common/net/winsock_socket.h"
 #include "common/utils/log.h"
@@ -9,7 +9,7 @@
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 static const char* TAG = "NET";
 
@@ -215,6 +215,6 @@ std::unique_ptr<IUdpSocket> IUdpSocket::create() {
     return std::make_unique<WinsockUdpSocket>();
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

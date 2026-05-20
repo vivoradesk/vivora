@@ -7,7 +7,7 @@
 // Matches the WASAPI / CoreAudio loopback contract: deliver interleaved
 // float PCM at the device-native rate as 10ms-ish chunks.
 
-#if defined(DESKBEAM_LINUX)
+#if defined(VIVORA_LINUX)
 
 #include "common/audio/audio_capture.h"
 #include "common/utils/log.h"
@@ -19,7 +19,7 @@
 #include <thread>
 #include <vector>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 namespace {
 
@@ -52,7 +52,7 @@ public:
 
         int err = 0;
         s_ = pa_simple_new(nullptr,                 // default server
-                           "DeskBeam",
+                           "Vivora",
                            PA_STREAM_RECORD,
                            "@DEFAULT_MONITOR@",     // default sink's monitor
                            "loopback",
@@ -116,6 +116,6 @@ std::unique_ptr<AudioCapture> create_default_loopback_capture() {
     return std::make_unique<PulseAudioCapture>();
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

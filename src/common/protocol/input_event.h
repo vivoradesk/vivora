@@ -4,7 +4,7 @@
 #include <cstring>
 #include <vector>
 
-namespace deskbeam::protocol {
+namespace vivora::protocol {
 
 // Input event types
 enum class InputEventType : uint8_t {
@@ -138,4 +138,4 @@ struct InputEvent {
     }
 };
 
-} // namespace deskbeam::protocol
+} // namespace vivora::protocol

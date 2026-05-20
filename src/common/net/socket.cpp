@@ -4,7 +4,7 @@
 #include <cstring>
 #include <string>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 SocketAddr resolve_host_port(const char* host_port) {
     SocketAddr out;
@@ -20,4 +20,4 @@ SocketAddr resolve_host_port(const char* host_port) {
     return resolve_host(host.c_str(), static_cast<uint16_t>(port_i));
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net

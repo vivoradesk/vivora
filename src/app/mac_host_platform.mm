@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "app/mac_host_platform.h"
 #include "common/codec/bitrate_controller.h"
@@ -12,30 +12,30 @@
 
 bool MacHostPlatform::init(uint32_t display_index,
                             uint32_t manual_bitrate_bps,
-                            deskbeam::VideoCodec codec) {
+                            vivora::VideoCodec codec) {
     // NSCursor / NSScreen need the AppKit shared app initialized. Host mode
     // doesn't create a UI, so make sure the singleton exists.
     [NSApplication sharedApplication];
 
-    if (codec != deskbeam::VideoCodec::HEVC) {
-        deskbeam::log::warn("HOST", "macOS VideoToolbox currently supports HEVC only; --codec=h264 ignored");
+    if (codec != vivora::VideoCodec::HEVC) {
+        vivora::log::warn("HOST", "macOS VideoToolbox currently supports HEVC only; --codec=h264 ignored");
     }
-    auto displays = deskbeam::host::MacScreenCapture::enumerate_displays();
+    auto displays = vivora::host::MacScreenCapture::enumerate_displays();
     if (displays.empty()) {
-        deskbeam::log::error("HOST", "No displays found (check Screen Recording permission)");
+        vivora::log::error("HOST", "No displays found (check Screen Recording permission)");
         return false;
     }
-    deskbeam::log::info("HOST", "Available displays:");
+    vivora::log::info("HOST", "Available displays:");
     for (const auto& d : displays) {
-        deskbeam::log::info("HOST", "  [%u] %s %s", d.index, d.name.c_str(),
+        vivora::log::info("HOST", "  [%u] %s %s", d.index, d.name.c_str(),
                             d.hdr_capable ? "(HDR capable)" : "");
     }
     if (display_index >= displays.size()) {
-        deskbeam::log::error("HOST", "Display index %u out of range", display_index);
+        vivora::log::error("HOST", "Display index %u out of range", display_index);
         return false;
     }
 
-    deskbeam::host::MacCaptureConfig ccfg;
+    vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
     ccfg.fps = 60;
     ccfg.show_cursor = false;
@@ -43,19 +43,19 @@ bool MacHostPlatform::init(uint32_t display_index,
     // MacScreenCapture honours prefer_hdr only when display_is_hdr() agrees.
     ccfg.prefer_hdr = true;
     if (!capture_.init(ccfg)) {
-        deskbeam::log::error("HOST", "Failed to init capture");
+        vivora::log::error("HOST", "Failed to init capture");
         return false;
     }
     if (!capture_.start()) {
-        deskbeam::log::error("HOST", "Failed to start capture");
+        vivora::log::error("HOST", "Failed to start capture");
         return false;
     }
 
     uint32_t bitrate = manual_bitrate_bps;
     if (bitrate == 0)
-        bitrate = deskbeam::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
+        bitrate = vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
 
-    deskbeam::host::MacEncoderConfig ecfg;
+    vivora::host::MacEncoderConfig ecfg;
     ecfg.width = capture_.width();
     ecfg.height = capture_.height();
     ecfg.fps = 60;
@@ -63,7 +63,7 @@ bool MacHostPlatform::init(uint32_t display_index,
     ecfg.idr_period = 120;
     ecfg.hdr = capture_.hdr_active();
     if (!encoder_.init(ecfg)) {
-        deskbeam::log::error("HOST", "Failed to init encoder");
+        vivora::log::error("HOST", "Failed to init encoder");
         capture_.stop();
         return false;
     }
@@ -91,7 +91,7 @@ bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
 }
 
 bool MacHostPlatform::get_encoded_packet(EncodedPacketView& out) {
-    deskbeam::host::MacEncodedPacket pkt;
+    vivora::host::MacEncodedPacket pkt;
     if (!encoder_.get_packet(pkt))
         return false;
     pkt_buf_ = std::move(pkt.data);
@@ -261,4 +261,4 @@ bool MacHostPlatform::take_cursor_shape(CursorShapeView& out) {
     return true;
 }
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

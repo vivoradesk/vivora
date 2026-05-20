@@ -2,7 +2,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace deskbeam::protocol {
+namespace vivora::protocol {
 
 // Little-endian helpers
 static void write_u16(uint8_t* buf, uint16_t val) {
@@ -72,4 +72,4 @@ Packet Packet::deserialize(const uint8_t* data, size_t len) {
     return pkt;
 }
 
-} // namespace deskbeam::protocol
+} // namespace vivora::protocol

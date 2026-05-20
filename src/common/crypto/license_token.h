@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <cstddef>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
-// Compact binary license token, signed by the DeskBeam private key and
+// Compact binary license token, signed by the Vivora private key and
 // verified offline by anyone holding the matching public key (the
 // managed relay, eventually the address-book sync API).  We use a
 // purpose-built layout instead of JWT — no JSON parser, no base64,
@@ -53,4 +53,4 @@ bool verify_license(const uint8_t token[LICENSE_TOKEN_SIZE],
                     int64_t now_unix,
                     LicenseClaims& out_claims);
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

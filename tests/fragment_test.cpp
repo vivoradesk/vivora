@@ -11,8 +11,8 @@
 #include <numeric>
 #include <random>
 
-using namespace deskbeam::net;
-using namespace deskbeam::protocol;
+using namespace vivora::net;
+using namespace vivora::protocol;
 
 static std::vector<uint8_t> make_test_data(size_t size) {
     std::vector<uint8_t> data(size);

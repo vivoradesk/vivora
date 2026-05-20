@@ -5,7 +5,7 @@
 #include "common/utils/log.h"
 #include <algorithm>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 void VideoSender::store_retx(uint32_t key, const std::vector<uint8_t>& wire) {
     auto& slot = retx_ring_[retx_write_cursor_ % RETX_BUFFER_CAPACITY];
@@ -350,4 +350,4 @@ void VideoSender::set_relay_active(const net::SocketAddr& relay_addr,
     relay_active_ = true;
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host

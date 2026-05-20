@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 std::vector<protocol::Packet> FrameFragmenter::fragment(
     const uint8_t* data, size_t data_len,
@@ -61,4 +61,4 @@ std::vector<protocol::Packet> FrameFragmenter::fragment(
     return packets;
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net

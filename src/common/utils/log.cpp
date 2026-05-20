@@ -4,7 +4,7 @@
 #include <chrono>
 #include <ctime>
 
-namespace deskbeam::log {
+namespace vivora::log {
 
 static Level g_level = Level::Debug;
 
@@ -77,4 +77,4 @@ void error(const char* tag, const char* fmt, ...) {
     va_end(args);
 }
 
-} // namespace deskbeam::log
+} // namespace vivora::log

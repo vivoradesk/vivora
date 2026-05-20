@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "host/input/input_injector.h"
 #include "common/utils/log.h"
@@ -13,7 +13,7 @@
 #include <cerrno>
 #include <cstring>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 
@@ -171,7 +171,7 @@ public:
         usetup.id.bustype = BUS_USB;
         usetup.id.vendor  = 0xDE5B;     // "DESB"
         usetup.id.product = 0x0001;
-        std::strncpy(usetup.name, "DeskBeam Virtual Input", sizeof(usetup.name) - 1);
+        std::strncpy(usetup.name, "Vivora Virtual Input", sizeof(usetup.name) - 1);
         if (::ioctl(fd_, UI_DEV_SETUP, &usetup) < 0) {
             log::error(TAG, "UI_DEV_SETUP failed: %s", std::strerror(errno));
             close_dev();
@@ -280,6 +280,6 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     return inj;
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

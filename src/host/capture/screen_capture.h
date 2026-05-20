@@ -5,7 +5,7 @@
 #include <vector>
 #include <functional>
 
-namespace deskbeam {
+namespace vivora {
 
 // Platform-independent screen capture interface
 class IScreenCapture {
@@ -32,4 +32,4 @@ public:
     static std::unique_ptr<IScreenCapture> create();
 };
 
-} // namespace deskbeam
+} // namespace vivora

@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "common/net/socket.h"
 
@@ -9,7 +9,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 // RAII Winsock init/cleanup — one instance per process
 struct WinsockInit {
@@ -36,6 +36,6 @@ private:
     SOCKET sock_ = INVALID_SOCKET;
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

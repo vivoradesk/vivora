@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 namespace {
 
@@ -710,4 +710,4 @@ void QtGlVideoView::refresh_cursor() {
     }
 }
 
-} // namespace deskbeam::client
+} // namespace vivora::client

@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "client/render/d3d_renderer.h"
 #include "common/utils/log.h"
@@ -14,7 +14,7 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-namespace deskbeam {
+namespace vivora {
 
 bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
                        uint32_t frame_width, uint32_t frame_height,
@@ -499,6 +499,6 @@ bool D3dRenderer::resize(uint32_t width, uint32_t height) {
     return true;
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

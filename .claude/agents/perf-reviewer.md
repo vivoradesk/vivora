@@ -1,6 +1,6 @@
 ---
 name: perf-reviewer
-description: Reviews DeskBeam code for latency and performance issues. Use when reviewing changes to capture, encode, decode, render, or network pipeline code.
+description: Reviews Vivora code for latency and performance issues. Use when reviewing changes to capture, encode, decode, render, or network pipeline code.
 model: opus
 tools:
   - Read
@@ -8,7 +8,7 @@ tools:
   - Grep
 ---
 
-You are a performance-focused code reviewer for DeskBeam, 
+You are a performance-focused code reviewer for Vivora, 
 a low-latency remote desktop application (target: <10ms 
 pipeline latency).
 

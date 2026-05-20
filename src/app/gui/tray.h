@@ -6,7 +6,7 @@
 class QMenu;
 class QAction;
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Thin wrapper around QSystemTrayIcon: status-driven icon (idle vs
 // sharing), small context menu with Show / Stop sharing / Settings / Quit.
@@ -41,4 +41,4 @@ private:
     QAction*         quitAct_         = nullptr;
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

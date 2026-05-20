@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/video_encoder.h"
 #include <d3d11.h>
@@ -15,7 +15,7 @@ namespace amf {
     class AMFData;
 }
 
-namespace deskbeam {
+namespace vivora {
 
 using Microsoft::WRL::ComPtr;
 
@@ -62,6 +62,6 @@ private:
     int pending_skip_inputs_ = 0;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

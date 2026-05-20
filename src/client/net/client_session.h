@@ -15,7 +15,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 enum class SessionState { Disconnected, Connecting, Connected };
 
@@ -316,4 +316,4 @@ private:
     std::vector<std::vector<uint8_t>> fec_recovered_scratch_;
 };
 
-} // namespace deskbeam::client
+} // namespace vivora::client

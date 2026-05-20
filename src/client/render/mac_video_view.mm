@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
@@ -25,7 +25,7 @@
 #define DB_NX_DEVICERALTKEYMASK   0x00000040
 #define DB_NX_DEVICERCTLKEYMASK   0x00002000
 
-namespace deskbeam { struct MacVideoViewImpl; }
+namespace vivora { struct MacVideoViewImpl; }
 
 // ---------------------------------------------------------------------------
 // Obj-C window delegate: signals main loop to exit on close.
@@ -50,7 +50,7 @@ namespace deskbeam { struct MacVideoViewImpl; }
 
 @interface DBStreamView : NSView {
 @public
-    deskbeam::MacVideoViewImpl* impl;  // back pointer for input callback
+    vivora::MacVideoViewImpl* impl;  // back pointer for input callback
     NSTrackingArea* trackingArea;
     NSUInteger lastModifierFlags;
     // Relative-mouse mode: on when host cursor is hidden (e.g. FPS game).
@@ -72,7 +72,7 @@ namespace deskbeam { struct MacVideoViewImpl; }
 @end
 
 // Forward declaration so the view can call into C++.
-namespace deskbeam {
+namespace vivora {
 static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev);
 // Returns true if a mapping exists. Extended-key handling relies on vk_code
 // on the Windows injector side (arrows, nav keys, etc.).
@@ -185,12 +185,12 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         CGFloat dx = event.deltaX;
         CGFloat dy = event.deltaY;
         if (dx == 0 && dy == 0) return;
-        deskbeam::protocol::InputEvent ev;
-        ev.type = deskbeam::protocol::InputEventType::MouseMoveRelative;
+        vivora::protocol::InputEvent ev;
+        ev.type = vivora::protocol::InputEventType::MouseMoveRelative;
         ev.dx = static_cast<int32_t>(llround(dx));
         ev.dy = static_cast<int32_t>(llround(dy));
         if (ev.dx == 0 && ev.dy == 0) return;
-        deskbeam::emit_input(impl, ev);
+        vivora::emit_input(impl, ev);
         return;
     }
 
@@ -200,13 +200,13 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     if (vw <= 0 || vh <= 0 || !impl) return;
 
     float xn = 0, yn = 0;
-    deskbeam::normalize_mouse(impl, p.x, vh - p.y, vw, vh, &xn, &yn);
+    vivora::normalize_mouse(impl, p.x, vh - p.y, vw, vh, &xn, &yn);
 
-    deskbeam::protocol::InputEvent ev;
-    ev.type = deskbeam::protocol::InputEventType::MouseMove;
+    vivora::protocol::InputEvent ev;
+    ev.type = vivora::protocol::InputEventType::MouseMove;
     ev.x_norm = xn;
     ev.y_norm = yn;
-    deskbeam::emit_input(impl, ev);
+    vivora::emit_input(impl, ev);
 }
 
 - (void)enterRelativeMode {
@@ -238,20 +238,20 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 - (void)mouseEntered:(NSEvent*)event { (void)event; [NSCursor hide]; }
 - (void)mouseExited:(NSEvent*)event  { (void)event; [NSCursor unhide]; }
 
-- (void)sendMouseButton:(deskbeam::protocol::MouseButton)btn pressed:(BOOL)down {
-    deskbeam::protocol::InputEvent ev;
-    ev.type = deskbeam::protocol::InputEventType::MouseButton;
+- (void)sendMouseButton:(vivora::protocol::MouseButton)btn pressed:(BOOL)down {
+    vivora::protocol::InputEvent ev;
+    ev.type = vivora::protocol::InputEventType::MouseButton;
     ev.button = btn;
     ev.pressed = down ? true : false;
-    deskbeam::emit_input(impl, ev);
+    vivora::emit_input(impl, ev);
 }
 
-- (void)mouseDown:(NSEvent*)event        { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Left   pressed:YES]; }
-- (void)mouseUp:(NSEvent*)event          { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Left   pressed:NO];  }
-- (void)rightMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Right  pressed:YES]; }
-- (void)rightMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Right  pressed:NO];  }
-- (void)otherMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Middle pressed:YES]; }
-- (void)otherMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:deskbeam::protocol::MouseButton::Middle pressed:NO];  }
+- (void)mouseDown:(NSEvent*)event        { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Left   pressed:YES]; }
+- (void)mouseUp:(NSEvent*)event          { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Left   pressed:NO];  }
+- (void)rightMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Right  pressed:YES]; }
+- (void)rightMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Right  pressed:NO];  }
+- (void)otherMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:YES]; }
+- (void)otherMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:NO];  }
 
 - (void)scrollWheel:(NSEvent*)event {
     // Mac scroll deltas are in lines (or pixels for precise scrolling).
@@ -262,23 +262,23 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     int16_t sy = (int16_t)std::max(-32000.0, std::min(32000.0, (double)dy * 30.0));
     if (sx == 0 && sy == 0) return;
 
-    deskbeam::protocol::InputEvent ev;
-    ev.type = deskbeam::protocol::InputEventType::MouseScroll;
+    vivora::protocol::InputEvent ev;
+    ev.type = vivora::protocol::InputEventType::MouseScroll;
     ev.scroll_dx = sx;
     ev.scroll_dy = sy;
-    deskbeam::emit_input(impl, ev);
+    vivora::emit_input(impl, ev);
 }
 
 - (void)sendKey:(uint16_t)macKeyCode down:(BOOL)down {
     uint16_t scan = 0, vk = 0;
-    if (!deskbeam::mac_key_to_win(macKeyCode, &scan, &vk)) return;
+    if (!vivora::mac_key_to_win(macKeyCode, &scan, &vk)) return;
 
-    deskbeam::protocol::InputEvent ev;
-    ev.type = down ? deskbeam::protocol::InputEventType::KeyDown
-                   : deskbeam::protocol::InputEventType::KeyUp;
+    vivora::protocol::InputEvent ev;
+    ev.type = down ? vivora::protocol::InputEventType::KeyDown
+                   : vivora::protocol::InputEventType::KeyUp;
     ev.scan_code = scan;
     ev.vk_code = vk;
-    deskbeam::emit_input(impl, ev);
+    vivora::emit_input(impl, ev);
 }
 
 - (void)keyDown:(NSEvent*)event {
@@ -331,7 +331,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 // C++ impl
 // ---------------------------------------------------------------------------
 
-namespace deskbeam {
+namespace vivora {
 
 static const char* TAG = "MAC_RENDER";
 
@@ -988,6 +988,6 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     return false;
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

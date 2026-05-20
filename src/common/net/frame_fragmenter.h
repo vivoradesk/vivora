@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 class FrameFragmenter {
 public:
@@ -26,4 +26,4 @@ public:
         bool keyframe, bool heartbeat = false);
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net

@@ -13,8 +13,8 @@
 #include <random>
 #include <vector>
 
-using namespace deskbeam::net;
-using namespace deskbeam::protocol;
+using namespace vivora::net;
+using namespace vivora::protocol;
 
 // Build a synthetic Video data wire packet with a unique seq_no and a
 // deterministic payload of `payload_len` bytes.

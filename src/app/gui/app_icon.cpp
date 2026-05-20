@@ -6,7 +6,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 namespace {
 
@@ -90,4 +90,4 @@ QIcon make_app_icon()         { return make_icon(QColor("#2196f3")); }
 QIcon make_tray_idle_icon()   { return make_icon(QColor("#607d8b")); } // grey-blue
 QIcon make_tray_sharing_icon(){ return make_icon(QColor("#4caf50")); } // green
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

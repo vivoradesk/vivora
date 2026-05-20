@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "app/windows_view_platform.h"
 #include <windows.h>
@@ -16,21 +16,21 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     // bootstrapped one in this process (in-process Connect from the
     // tray app).  CLI path still constructs its own.  Qt forbids two
     // QApplications per process; this check is what lets the host UI
-    // and a view session coexist in the same deskbeam.exe.
+    // and a view session coexist in the same vivora.exe.
     if (!QApplication::instance()) {
         app_ = std::make_unique<QApplication>(argc, argv);
     }
-    window_ = std::make_unique<deskbeam::StreamWindow>();
-    window_->setWindowTitle(QString("DeskBeam — %1:%2").arg(host_ip).arg(port));
+    window_ = std::make_unique<vivora::StreamWindow>();
+    window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
     window_->show();
     return true;
 }
 
-bool WindowsViewPlatform::init_decoder(deskbeam::VideoCodec codec) {
+bool WindowsViewPlatform::init_decoder(vivora::VideoCodec codec) {
     if (decoder_) return true;
-    decoder_ = deskbeam::IVideoDecoder::create();
+    decoder_ = vivora::IVideoDecoder::create();
     if (!decoder_->init(codec)) {
-        deskbeam::log::error("VIEW", "Failed to init decoder");
+        vivora::log::error("VIEW", "Failed to init decoder");
         decoder_.reset();
         return false;
     }
@@ -51,14 +51,14 @@ bool WindowsViewPlatform::decode(const uint8_t* data, size_t len,
                                   uint16_t seq_no) {
     if (!decoder_) return false;
     bool ok = decoder_->decode(data, len, seq_no);
-    if (!ok) deskbeam::log::warn("VIEW", "Decoder rejected frame seq=%u", seq_no);
+    if (!ok) vivora::log::warn("VIEW", "Decoder rejected frame seq=%u", seq_no);
     return ok;
 }
 
 int WindowsViewPlatform::render() {
     if (!decoder_) return 0;
     int count = 0;
-    deskbeam::DecodedFrame decoded;
+    vivora::DecodedFrame decoded;
     while (decoder_->get_frame(decoded)) {
         if (!renderer_ready_ && decoded.width > 0 && decoded.height > 0 && decoded.texture) {
             D3D11_TEXTURE2D_DESC tex_desc = {};
@@ -75,7 +75,7 @@ int WindowsViewPlatform::render() {
                 } else {
                     window_->set_stream_size(decoded.width, decoded.height);
                 }
-                deskbeam::log::info("VIEW", "Renderer started: %ux%u, format=%u",
+                vivora::log::info("VIEW", "Renderer started: %ux%u, format=%u",
                                     decoded.width, decoded.height, tex_desc.Format);
             }
         }
@@ -90,11 +90,11 @@ int WindowsViewPlatform::render() {
 
 void WindowsViewPlatform::flush_decoder() { if (decoder_) decoder_->flush(); }
 
-void WindowsViewPlatform::upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) {
+void WindowsViewPlatform::upload_cursor_shape(const vivora::protocol::CursorShapeMessage& shape) {
     if (window_) window_->upload_cursor_shape(shape);
 }
 
-void WindowsViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) {
+void WindowsViewPlatform::update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) {
     if (window_) window_->update_cursor_position(pos);
 }
 
@@ -104,7 +104,7 @@ void WindowsViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     if (window_) window_->set_stream_size(width, height);
 }
 
-void WindowsViewPlatform::update_stats(const deskbeam::StatsView& stats) {
+void WindowsViewPlatform::update_stats(const vivora::StatsView& stats) {
     if (window_) window_->update_stats(stats);
 }
 
@@ -113,4 +113,4 @@ void WindowsViewPlatform::shutdown() {
     app_.reset();
 }
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

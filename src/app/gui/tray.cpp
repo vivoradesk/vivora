@@ -7,23 +7,23 @@
 #include <QIcon>
 #include <QMenu>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 Tray::Tray(QObject* parent) : QObject(parent) {
     tray_ = new QSystemTrayIcon(this);
     // Procedurally drawn brand icon — see app_icon.cpp.  Idle = grey-blue
     // until setSharing() flips us to the green sharing variant.
     tray_->setIcon(make_tray_idle_icon());
-    tray_->setToolTip("DeskBeam");
+    tray_->setToolTip("Vivora");
 
     menu_ = new QMenu();
-    showAct_         = menu_->addAction("Show DeskBeam");
+    showAct_         = menu_->addAction("Show Vivora");
     stopSharingAct_  = menu_->addAction("Stop sharing");
     stopSharingAct_->setEnabled(false);
     menu_->addSeparator();
     settingsAct_     = menu_->addAction("Settings…");
     menu_->addSeparator();
-    quitAct_         = menu_->addAction("Quit DeskBeam");
+    quitAct_         = menu_->addAction("Quit Vivora");
 
     tray_->setContextMenu(menu_);
     tray_->show();
@@ -47,9 +47,9 @@ Tray::~Tray() {
 
 void Tray::setSharing(bool sharing, int clientCount) {
     stopSharingAct_->setEnabled(sharing);
-    QString tip = "DeskBeam";
+    QString tip = "Vivora";
     if (sharing) {
-        tip = QString("DeskBeam — sharing (%1 client%2)")
+        tip = QString("Vivora — sharing (%1 client%2)")
                 .arg(clientCount).arg(clientCount == 1 ? "" : "s");
     }
     tray_->setToolTip(tip);
@@ -66,4 +66,4 @@ void Tray::notify(const QString& title, const QString& body) {
     tray_->showMessage(title, body, QSystemTrayIcon::Information, 5000);
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

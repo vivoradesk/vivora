@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <functional>
 
-namespace deskbeam {
+namespace vivora {
 
 // Platform-specific view (client) operations: windowing, decode, render.
 // One implementation per platform.
@@ -84,4 +84,4 @@ struct ViewPlatform {
     virtual void shutdown() {}
 };
 
-} // namespace deskbeam
+} // namespace vivora

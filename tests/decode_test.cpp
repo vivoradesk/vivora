@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -12,11 +12,11 @@
 int main() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-    deskbeam::log::info("TEST", "=== Decode Test ===");
+    vivora::log::info("TEST", "=== Decode Test ===");
 
-    auto decoder = deskbeam::IVideoDecoder::create();
+    auto decoder = vivora::IVideoDecoder::create();
     if (!decoder->init()) {
-        deskbeam::log::error("TEST", "Failed to init decoder");
+        vivora::log::error("TEST", "Failed to init decoder");
         return 1;
     }
 
@@ -24,7 +24,7 @@ int main() {
     FILE* f = fopen("transport_test.h265", "rb");
     if (!f) f = fopen("encode_test.h265", "rb");
     if (!f) {
-        deskbeam::log::error("TEST", "No .h265 test file found");
+        vivora::log::error("TEST", "No .h265 test file found");
         return 1;
     }
 
@@ -36,23 +36,23 @@ int main() {
     fread(data.data(), 1, fsize, f);
     fclose(f);
 
-    deskbeam::log::info("TEST", "Read %ld bytes from .h265 file", fsize);
+    vivora::log::info("TEST", "Read %ld bytes from .h265 file", fsize);
 
     // Feed the whole file as one big chunk (MF should handle NAL parsing)
-    deskbeam::log::info("TEST", "Feeding to decoder...");
+    vivora::log::info("TEST", "Feeding to decoder...");
     bool ok = decoder->decode(data.data(), data.size(), 0);
-    deskbeam::log::info("TEST", "decode() returned %s", ok ? "true" : "false");
+    vivora::log::info("TEST", "decode() returned %s", ok ? "true" : "false");
 
     // Try to get output
-    deskbeam::DecodedFrame frame;
+    vivora::DecodedFrame frame;
     int decoded = 0;
     while (decoder->get_frame(frame)) {
         decoded++;
-        deskbeam::log::info("TEST", "Decoded frame %d: %ux%u", decoded, frame.width, frame.height);
+        vivora::log::info("TEST", "Decoded frame %d: %ux%u", decoded, frame.width, frame.height);
     }
 
-    deskbeam::log::info("TEST", "Total decoded frames: %d", decoded);
-    deskbeam::log::info("TEST", "=== %s ===", decoded > 0 ? "PASS" : "NEEDS MORE DATA");
+    vivora::log::info("TEST", "Total decoded frames: %d", decoded);
+    vivora::log::info("TEST", "=== %s ===", decoded > 0 ? "PASS" : "NEEDS MORE DATA");
 
     return 0;
 }

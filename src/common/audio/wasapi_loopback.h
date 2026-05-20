@@ -9,7 +9,7 @@ struct IAudioCaptureClient;
 struct IAudioClient;
 struct IMMDevice;
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Windows WASAPI loopback capture of the default render endpoint.
 // Produces float32 interleaved PCM at the endpoint's native mix format.
@@ -44,4 +44,4 @@ private:
     bool     is_float_ = false;
 };
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

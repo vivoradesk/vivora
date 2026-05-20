@@ -19,7 +19,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 // QOpenGLWidget that renders a single YUV420P frame to a fullscreen quad
 // via a fragment shader doing BT.709 YUV->RGB.  Mouse / keyboard / wheel
@@ -165,4 +165,4 @@ private:
     bool    is_x11_session() const;
 };
 
-} // namespace deskbeam::client
+} // namespace vivora::client

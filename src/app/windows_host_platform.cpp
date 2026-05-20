@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "app/windows_host_platform.h"
 #include <windows.h>
@@ -8,16 +8,16 @@
 #include <utility>
 
 bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
-                               deskbeam::EncoderKind kind,
-                               deskbeam::VideoCodec codec) {
-    capture_ = deskbeam::IScreenCapture::create();
-    dxgi_ = dynamic_cast<deskbeam::DxgiCapture*>(capture_.get());
+                               vivora::EncoderKind kind,
+                               vivora::VideoCodec codec) {
+    capture_ = vivora::IScreenCapture::create();
+    dxgi_ = dynamic_cast<vivora::DxgiCapture*>(capture_.get());
     if (!capture_ || !capture_->init(0)) {
-        deskbeam::log::error("HOST", "Failed to init capture");
+        vivora::log::error("HOST", "Failed to init capture");
         return false;
     }
     auto res = capture_->get_resolution();
-    deskbeam::log::info("HOST", "Capture: %ux%u", res.width, res.height);
+    vivora::log::info("HOST", "Capture: %ux%u", res.width, res.height);
 
     // HDR carriage: H.264 is 8-bit only, but DXGI hands us FP16 surfaces
     // when the source display is HDR.  AMF "falls back" to 8-bit by
@@ -28,12 +28,12 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     // already negotiates the host's actual codec via the handshake, so
     // it picks HEVC automatically.
     auto effective_codec = codec;
-    if (effective_codec == deskbeam::VideoCodec::H264
+    if (effective_codec == vivora::VideoCodec::H264
         && dxgi_ && dxgi_->get_capture_format() == DXGI_FORMAT_R16G16B16A16_FLOAT) {
-        deskbeam::log::warn("HOST",
+        vivora::log::warn("HOST",
             "HDR capture (FP16) detected — promoting requested H.264 to "
             "HEVC Main10 so 10-bit colour survives the encode");
-        effective_codec = deskbeam::VideoCodec::HEVC;
+        effective_codec = vivora::VideoCodec::HEVC;
     }
 
     // Save the encoder config — start_encoder() rebuilds the encoder
@@ -43,7 +43,7 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     saved_codec_     = effective_codec;
     live_bitrate_bps_ = manual_bitrate_bps != 0
         ? manual_bitrate_bps
-        : deskbeam::codec::default_bitrate_for(res.width, res.height, 60);
+        : vivora::codec::default_bitrate_for(res.width, res.height, 60);
 
     // Force initial mouse movement so DXGI produces its first frame
     // immediately (otherwise the duplication blocks until the user
@@ -60,13 +60,13 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
 bool WindowsHostPlatform::start_encoder() {
     if (encoder_) return true;   // already running
 
-    encoder_ = deskbeam::IVideoEncoder::create(saved_kind_);
+    encoder_ = vivora::IVideoEncoder::create(saved_kind_);
     if (!encoder_) {
-        deskbeam::log::error("HOST", "No matching video encoder available");
+        vivora::log::error("HOST", "No matching video encoder available");
         return false;
     }
     auto res = capture_->get_resolution();
-    deskbeam::EncoderConfig cfg;
+    vivora::EncoderConfig cfg;
     cfg.width       = res.width;
     cfg.height      = res.height;
     cfg.fps         = 60;
@@ -81,12 +81,12 @@ bool WindowsHostPlatform::start_encoder() {
     if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
 
     if (!encoder_->init(cfg, dxgi_ ? dxgi_->get_device() : nullptr)) {
-        deskbeam::log::error("HOST", "Failed to init encoder");
+        vivora::log::error("HOST", "Failed to init encoder");
         encoder_.reset();
         return false;
     }
-    deskbeam::log::info("HOST", "Encoder started (%s, %u kbps)",
-                        saved_codec_ == deskbeam::VideoCodec::HEVC ? "hevc" : "h264",
+    vivora::log::info("HOST", "Encoder started (%s, %u kbps)",
+                        saved_codec_ == vivora::VideoCodec::HEVC ? "hevc" : "h264",
                         live_bitrate_bps_ / 1000);
     return true;
 }
@@ -97,7 +97,7 @@ void WindowsHostPlatform::stop_encoder() {
     // Drop the staged frame too — its content is from a previous session
     // and may not match the next encoder's input format if config changes.
     staging_valid_ = false;
-    deskbeam::log::info("HOST", "Encoder stopped (no clients attached)");
+    vivora::log::info("HOST", "Encoder stopped (no clients attached)");
 }
 
 uint32_t WindowsHostPlatform::capture_width()  const { return capture_->get_resolution().width; }
@@ -112,7 +112,7 @@ void WindowsHostPlatform::set_bitrate(uint32_t bps) {
 void WindowsHostPlatform::request_idr() {
     if (encoder_) encoder_->request_idr();
 }
-deskbeam::VideoCodec WindowsHostPlatform::actual_codec() const {
+vivora::VideoCodec WindowsHostPlatform::actual_codec() const {
     // Answer from saved config when encoder is torn down — host_loop
     // queries this before the first viewer attaches.
     return encoder_ ? encoder_->get_config().codec : saved_codec_;
@@ -127,7 +127,7 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
     // the encoder_->encode() call below otherwise.
     if (!encoder_) return false;
 
-    deskbeam::CapturedFrame frame;
+    vivora::CapturedFrame frame;
     // Non-blocking capture: if DXGI doesn't have a fresh frame, return
     // immediately so the host_loop can fire heartbeat / yield. A 16ms
     // timeout here halved the loop's effective rate on a static screen
@@ -166,7 +166,7 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                 desc.CPUAccessFlags = 0;
                 desc.MiscFlags      = 0;
                 if (FAILED(dev->CreateTexture2D(&desc, nullptr, staging_tex_.GetAddressOf()))) {
-                    deskbeam::log::warn("HOST", "Heartbeat staging texture alloc failed");
+                    vivora::log::warn("HOST", "Heartbeat staging texture alloc failed");
                 }
             }
             if (staging_tex_) {
@@ -207,7 +207,7 @@ bool WindowsHostPlatform::get_cursor_state(CursorState& out) {
 
 bool WindowsHostPlatform::take_cursor_shape(CursorShapeView& out) {
     if (!dxgi_) return false;
-    deskbeam::CursorShape s;
+    vivora::CursorShape s;
     if (!dxgi_->take_new_cursor_shape(s)) return false;
     out.id        = s.id;
     out.width     = s.width;
@@ -220,7 +220,7 @@ bool WindowsHostPlatform::take_cursor_shape(CursorShapeView& out) {
 
 bool WindowsHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     if (!encoder_) return false;
-    deskbeam::EncodedPacket pkt;
+    vivora::EncodedPacket pkt;
     if (!encoder_->get_packet(pkt))
         return false;
     pkt_buf_ = std::move(pkt.data);
@@ -232,4 +232,4 @@ bool WindowsHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     return true;
 }
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

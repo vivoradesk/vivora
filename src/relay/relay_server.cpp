@@ -1,4 +1,4 @@
-// deskbeam-relay: standalone UDP forwarder for peers that can't punch
+// vivora-relay: standalone UDP forwarder for peers that can't punch
 // through their NATs directly (symmetric NAT, CGNAT, blocking firewalls).
 // Both peers BIND with their pubkey + the peer's pubkey; once both halves
 // arrive, the relay links them and forwards every DATA payload from one
@@ -64,7 +64,7 @@ struct AllocIdHash {
     }
 };
 
-// Same shape as deskbeam::net::SocketAddr but used here as map keys, so
+// Same shape as vivora::net::SocketAddr but used here as map keys, so
 // it needs hash + equality.  We define equality on the wrapped value to
 // dodge any future change to the struct layout.
 struct EndpointKey {
@@ -99,7 +99,7 @@ struct SessionIdHash {
 // One side of a paired session.  `paired_alloc` is the alloc id of the
 // other peer once both halves bound; until then it's unset.
 struct Binding {
-    deskbeam::net::SocketAddr endpoint;
+    vivora::net::SocketAddr endpoint;
     SessionId                 session_id;
     AllocId                   paired_alloc;
     bool                      paired = false;
@@ -148,8 +148,8 @@ void hex_short(const uint8_t pubkey[32], char out[17]) {
 } // namespace
 
 int main(int argc, char** argv) {
-    using namespace deskbeam;
-    namespace rly = deskbeam::net::relay;
+    using namespace vivora;
+    namespace rly = vivora::net::relay;
 
     uint16_t port = DEFAULT_PORT;
     bool require_license = false;
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
     sock->set_recvbuf(4 << 20);
     sock->set_sendbuf(4 << 20);
     sock->set_nonblocking(true);
-    log::info(TAG, "deskbeam-relay listening on UDP :%u (TTL=%ds)%s",
+    log::info(TAG, "vivora-relay listening on UDP :%u (TTL=%ds)%s",
               port, BINDING_TTL,
               require_license ? "  [license required]" : "");
 
@@ -302,11 +302,11 @@ int main(int argc, char** argv) {
                     if (ackn) sock->send_to(txbuf, ackn, sender);
                     break;
                 }
-                deskbeam::crypto::LicenseClaims claims;
+                vivora::crypto::LicenseClaims claims;
                 const int64_t now_unix =
                     std::chrono::duration_cast<std::chrono::seconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
-                if (!deskbeam::crypto::verify_license(p.license, license_pubkey,
+                if (!vivora::crypto::verify_license(p.license, license_pubkey,
                                                       now_unix, claims)) {
                     log::info(TAG, "reject bind from %s:%u: invalid / expired license",
                               ip_to_string(sender.ip).c_str(), sender.port);
@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
                 }
                 // Pro-tier required for managed relay.  Trial tier passes
                 // verification but doesn't get to bind here.
-                if (claims.tier != deskbeam::crypto::LicenseTier::Pro) {
+                if (claims.tier != vivora::crypto::LicenseTier::Pro) {
                     log::info(TAG, "reject bind from %s:%u: trial tier",
                               ip_to_string(sender.ip).c_str(), sender.port);
                     rly::BindAckPayload ack{};

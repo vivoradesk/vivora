@@ -4,12 +4,12 @@
 
 #include <string>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Where the host's long-term Curve25519 keypair lives on disk.
-//   Windows: %APPDATA%\DeskBeam\host_key
-//   Linux:   $XDG_CONFIG_HOME/deskbeam/host_key  (or ~/.config/deskbeam/...)
-//   macOS:   ~/Library/Application Support/DeskBeam/host_key
+//   Windows: %APPDATA%\Vivora\host_key
+//   Linux:   $XDG_CONFIG_HOME/vivora/host_key  (or ~/.config/vivora/...)
+//   macOS:   ~/Library/Application Support/Vivora/host_key
 // Wire format is raw 64 bytes: secret_key[32] || public_key[32].  No header,
 // no checksum — this is a private file, permissions (0600 on POSIX) are our
 // integrity story.
@@ -35,4 +35,4 @@ std::string hex_encode(const uint8_t* bytes, size_t len);
 // non-hex char or wrong length.  Used by the client's `--host-key HEX` CLI.
 bool hex_decode_32(const std::string& hex, uint8_t out[32]);
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

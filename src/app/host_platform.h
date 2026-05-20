@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace deskbeam {
+namespace vivora {
 
 // Platform-specific host operations: capture, encode, shutdown.
 // One implementation per platform (Windows/DXGI+AMF, macOS/SCK+VTB, Linux/PW+VAAPI).
@@ -111,4 +111,4 @@ struct HostPlatform {
     virtual bool take_cursor_shape(CursorShapeView& /*out*/) { return false; }
 };
 
-} // namespace deskbeam
+} // namespace vivora

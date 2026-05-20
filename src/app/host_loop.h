@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace deskbeam {
+namespace vivora {
 
 struct HostLoopConfig {
     uint16_t port = 9876;
@@ -55,4 +55,4 @@ struct HostLoopConfig {
 // All platform-specific work is delegated to |platform|.
 int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg);
 
-} // namespace deskbeam
+} // namespace vivora

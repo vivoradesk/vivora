@@ -1,4 +1,4 @@
-#if defined(DESKBEAM_MACOS) || defined(DESKBEAM_LINUX)
+#if defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
 
 #include "common/net/posix_socket.h"
 #include "common/utils/log.h"
@@ -15,7 +15,7 @@
 #include <errno.h>
 #include <cstring>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 static const char* TAG = "NET";
 
@@ -191,6 +191,6 @@ std::unique_ptr<IUdpSocket> IUdpSocket::create() {
     return std::make_unique<PosixUdpSocket>();
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net
 
 #endif

@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 // winsock_socket.h must come first — it includes winsock2.h which must
 // precede any windows.h inclusion to avoid winsock.h/winsock2.h clash.
 #include "common/net/winsock_socket.h"
@@ -15,17 +15,17 @@
 #include "app/windows_view_platform.h"
 #endif
 
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 #include "app/mac_host_platform.h"
 #include "app/mac_view_platform.h"
 #endif
 
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 #include "app/linux_view_platform.h"
 #include "app/linux_host_platform.h"
 #endif
 
-namespace deskbeam {
+namespace vivora {
 
 // Match a long-form flag with an attached value: both "--flag VALUE" (next
 // argv) and "--flag=VALUE" (single argv with '=') are accepted.  Returns the
@@ -42,7 +42,7 @@ static const char* flag_value(const char* name, char** argv, int argc, int& i) {
 }
 
 static void print_usage(const char* prog) {
-    std::printf("DeskBeam v0.1.0 — low-latency remote desktop\n\n");
+    std::printf("Vivora v0.1.0 — low-latency remote desktop\n\n");
     std::printf("Usage:\n");
     std::printf("  %s                             Launch GUI (default)\n", prog);
     std::printf("  %s --host [options]            Headless: start hosting\n", prog);
@@ -71,8 +71,8 @@ int run_legacy_cli(int argc, char** argv) {
     bool mode_view = false;
     uint32_t display_index = 0;
     uint32_t manual_bitrate_bps = 0;
-    deskbeam::EncoderKind encoder_kind = deskbeam::EncoderKind::Auto;
-    deskbeam::VideoCodec  codec = deskbeam::VideoCodec::HEVC;
+    vivora::EncoderKind encoder_kind = vivora::EncoderKind::Auto;
+    vivora::VideoCodec  codec = vivora::VideoCodec::HEVC;
     bool codec_explicit = false;
     const char* stun_server = "stun.l.google.com:19302";
     const char* host_key_hex = nullptr;
@@ -91,19 +91,19 @@ int run_legacy_cli(int argc, char** argv) {
         } else if ((v = flag_value("--bitrate", argv, argc, i)) != nullptr) {
             manual_bitrate_bps = static_cast<uint32_t>(std::atoi(v)) * 1'000'000u;
         } else if ((v = flag_value("--encoder", argv, argc, i)) != nullptr) {
-            if      (std::strcmp(v, "auto")  == 0) encoder_kind = deskbeam::EncoderKind::Auto;
-            else if (std::strcmp(v, "amf")   == 0) encoder_kind = deskbeam::EncoderKind::Amf;
-            else if (std::strcmp(v, "nvenc") == 0) encoder_kind = deskbeam::EncoderKind::Nvenc;
-            else if (std::strcmp(v, "qsv")   == 0) encoder_kind = deskbeam::EncoderKind::Qsv;
+            if      (std::strcmp(v, "auto")  == 0) encoder_kind = vivora::EncoderKind::Auto;
+            else if (std::strcmp(v, "amf")   == 0) encoder_kind = vivora::EncoderKind::Amf;
+            else if (std::strcmp(v, "nvenc") == 0) encoder_kind = vivora::EncoderKind::Nvenc;
+            else if (std::strcmp(v, "qsv")   == 0) encoder_kind = vivora::EncoderKind::Qsv;
             else {
                 std::fprintf(stderr, "Error: --encoder must be one of: auto, amf, nvenc, qsv\n");
                 return 1;
             }
         } else if ((v = flag_value("--codec", argv, argc, i)) != nullptr) {
             if      (std::strcmp(v, "h264") == 0 || std::strcmp(v, "avc")  == 0)
-                codec = deskbeam::VideoCodec::H264;
+                codec = vivora::VideoCodec::H264;
             else if (std::strcmp(v, "hevc") == 0 || std::strcmp(v, "h265") == 0)
-                codec = deskbeam::VideoCodec::HEVC;
+                codec = vivora::VideoCodec::HEVC;
             else {
                 std::fprintf(stderr, "Error: --codec must be h264 or hevc\n");
                 return 1;
@@ -144,34 +144,34 @@ int run_legacy_cli(int argc, char** argv) {
     }
 
     if (mode_host) {
-#ifdef DESKBEAM_WINDOWS
-        deskbeam::net::WinsockInit wsa;
+#ifdef VIVORA_WINDOWS
+        vivora::net::WinsockInit wsa;
         if (!wsa.ok) {
-            deskbeam::log::error("HOST", "Failed to init Winsock");
+            vivora::log::error("HOST", "Failed to init Winsock");
             return 1;
         }
         WindowsHostPlatform platform;
         if (!platform.init(manual_bitrate_bps, encoder_kind, codec)) return 1;
 #endif
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
         MacHostPlatform platform;
         if (!platform.init(display_index, manual_bitrate_bps, codec)) return 1;
 #endif
-#ifdef DESKBEAM_LINUX
-        deskbeam::VideoCodec linux_codec = codec;
-        if (!codec_explicit && codec == deskbeam::VideoCodec::HEVC) {
-            linux_codec = deskbeam::VideoCodec::H264;
-            deskbeam::log::info("HOST",
+#ifdef VIVORA_LINUX
+        vivora::VideoCodec linux_codec = codec;
+        if (!codec_explicit && codec == vivora::VideoCodec::HEVC) {
+            linux_codec = vivora::VideoCodec::H264;
+            vivora::log::info("HOST",
                 "Defaulting to H.264 on Linux host — pass --codec hevc to force HEVC vaapi.");
         }
         LinuxHostPlatform platform;
         if (!platform.init(manual_bitrate_bps, linux_codec)) return 1;
 #endif
-        deskbeam::HostLoopConfig lcfg;
+        vivora::HostLoopConfig lcfg;
         lcfg.port = port;
         lcfg.manual_bitrate_bps = manual_bitrate_bps;
         lcfg.encoder_kind = encoder_kind;
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
         lcfg.codec = linux_codec;
 #else
         lcfg.codec = codec;
@@ -181,7 +181,7 @@ int run_legacy_cli(int argc, char** argv) {
         lcfg.relay_server = relay_server;
         lcfg.relay_session_hex = relay_session_hex;
         lcfg.license_file = license_file;
-        return deskbeam::run_host_loop(platform, lcfg);
+        return vivora::run_host_loop(platform, lcfg);
     }
 
     if (mode_view) {
@@ -192,24 +192,24 @@ int run_legacy_cli(int argc, char** argv) {
             return 1;
         }
         if (!host_ip) host_ip = "0.0.0.0";
-#ifdef DESKBEAM_WINDOWS
-        deskbeam::net::WinsockInit wsa;
+#ifdef VIVORA_WINDOWS
+        vivora::net::WinsockInit wsa;
         if (!wsa.ok) {
-            deskbeam::log::error("VIEW", "Failed to init Winsock");
+            vivora::log::error("VIEW", "Failed to init Winsock");
             return 1;
         }
         WindowsViewPlatform platform;
         if (!platform.init(argc, argv, host_ip, port)) return 1;
 #endif
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
         MacViewPlatform platform;
         if (!platform.init(host_ip, port)) return 1;
 #endif
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
         LinuxViewPlatform platform;
         if (!platform.init(argc, argv, host_ip, port)) return 1;
 #endif
-        deskbeam::ViewLoopConfig vcfg;
+        vivora::ViewLoopConfig vcfg;
         vcfg.host_ip = host_ip;
         vcfg.port = port;
         vcfg.stun_server = stun_server;
@@ -219,11 +219,11 @@ int run_legacy_cli(int argc, char** argv) {
         vcfg.relay_server = relay_server;
         vcfg.relay_session_hex = relay_session_hex;
         vcfg.license_file = license_file;
-        return deskbeam::run_view_loop(platform, vcfg);
+        return vivora::run_view_loop(platform, vcfg);
     }
 
     print_usage(argv[0]);
     return 0;
 }
 
-} // namespace deskbeam
+} // namespace vivora

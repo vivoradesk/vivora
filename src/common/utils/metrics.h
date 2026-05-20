@@ -3,7 +3,7 @@
 #include "common/utils/types.h"
 #include <string>
 
-namespace deskbeam {
+namespace vivora {
 
 // Simple RAII timer that logs elapsed time on destruction
 class ScopedTimer {
@@ -23,4 +23,4 @@ private:
     TimePoint start_;
 };
 
-} // namespace deskbeam
+} // namespace vivora

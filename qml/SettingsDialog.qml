@@ -10,7 +10,7 @@ Window {
     height: 540
     minimumWidth: 480
     minimumHeight: 420
-    title: "DeskBeam — Settings"
+    title: "Vivora — Settings"
 
     signal closed()
 
@@ -66,7 +66,7 @@ Window {
             Label { text: "Rendezvous (host:port):" }
             TextField {
                 Layout.fillWidth: true
-                placeholderText: "rdv.deskbeam.dev:7000"
+                placeholderText: "rdv.vivora.dev:7000"
                 text: App.settings.rendezvous
                 onEditingFinished: App.settings.rendezvous = text
             }
@@ -74,7 +74,7 @@ Window {
             Label { text: "Relay (host:port):" }
             TextField {
                 Layout.fillWidth: true
-                placeholderText: "relay.deskbeam.dev:7100"
+                placeholderText: "relay.vivora.dev:7100"
                 text: App.settings.relay
                 onEditingFinished: App.settings.relay = text
             }

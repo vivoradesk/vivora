@@ -1,9 +1,9 @@
-// deskbeam-license-mint: tiny CLI tool for the manual side of the
+// vivora-license-mint: tiny CLI tool for the manual side of the
 // licensing flow.  Two modes:
 //
 //   keygen   — generate an Ed25519 keypair, write the 64-byte expanded
 //              secret to <out>.sk and the 32-byte public key to <out>.pk.
-//              The .pk file is what `deskbeam-relay --require-license`
+//              The .pk file is what `vivora-relay --require-license`
 //              consumes; the .sk file feeds back into this tool's `mint`.
 //
 //   mint     — take a .sk file plus claim parameters (tier, exp, subject)
@@ -14,7 +14,7 @@
 // supply a 32-byte seed read from the OS RNG).
 //
 // This is a developer tool — the real production minting will live in
-// the closed-source deskbeam-cloud service backed by a Paddle webhook.
+// the closed-source vivora-cloud service backed by a Paddle webhook.
 // For now it lets us prepare a few test tokens by hand.
 
 #include "common/crypto/license_token.h"
@@ -74,10 +74,10 @@ bool hex_decode(const char* s, uint8_t* out, size_t out_len) {
 }
 
 int do_keygen(int argc, char** argv) {
-    if (argc < 1) { usage("deskbeam-license-mint"); return 1; }
+    if (argc < 1) { usage("vivora-license-mint"); return 1; }
     const std::string base = argv[0];
     uint8_t seed[32];
-    deskbeam::crypto::random_bytes(seed, 32);
+    vivora::crypto::random_bytes(seed, 32);
     uint8_t sk[64];
     uint8_t pk[32];
     crypto_eddsa_key_pair(sk, pk, seed);   // monocypher consumes the seed
@@ -120,9 +120,9 @@ int do_mint(int argc, char** argv) {
         std::fprintf(stderr, "failed to read 64B secret from %s\n", key_path);
         return 1;
     }
-    deskbeam::crypto::LicenseClaims claims;
-    if      (std::strcmp(tier_str, "pro")   == 0) claims.tier = deskbeam::crypto::LicenseTier::Pro;
-    else if (std::strcmp(tier_str, "trial") == 0) claims.tier = deskbeam::crypto::LicenseTier::Trial;
+    vivora::crypto::LicenseClaims claims;
+    if      (std::strcmp(tier_str, "pro")   == 0) claims.tier = vivora::crypto::LicenseTier::Pro;
+    else if (std::strcmp(tier_str, "trial") == 0) claims.tier = vivora::crypto::LicenseTier::Trial;
     else { std::fprintf(stderr, "unknown --tier %s\n", tier_str); return 1; }
     claims.exp_unix = exp_unix > 0 ? exp_unix
                                    : (std::time(nullptr) + 90 * 86400);
@@ -133,8 +133,8 @@ int do_mint(int argc, char** argv) {
         }
     }
 
-    uint8_t token[deskbeam::crypto::LICENSE_TOKEN_SIZE];
-    if (!deskbeam::crypto::sign_license(claims, sk, token)) {
+    uint8_t token[vivora::crypto::LICENSE_TOKEN_SIZE];
+    if (!vivora::crypto::sign_license(claims, sk, token)) {
         std::fprintf(stderr, "sign_license failed\n");
         return 1;
     }

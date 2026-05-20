@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/nvenc_encoder.h"
 #include "common/utils/log.h"
@@ -12,7 +12,7 @@
 
 #include "nvEncodeAPI.h"
 
-namespace deskbeam {
+namespace vivora {
 
 static const char* TAG = "NVENC";
 
@@ -771,6 +771,6 @@ void NvencEncoder::set_bitrate(uint32_t bitrate_bps) {
     }
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

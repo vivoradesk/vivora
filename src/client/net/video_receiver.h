@@ -6,7 +6,7 @@
 #include "common/protocol/packet.h"
 #include <cstdint>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 // Polls UDP socket for video packets, reassembles frames.
 // FEC decoder sits between the socket and the assembler: raw wire packets
@@ -73,4 +73,4 @@ private:
     static constexpr size_t RECV_BUF_SIZE = 2048;
 };
 
-} // namespace deskbeam::client
+} // namespace vivora::client

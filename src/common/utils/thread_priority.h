@@ -1,6 +1,6 @@
 #pragma once
 
-namespace deskbeam::utils {
+namespace vivora::utils {
 
 // Raise the calling thread to a real-time-ish priority band so capture,
 // encode, and send run without being preempted by background work.
@@ -14,4 +14,4 @@ namespace deskbeam::utils {
 //          falls back to no-op when the process lacks CAP_SYS_NICE.
 void boost_current_thread_priority();
 
-} // namespace deskbeam::utils
+} // namespace vivora::utils

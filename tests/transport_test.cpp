@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -17,7 +17,7 @@
 #include <chrono>
 #include <thread>
 
-using namespace deskbeam;
+using namespace vivora;
 
 int main() {
     log::info("TEST", "=== Transport Test: Capture -> Encode -> UDP Loopback -> Reassemble ===");

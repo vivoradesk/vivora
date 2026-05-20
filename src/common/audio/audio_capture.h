@@ -5,7 +5,7 @@
 #include <functional>
 #include <memory>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Interleaved float PCM delivered at the device-native sample rate and
 // channel count. Implementations decide the block size (typically equal to
@@ -36,4 +36,4 @@ public:
 // Create platform default capture (loopback). Returns nullptr if unsupported.
 std::unique_ptr<AudioCapture> create_default_loopback_capture();
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

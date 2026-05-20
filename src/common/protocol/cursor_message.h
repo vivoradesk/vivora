@@ -4,7 +4,7 @@
 #include <cstring>
 #include <vector>
 
-namespace deskbeam::protocol {
+namespace vivora::protocol {
 
 // Cursor shape: a BGRA bitmap + hotspot. Sent on a Control-channel
 // PacketType::CursorShape whenever the host cursor's shape changes.
@@ -84,4 +84,4 @@ struct CursorPositionMessage {
     }
 };
 
-} // namespace deskbeam::protocol
+} // namespace vivora::protocol

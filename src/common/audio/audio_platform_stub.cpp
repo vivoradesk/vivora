@@ -4,12 +4,12 @@
 // stub on Linux (host-side capture is L3 territory) and full stubs for any
 // other UNIX-like target that may appear later.
 
-#if !defined(DESKBEAM_LINUX) && !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(VIVORA_LINUX) && !defined(_WIN32) && !defined(__APPLE__)
 
 #include "common/audio/audio_capture.h"
 #include "common/audio/audio_output.h"
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 std::unique_ptr<AudioCapture> create_default_loopback_capture() {
     return nullptr;
@@ -19,6 +19,6 @@ std::unique_ptr<AudioOutput> create_default_audio_output() {
     return nullptr;
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
 #endif

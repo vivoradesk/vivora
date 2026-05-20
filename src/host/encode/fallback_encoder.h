@@ -1,11 +1,11 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/video_encoder.h"
 #include <memory>
 
-namespace deskbeam {
+namespace vivora {
 
 // Wraps a primary encoder and swaps in a secondary one if the primary
 // returns encode() failures for long enough.  Purpose: NVENC on hybrid
@@ -47,6 +47,6 @@ private:
     bool switched_ = false;   // one-way: once we fall back, stay fallen back
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

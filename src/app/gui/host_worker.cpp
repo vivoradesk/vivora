@@ -3,17 +3,17 @@
 #include "app/host_loop.h"
 #include "common/utils/log.h"
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include "app/windows_host_platform.h"
 #endif
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 #include "app/mac_host_platform.h"
 #endif
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 #include "app/linux_host_platform.h"
 #endif
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 HostWorker::HostWorker(QObject* parent) : QObject(parent) {
     // The worker QObject lives on the GUI thread; the platform + loop run
@@ -63,7 +63,7 @@ void HostWorker::stop() {
 void HostWorker::runOnWorkerThread() {
     // Build the platform here so all D3D11/DXGI/encoder objects are
     // created and destroyed on the same thread that drives the loop.
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     auto* p = new WindowsHostPlatform();
     if (!p->init(cfg_.manual_bitrate_bps, cfg_.encoder_kind, cfg_.codec)) {
         delete p;
@@ -72,7 +72,7 @@ void HostWorker::runOnWorkerThread() {
     }
     platform_.reset(p);
 #endif
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
     auto* p = new MacHostPlatform();
     if (!p->init(cfg_.display_index, cfg_.manual_bitrate_bps, cfg_.codec)) {
         delete p;
@@ -81,7 +81,7 @@ void HostWorker::runOnWorkerThread() {
     }
     platform_.reset(p);
 #endif
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
     auto* p = new LinuxHostPlatform();
     if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec)) {
         delete p;
@@ -91,7 +91,7 @@ void HostWorker::runOnWorkerThread() {
     platform_.reset(p);
 #endif
 
-    deskbeam::HostLoopConfig lcfg;
+    vivora::HostLoopConfig lcfg;
     lcfg.port               = cfg_.port;
     lcfg.manual_bitrate_bps = cfg_.manual_bitrate_bps;
     lcfg.encoder_kind       = cfg_.encoder_kind;
@@ -118,11 +118,11 @@ void HostWorker::runOnWorkerThread() {
         }, Qt::QueuedConnection);
     };
 
-    deskbeam::run_host_loop(*platform_, lcfg);
+    vivora::run_host_loop(*platform_, lcfg);
 
     // Loop exited (stop requested or unrecoverable error).  Tear down
     // the platform on this thread before signalling stopped().
     platform_.reset();
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

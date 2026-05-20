@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace deskbeam::net::rdv {
+namespace vivora::net::rdv {
 
 namespace {
 
@@ -254,4 +254,4 @@ void pubkey_to_hex(const uint8_t pubkey[32], char out[65]) {
     out[64] = '\0';
 }
 
-} // namespace deskbeam::net::rdv
+} // namespace vivora::net::rdv

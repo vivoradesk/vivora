@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "client/decode/mf_decoder.h"
 #include "common/utils/log.h"
@@ -18,7 +18,7 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "d3d11.lib")
 
-namespace deskbeam {
+namespace vivora {
 
 // Will find HEVC decoder via MFTEnum
 
@@ -435,6 +435,6 @@ std::unique_ptr<IVideoDecoder> IVideoDecoder::create() {
     return std::make_unique<MfDecoder>();
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

@@ -20,7 +20,7 @@
 #  include <unistd.h>
 #endif
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 namespace {
 
@@ -92,7 +92,7 @@ std::string default_peer_pins_path() {
 #if defined(_WIN32)
     char appdata[MAX_PATH] = {};
     if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, appdata))) {
-        return join_path(join_path(appdata, "DeskBeam"), "known_peers.txt");
+        return join_path(join_path(appdata, "Vivora"), "known_peers.txt");
     }
     return "known_peers.txt";
 #elif defined(__APPLE__)
@@ -103,7 +103,7 @@ std::string default_peer_pins_path() {
     if (!home) return "known_peers.txt";
     std::string p = join_path(home, "Library");
     p = join_path(p, "Application Support");
-    p = join_path(p, "DeskBeam");
+    p = join_path(p, "Vivora");
     return join_path(p, "known_peers.txt");
 #else
     const char* xdg = std::getenv("XDG_CONFIG_HOME");
@@ -118,7 +118,7 @@ std::string default_peer_pins_path() {
         if (!home) return "known_peers.txt";
         base = join_path(home, ".config");
     }
-    base = join_path(base, "deskbeam");
+    base = join_path(base, "vivora");
     return join_path(base, "known_peers.txt");
 #endif
 }
@@ -160,4 +160,4 @@ PinResult check_or_pin_peer(const std::string& code,
     return PinResult::NewlyPinned;
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

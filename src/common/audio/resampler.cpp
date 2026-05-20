@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 Resampler::Resampler() = default;
 Resampler::~Resampler() { destroy(); }
@@ -66,4 +66,4 @@ bool Resampler::process(const float* in,  unsigned int& in_frames,
     return err == RESAMPLER_ERR_SUCCESS;
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

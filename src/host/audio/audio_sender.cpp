@@ -7,9 +7,9 @@
 #include <chrono>
 #include <cstring>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
-using namespace deskbeam::audio;
+using namespace vivora::audio;
 
 AudioSender::AudioSender(net::IUdpSocket& socket) : socket_(socket) {}
 
@@ -193,4 +193,4 @@ void AudioSender::emit_packet() {
     }
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host

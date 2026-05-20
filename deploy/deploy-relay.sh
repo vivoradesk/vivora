@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Deploy the deskbeam-relay binary to a Linux VPS (typically the same
-# host already running deskbeam-rendezvous).
+# Deploy the vivora-relay binary to a Linux VPS (typically the same
+# host already running vivora-rendezvous).
 #
 # Usage:
 #   ./deploy-relay.sh user@host[:port]
 #
 # Same shape as deploy-rendezvous.sh — assumes a Linux build at
-# build-linux/bin/deskbeam-relay (override via BIN=).  The 'deskbeam'
+# build-linux/bin/vivora-relay (override via BIN=).  The 'vivora'
 # system user is created by deploy-rendezvous.sh; this script reuses
 # it and only adds the relay binary + unit + ufw rule.
 
@@ -18,12 +18,12 @@ if [[ $# -ne 1 ]]; then
 fi
 
 TARGET="$1"
-BIN="${BIN:-build-linux/bin/deskbeam-relay}"
-SERVICE_FILE="$(dirname "$0")/deskbeam-relay.service"
+BIN="${BIN:-build-linux/bin/vivora-relay}"
+SERVICE_FILE="$(dirname "$0")/vivora-relay.service"
 
 if [[ ! -x "$BIN" ]]; then
     echo "binary not found: $BIN" >&2
-    echo "Build it first: cmake --build build-linux --target deskbeam-relay" >&2
+    echo "Build it first: cmake --build build-linux --target vivora-relay" >&2
     exit 1
 fi
 if [[ ! -f "$SERVICE_FILE" ]]; then
@@ -55,7 +55,7 @@ scp "${SCP_OPTS[@]}" "$BIN" "$SERVICE_FILE" "$HOSTPART:/tmp/" 1>/dev/null
 # LICENSE_PK env var (path to local file).  If unset and the
 # unit file references --require-license, deployment will still
 # work but the relay will refuse to start until the file is on
-# disk under /etc/deskbeam/license.pk.
+# disk under /etc/vivora/license.pk.
 if [[ -n "${LICENSE_PK:-}" ]]; then
     if [[ ! -f "$LICENSE_PK" ]]; then
         echo "LICENSE_PK=$LICENSE_PK does not exist" >&2
@@ -72,26 +72,26 @@ echo "==> Installing on remote"
 ssh "${SSH_OPTS[@]}" "$HOSTPART" "UPLOAD_LICENSE_PK=$UPLOAD_LICENSE_PK bash -s" <<'REMOTE'
 set -euo pipefail
 
-# 'deskbeam' user comes from deploy-rendezvous.sh; create if missing
+# 'vivora' user comes from deploy-rendezvous.sh; create if missing
 # so this script also works on a fresh box.
-if ! id deskbeam &>/dev/null; then
-    sudo useradd --system --no-create-home --shell /usr/sbin/nologin deskbeam
-    echo "  + created system user 'deskbeam'"
+if ! id vivora &>/dev/null; then
+    sudo useradd --system --no-create-home --shell /usr/sbin/nologin vivora
+    echo "  + created system user 'vivora'"
 fi
 
-sudo install -m 0755 -o root -g root /tmp/deskbeam-relay /usr/local/bin/deskbeam-relay
-echo "  + /usr/local/bin/deskbeam-relay installed"
+sudo install -m 0755 -o root -g root /tmp/vivora-relay /usr/local/bin/vivora-relay
+echo "  + /usr/local/bin/vivora-relay installed"
 
-sudo install -m 0644 -o root -g root /tmp/deskbeam-relay.service /etc/systemd/system/
-echo "  + /etc/systemd/system/deskbeam-relay.service installed"
+sudo install -m 0644 -o root -g root /tmp/vivora-relay.service /etc/systemd/system/
+echo "  + /etc/systemd/system/vivora-relay.service installed"
 
-# Install license public key if uploaded.  /etc/deskbeam is created with
-# 0755 so the deskbeam user can read the key under ProtectSystem=strict.
+# Install license public key if uploaded.  /etc/vivora is created with
+# 0755 so the vivora user can read the key under ProtectSystem=strict.
 if [[ "${UPLOAD_LICENSE_PK:-0}" == "1" ]]; then
-    sudo mkdir -p /etc/deskbeam
-    sudo install -m 0644 -o root -g root /tmp/license.pk /etc/deskbeam/license.pk
+    sudo mkdir -p /etc/vivora
+    sudo install -m 0644 -o root -g root /tmp/license.pk /etc/vivora/license.pk
     rm -f /tmp/license.pk
-    echo "  + /etc/deskbeam/license.pk installed"
+    echo "  + /etc/vivora/license.pk installed"
 fi
 
 if command -v ufw &>/dev/null; then
@@ -100,14 +100,14 @@ if command -v ufw &>/dev/null; then
 fi
 
 sudo systemctl daemon-reload
-sudo systemctl enable deskbeam-relay.service >/dev/null 2>&1 || true
-sudo systemctl restart deskbeam-relay.service
+sudo systemctl enable vivora-relay.service >/dev/null 2>&1 || true
+sudo systemctl restart vivora-relay.service
 echo "  + service enabled + (re)started"
 
-sudo systemctl --no-pager --full status deskbeam-relay.service | head -15
+sudo systemctl --no-pager --full status vivora-relay.service | head -15
 
-rm -f /tmp/deskbeam-relay /tmp/deskbeam-relay.service
+rm -f /tmp/vivora-relay /tmp/vivora-relay.service
 REMOTE
 
 echo "==> Done.  Tail logs with:"
-echo "    ssh $TARGET 'sudo journalctl -u deskbeam-relay -f'"
+echo "    ssh $TARGET 'sudo journalctl -u vivora-relay -f'"

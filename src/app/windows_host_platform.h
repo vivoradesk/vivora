@@ -1,5 +1,5 @@
 #pragma once
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -12,18 +12,18 @@
 #include <memory>
 #include <vector>
 
-class WindowsHostPlatform : public deskbeam::HostPlatform {
+class WindowsHostPlatform : public vivora::HostPlatform {
 public:
     bool init(uint32_t manual_bitrate_bps,
-              deskbeam::EncoderKind kind,
-              deskbeam::VideoCodec codec);
+              vivora::EncoderKind kind,
+              vivora::VideoCodec codec);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
 
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
-    deskbeam::VideoCodec actual_codec() const override;
+    vivora::VideoCodec actual_codec() const override;
 
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
@@ -42,9 +42,9 @@ public:
     void stop_encoder() override;
 
 private:
-    std::unique_ptr<deskbeam::IScreenCapture> capture_;
-    deskbeam::DxgiCapture* dxgi_ = nullptr;
-    std::unique_ptr<deskbeam::IVideoEncoder> encoder_;
+    std::unique_ptr<vivora::IScreenCapture> capture_;
+    vivora::DxgiCapture* dxgi_ = nullptr;
+    std::unique_ptr<vivora::IVideoEncoder> encoder_;
     std::vector<uint8_t> pkt_buf_;
 
     // Saved encoder config so start_encoder() can rebuild after a
@@ -52,8 +52,8 @@ private:
     // (BitrateController updates it on RTT/loss changes) — we keep a
     // running copy here that set_bitrate() updates whether or not the
     // encoder is currently live.
-    deskbeam::EncoderKind saved_kind_  = deskbeam::EncoderKind::Auto;
-    deskbeam::VideoCodec  saved_codec_ = deskbeam::VideoCodec::HEVC;
+    vivora::EncoderKind saved_kind_  = vivora::EncoderKind::Auto;
+    vivora::VideoCodec  saved_codec_ = vivora::VideoCodec::HEVC;
     uint32_t              live_bitrate_bps_ = 0;
 
     // Owned mirror of the most recently captured DXGI texture, fed to the
@@ -68,4 +68,4 @@ private:
     bool    last_cursor_visible_ = false;
 };
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

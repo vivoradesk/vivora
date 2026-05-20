@@ -11,7 +11,7 @@ struct IAudioClient;
 struct IAudioRenderClient;
 struct IMMDevice;
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Windows WASAPI shared-mode render output. Opens the default audio endpoint,
 // forces its native mix format, and plays float32 samples pushed via write().
@@ -57,4 +57,4 @@ private:
     bool   device_changed_ = false; // guarded by ring_mu_
 };
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

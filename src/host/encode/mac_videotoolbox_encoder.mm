@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "host/encode/mac_videotoolbox_encoder.h"
 #include "common/utils/log.h"
@@ -11,7 +11,7 @@
 #include <deque>
 #include <cstring>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 constexpr const char* TAG = "MAC_ENC";
@@ -91,7 +91,7 @@ static void vt_output_callback(void* outputCallbackRefCon,
                                CMSampleBufferRef sampleBuffer) {
     auto* impl = static_cast<MacVideoToolboxEncoder::Impl*>(outputCallbackRefCon);
     if (status != noErr || !sampleBuffer) {
-        deskbeam::log::warn(TAG, "Encoder output status=%d", (int)status);
+        vivora::log::warn(TAG, "Encoder output status=%d", (int)status);
         return;
     }
     if (!CMSampleBufferDataIsReady(sampleBuffer)) return;
@@ -108,13 +108,13 @@ static void vt_output_callback(void* outputCallbackRefCon,
     if (keyframe) {
         CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sampleBuffer);
         if (fmt && !append_param_sets_hevc(fmt, pkt.data)) {
-            deskbeam::log::warn(TAG, "Failed to extract HEVC parameter sets");
+            vivora::log::warn(TAG, "Failed to extract HEVC parameter sets");
         }
     }
 
     CMBlockBufferRef bb = CMSampleBufferGetDataBuffer(sampleBuffer);
     if (!bb || !append_avcc_to_annexb(bb, pkt.data)) {
-        deskbeam::log::warn(TAG, "Failed to convert AVCC to Annex-B");
+        vivora::log::warn(TAG, "Failed to convert AVCC to Annex-B");
         return;
     }
 
@@ -305,6 +305,6 @@ void MacVideoToolboxEncoder::set_bitrate(uint32_t bitrate_bps) {
     CFRelease(arr); CFRelease(b); CFRelease(s);
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

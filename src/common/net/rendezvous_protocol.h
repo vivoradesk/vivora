@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deskbeam::net::rdv {
+namespace vivora::net::rdv {
 
 // Rendezvous wire protocol v1.  Lightweight UDP signalling layer that lives
 // outside the encrypted media session — peers exchange reflexive endpoints
@@ -178,4 +178,4 @@ bool decode_lookup_code  (const uint8_t* p, size_t len, LookupByCodePayload& out
 // Hex-encode a 32-byte pubkey for log output.
 void pubkey_to_hex(const uint8_t pubkey[32], char out[65]);
 
-} // namespace deskbeam::net::rdv
+} // namespace vivora::net::rdv

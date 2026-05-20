@@ -2,7 +2,7 @@
 
 #include <QCoreApplication>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 namespace {
 constexpr const char* K_RENDEZVOUS         = "network/rendezvous";
@@ -45,11 +45,11 @@ constexpr bool  DEF_START_AT_LOGIN   = false;
 
 Settings::Settings(QObject* parent)
     : QObject(parent),
-      q_("DeskBeam", "DeskBeam") {
+      q_("Vivora", "Vivora") {
     // QCoreApplication org/name fields are also used by other places
     // (peer pin file, etc.); set them once at app startup for clarity.
-    QCoreApplication::setOrganizationName("DeskBeam");
-    QCoreApplication::setApplicationName("DeskBeam");
+    QCoreApplication::setOrganizationName("Vivora");
+    QCoreApplication::setApplicationName("Vivora");
 }
 
 QString Settings::rendezvous() const          { return q_.value(K_RENDEZVOUS, DEF_RENDEZVOUS).toString(); }
@@ -94,4 +94,4 @@ void Settings::setMinimizeToTray(bool v)      { if (v != minimizeToTray()) { q_.
 bool Settings::startAtLogin() const           { return q_.value(K_START_AT_LOGIN, DEF_START_AT_LOGIN).toBool(); }
 void Settings::setStartAtLogin(bool v)        { if (v != startAtLogin()) { q_.setValue(K_START_AT_LOGIN, v); emit changed(); } }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

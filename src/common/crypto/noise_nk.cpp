@@ -7,7 +7,7 @@ extern "C" {
 
 #include <cstring>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Protocol name fixes the handshake pattern, DH, cipher, and hash so that
 // any mismatch between peers shows up as a handshake failure rather than
@@ -530,4 +530,4 @@ size_t CipherState::decrypt(const uint8_t* wire, size_t wire_len, uint8_t* out) 
     return ct_len;
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

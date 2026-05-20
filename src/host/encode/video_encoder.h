@@ -7,7 +7,7 @@
 #include <memory>
 #include <functional>
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include <dxgiformat.h>
 #endif
 // Forward declarations (incomplete types are fine on all platforms; only
@@ -15,7 +15,7 @@
 struct ID3D11Device;
 struct ID3D11Texture2D;
 
-namespace deskbeam {
+namespace vivora {
 
 // Which hardware encoder backend to use. `Auto` probes available runtimes.
 enum class EncoderKind : uint8_t {
@@ -33,7 +33,7 @@ struct EncoderConfig {
     uint32_t idr_period = 120;          // IDR every N frames (0 = auto)
     bool low_latency = true;
     VideoCodec codec = VideoCodec::HEVC;
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     DXGI_FORMAT input_format = DXGI_FORMAT_B8G8R8A8_UNORM;  // capture texture format
 #endif
 };
@@ -86,4 +86,4 @@ public:
     static std::unique_ptr<IVideoEncoder> create(EncoderKind kind = EncoderKind::Auto);
 };
 
-} // namespace deskbeam
+} // namespace vivora

@@ -4,16 +4,16 @@
 // Linux fail the platform-init check; main.cpp also short-circuits the
 // host path with a clear error message before getting here.
 
-#if defined(DESKBEAM_LINUX)
+#if defined(VIVORA_LINUX)
 
 #include "host/input/input_injector.h"
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 std::unique_ptr<InputInjector> InputInjector::create() {
     return nullptr;
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
 #endif

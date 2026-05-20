@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #define NOMINMAX
 #include "host/capture/screen_capture.h"
@@ -34,7 +34,7 @@ static float get_sdr_boost() {
         sdr.header.id = paths[i].targetInfo.id;
         if (DisplayConfigGetDeviceInfo(&sdr.header) == ERROR_SUCCESS && sdr.SDRWhiteLevel > 1000) {
             float boost = sdr.SDRWhiteLevel / 1000.0f;
-            deskbeam::log::info("TEST", "SDR boost factor: %.3f (%.0f nits)",
+            vivora::log::info("TEST", "SDR boost factor: %.3f (%.0f nits)",
                                 boost, 80.0f * boost);
             return boost;
         }
@@ -68,7 +68,7 @@ static bool save_texture_to_bmp(ID3D11Device* device, ID3D11DeviceContext* ctx,
     texture->GetDesc(&desc);
 
     float sdr_boost = get_sdr_boost();
-    deskbeam::log::info("TEST", "Texture format: %u, %ux%u, SDR boost: %.3f",
+    vivora::log::info("TEST", "Texture format: %u, %ux%u, SDR boost: %.3f",
                         desc.Format, desc.Width, desc.Height, sdr_boost);
 
     // Create staging texture to read back to CPU (test only — not part of pipeline)
@@ -157,33 +157,33 @@ static bool save_texture_to_bmp(ID3D11Device* device, ID3D11DeviceContext* ctx,
 }
 
 int main() {
-    deskbeam::log::info("TEST", "=== DXGI Capture Test ===");
+    vivora::log::info("TEST", "=== DXGI Capture Test ===");
 
     // Test 1: Factory creates DxgiCapture on Windows
-    auto capture = deskbeam::IScreenCapture::create();
+    auto capture = vivora::IScreenCapture::create();
     assert(capture != nullptr);
-    deskbeam::log::info("TEST", "PASS: Factory created capture instance");
+    vivora::log::info("TEST", "PASS: Factory created capture instance");
 
     // Test 2: Monitor enumeration (needs D3D11 init first)
-    auto* dxgi = dynamic_cast<deskbeam::DxgiCapture*>(capture.get());
+    auto* dxgi = dynamic_cast<vivora::DxgiCapture*>(capture.get());
     assert(dxgi != nullptr);
 
     bool ok = capture->init(0);
     if (!ok) {
-        deskbeam::log::error("TEST", "SKIP: Could not init capture (no desktop access?)");
+        vivora::log::error("TEST", "SKIP: Could not init capture (no desktop access?)");
         return 0;
     }
-    deskbeam::log::info("TEST", "PASS: Capture initialized");
+    vivora::log::info("TEST", "PASS: Capture initialized");
 
     // Test 3: Resolution is valid
     auto res = capture->get_resolution();
     assert(res.width > 0 && res.height > 0);
-    deskbeam::log::info("TEST", "PASS: Resolution %ux%u", res.width, res.height);
+    vivora::log::info("TEST", "PASS: Resolution %ux%u", res.width, res.height);
 
     // Test 4: Monitor enumeration
     auto monitors = capture->enumerate_monitors();
     assert(!monitors.empty());
-    deskbeam::log::info("TEST", "PASS: Found %zu monitor(s)", monitors.size());
+    vivora::log::info("TEST", "PASS: Found %zu monitor(s)", monitors.size());
 
     // Test 5: Capture frames until we get one with actual content
     // DXGI Desktop Duplication only returns pixel data when something changes.
@@ -200,11 +200,11 @@ int main() {
         SendInput(1, &input, sizeof(INPUT));
     }
 
-    deskbeam::CapturedFrame frame;
+    vivora::CapturedFrame frame;
     bool got_content = false;
     for (int attempt = 0; attempt < 30; ++attempt) {
         if (capture->capture_frame(frame, 200)) {
-            deskbeam::log::info("TEST", "Frame #%llu, dirty_rects=%zu",
+            vivora::log::info("TEST", "Frame #%llu, dirty_rects=%zu",
                                 static_cast<unsigned long long>(frame.frame_index),
                                 frame.dirty_rects.size());
             if (!frame.dirty_rects.empty()) {
@@ -224,7 +224,7 @@ int main() {
     }
     assert(got_content);
     assert(frame.texture);
-    deskbeam::log::info("TEST", "PASS: Captured frame with content, dirty_rects=%zu",
+    vivora::log::info("TEST", "PASS: Captured frame with content, dirty_rects=%zu",
                         frame.dirty_rects.size());
 
     // Test 6: Copy texture and save screenshot for visual verification
@@ -246,26 +246,26 @@ int main() {
 
         save_texture_to_bmp(dxgi->get_device(), dxgi->get_context(),
                             copy, "capture_test.bmp");
-        deskbeam::log::info("TEST", "PASS: Saved capture_test.bmp");
+        vivora::log::info("TEST", "PASS: Saved capture_test.bmp");
         copy->Release();
     }
 
     // Test 7: Capture multiple frames and measure FPS
-    deskbeam::log::info("TEST", "Capturing 120 frames for FPS measurement...");
-    auto start = deskbeam::Clock::now();
+    vivora::log::info("TEST", "Capturing 120 frames for FPS measurement...");
+    auto start = vivora::Clock::now();
     int captured = 0;
     for (int i = 0; i < 120; ++i) {
-        deskbeam::CapturedFrame f;
+        vivora::CapturedFrame f;
         if (capture->capture_frame(f, 50)) {
             captured++;
             capture->release_frame(f);
         }
     }
-    auto elapsed = std::chrono::duration<double>(deskbeam::Clock::now() - start).count();
+    auto elapsed = std::chrono::duration<double>(vivora::Clock::now() - start).count();
     double fps = captured / elapsed;
-    deskbeam::log::info("TEST", "PASS: Captured %d frames in %.2fs (%.1f FPS)", captured, elapsed, fps);
+    vivora::log::info("TEST", "PASS: Captured %d frames in %.2fs (%.1f FPS)", captured, elapsed, fps);
 
-    deskbeam::log::info("TEST", "=== All tests passed ===");
+    vivora::log::info("TEST", "=== All tests passed ===");
     return 0;
 }
 

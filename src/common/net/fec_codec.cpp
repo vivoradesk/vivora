@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cstring>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 using protocol::PacketHeader;
 using protocol::PacketType;
@@ -643,4 +643,4 @@ void FecDecoder::expire_old_groups() {
     }
 }
 
-} // namespace deskbeam::net
+} // namespace vivora::net

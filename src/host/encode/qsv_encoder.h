@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/video_encoder.h"
 #include <d3d11.h>
@@ -12,7 +12,7 @@
 // don't want to drag them into the header. Pointer members are void* and
 // the .cpp reinterpret_casts them.
 
-namespace deskbeam {
+namespace vivora {
 
 using Microsoft::WRL::ComPtr;
 
@@ -72,6 +72,6 @@ private:
     std::queue<EncodedPacket> output_packets_;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

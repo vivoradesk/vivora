@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Fill `out` with `len` bytes from the platform CSPRNG.
 //   Windows: BCryptGenRandom(BCRYPT_USE_SYSTEM_PREFERRED_RNG)
@@ -17,4 +17,4 @@ namespace deskbeam::crypto {
 // Noise session.  Never replace with rand()/std::mt19937.
 bool random_bytes(uint8_t* out, size_t len);
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

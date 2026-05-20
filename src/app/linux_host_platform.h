@@ -1,5 +1,5 @@
 #pragma once
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "app/host_platform.h"
 #include "host/capture/pipewire_capture.h"
@@ -11,16 +11,16 @@
 #include <mutex>
 #include <queue>
 
-class LinuxHostPlatform : public deskbeam::HostPlatform {
+class LinuxHostPlatform : public vivora::HostPlatform {
 public:
-    bool init(uint32_t manual_bitrate_bps, deskbeam::VideoCodec codec);
+    bool init(uint32_t manual_bitrate_bps, vivora::VideoCodec codec);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
 
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
-    deskbeam::VideoCodec actual_codec() const override { return codec_; }
+    vivora::VideoCodec actual_codec() const override { return codec_; }
 
     // PipeWire is event-driven — capture happens on its own thread and
     // encoded packets land in queued_pkts_.  capture_and_encode() returns
@@ -37,11 +37,11 @@ public:
     void shutdown() override;
 
 private:
-    void on_pw_frame(const deskbeam::host::PipeWireCapture::Frame& f);
+    void on_pw_frame(const vivora::host::PipeWireCapture::Frame& f);
 
-    deskbeam::host::PipeWireCapture cap_;
-    deskbeam::host::VaapiEncoder    enc_;
-    deskbeam::VideoCodec codec_ = deskbeam::VideoCodec::H264;
+    vivora::host::PipeWireCapture cap_;
+    vivora::host::VaapiEncoder    enc_;
+    vivora::VideoCodec codec_ = vivora::VideoCodec::H264;
     // Set when first PipeWire frame arrives — init() blocks until then
     // so host_loop sees real capture dimensions for bitrate sizing.
     std::condition_variable first_frame_cv_;
@@ -58,7 +58,7 @@ private:
     // host_loop pops via get_encoded_packet().  The heartbeat tag rides
     // alongside the packet so the wire layer can switch off FEC for it.
     struct QueuedPacket {
-        deskbeam::host::VaapiEncoder::Packet pkt;
+        vivora::host::VaapiEncoder::Packet pkt;
         bool heartbeat = false;
     };
     std::mutex enc_mu_;
@@ -79,4 +79,4 @@ private:
     QueuedPacket pkt_buf_;
 };
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

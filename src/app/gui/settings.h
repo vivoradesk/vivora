@@ -4,7 +4,7 @@
 #include <QSettings>
 #include <QString>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Persistent settings exposed to QML.  Backed by QSettings (writes to a
 // per-user ini file or registry, platform-conventional location).  Every
@@ -57,4 +57,4 @@ private:
     QSettings q_;
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

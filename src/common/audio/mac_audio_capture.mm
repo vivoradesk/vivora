@@ -13,7 +13,7 @@
 #include <mutex>
 #include <vector>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 namespace {
 constexpr const char* TAG = "MAC_AUDIO_CAP";
@@ -33,7 +33,7 @@ static SCShareableContent* sck_fetch_sync() {
 
 } // namespace
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
 // Obj-C delegate receiving audio sample buffers from SCStream.
 @interface DBAudioStreamOutput : NSObject <SCStreamOutput, SCStreamDelegate>
@@ -67,7 +67,7 @@ static SCShareableContent* sck_fetch_sync() {
     const bool     is_planar = (asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
     // We expect 32-bit float; bail if SCK ever changes default.
     if (!is_float || asbd->mBitsPerChannel != 32) {
-        deskbeam::log::warn(deskbeam::audio::TAG,
+        vivora::log::warn(vivora::audio::TAG,
             "Unexpected audio format: flags=0x%x bits=%u channels=%u",
             (unsigned)asbd->mFormatFlags, (unsigned)asbd->mBitsPerChannel, (unsigned)channels);
         return;
@@ -135,13 +135,13 @@ static SCShareableContent* sck_fetch_sync() {
 
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error {
     (void)stream;
-    deskbeam::log::warn(deskbeam::audio::TAG, "SCStream(audio) stopped: %s",
+    vivora::log::warn(vivora::audio::TAG, "SCStream(audio) stopped: %s",
         error ? [[error localizedDescription] UTF8String] : "no error");
 }
 
 @end
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 class MacAudioCapture : public AudioCapture {
 public:
@@ -193,7 +193,7 @@ public:
             if (cb_copy) cb_copy(samples, frames, rate, channels);
         };
 
-        queue_ = dispatch_queue_create("com.deskbeam.audio_capture", DISPATCH_QUEUE_SERIAL);
+        queue_ = dispatch_queue_create("com.vivora.audio_capture", DISPATCH_QUEUE_SERIAL);
         stream_ = [[SCStream alloc] initWithFilter:filter
                                      configuration:cfg
                                           delegate:output_];
@@ -276,6 +276,6 @@ std::unique_ptr<AudioCapture> create_default_loopback_capture() {
     return nullptr;
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
 #endif // __APPLE__

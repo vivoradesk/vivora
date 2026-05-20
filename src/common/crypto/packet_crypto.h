@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 // Transport AEAD helpers built on top of CipherState.  They operate on the
 // raw wire form produced by Packet::serialize() — a 10-byte header followed
@@ -44,4 +44,4 @@ size_t seal_packet(const uint8_t* wire, size_t wire_len,
 size_t open_packet(const uint8_t* wire, size_t wire_len,
                    CipherState& cs, uint8_t* out);
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

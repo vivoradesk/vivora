@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/amf_encoder.h"
 #include "common/utils/log.h"
@@ -19,7 +19,7 @@
 
 using namespace amf;
 
-namespace deskbeam {
+namespace vivora {
 
 static const char* TAG = "ENCODE";
 
@@ -388,6 +388,6 @@ void AmfEncoder::set_bitrate(uint32_t bitrate_bps) {
 
 // Factory moved to encoder_factory.cpp
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

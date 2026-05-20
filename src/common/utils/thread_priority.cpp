@@ -15,7 +15,7 @@
     #include <errno.h>
 #endif
 
-namespace deskbeam::utils {
+namespace vivora::utils {
 
 void boost_current_thread_priority() {
 #if defined(_WIN32)
@@ -45,4 +45,4 @@ void boost_current_thread_priority() {
 #endif
 }
 
-} // namespace deskbeam::utils
+} // namespace vivora::utils

@@ -1,11 +1,11 @@
-add_executable(deskbeam_client
+add_executable(vivora_client
     main.cpp
 )
 
-target_link_libraries(deskbeam_client PRIVATE deskbeam_common)
+target_link_libraries(vivora_client PRIVATE vivora_common)
 
 if(WIN32)
-    target_sources(deskbeam_client PRIVATE
+    target_sources(vivora_client PRIVATE
         net/video_receiver.cpp
         net/client_session.cpp
     )

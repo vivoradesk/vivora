@@ -15,7 +15,7 @@
 #include <chrono>
 #include <thread>
 
-namespace deskbeam {
+namespace vivora {
 
 ViewLoopState::ViewLoopState() = default;
 
@@ -329,11 +329,11 @@ bool ViewLoopState::iter() {
         v.audio_pps  = session.last_audio_pps();
         v.plc_pct    = session.last_plc_pct();
         std::snprintf(v.decoder, sizeof(v.decoder), "%s",
-#if defined(DESKBEAM_LINUX)
+#if defined(VIVORA_LINUX)
                       "SW HEVC"
-#elif defined(DESKBEAM_WINDOWS)
+#elif defined(VIVORA_WINDOWS)
                       "MF HW"
-#elif defined(DESKBEAM_MACOS)
+#elif defined(VIVORA_MACOS)
                       "VTB HW"
 #else
                       "?"
@@ -362,4 +362,4 @@ int run_view_loop(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     return state.exit_code();
 }
 
-} // namespace deskbeam
+} // namespace vivora

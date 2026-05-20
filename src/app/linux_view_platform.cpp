@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "app/linux_view_platform.h"
 #include "common/utils/log.h"
@@ -24,8 +24,8 @@ bool LinuxViewPlatform::init(int argc, char* argv[],
     app_ = std::make_unique<QApplication>(argc, argv);
 
     window_ = std::make_unique<QMainWindow>();
-    window_->setWindowTitle(QString("DeskBeam — %1:%2").arg(host_ip).arg(port));
-    view_ = new deskbeam::client::QtGlVideoView(window_.get());
+    window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
+    view_ = new vivora::client::QtGlVideoView(window_.get());
     window_->setCentralWidget(view_);
     // Without an explicit focus proxy, QMainWindow keeps keyboard focus and
     // the central widget's keyPressEvent never fires — so all key input
@@ -47,11 +47,11 @@ bool LinuxViewPlatform::pump_events() {
     return !app_->closingDown() && window_->isVisible();
 }
 
-bool LinuxViewPlatform::init_decoder(deskbeam::VideoCodec codec) {
+bool LinuxViewPlatform::init_decoder(vivora::VideoCodec codec) {
     if (decoder_) return true;
-    decoder_ = std::make_unique<deskbeam::client::FfmpegDecoder>();
+    decoder_ = std::make_unique<vivora::client::FfmpegDecoder>();
     if (!decoder_->init(codec)) {
-        deskbeam::log::error("VIEW", "Failed to init FFmpeg decoder");
+        vivora::log::error("VIEW", "Failed to init FFmpeg decoder");
         decoder_.reset();
         return false;
     }
@@ -63,7 +63,7 @@ bool LinuxViewPlatform::decode(const uint8_t* data, size_t len,
                                uint16_t seq_no) {
     if (!decoder_) return false;
     bool ok = decoder_->decode(data, len, seq_no, keyframe);
-    if (!ok) deskbeam::log::warn("VIEW", "Decoder rejected frame seq=%u", seq_no);
+    if (!ok) vivora::log::warn("VIEW", "Decoder rejected frame seq=%u", seq_no);
     return ok;
 }
 
@@ -74,7 +74,7 @@ int LinuxViewPlatform::render() {
     // the setter is a trivial bool store.
     view_->set_hdr(decoder_->is_hdr());
     int count = 0;
-    deskbeam::client::FfmpegDecoder::YuvFrame f;
+    vivora::client::FfmpegDecoder::YuvFrame f;
     while (decoder_->get_frame(f)) {
         // First frame: if StreamInfo already arrived, propagate dims;
         // otherwise fall back to decoded size so input mapping has
@@ -101,18 +101,18 @@ void LinuxViewPlatform::flush_decoder() {
     if (decoder_) decoder_->reinit();
 }
 
-void LinuxViewPlatform::upload_cursor_shape(const deskbeam::protocol::CursorShapeMessage& shape) {
+void LinuxViewPlatform::upload_cursor_shape(const vivora::protocol::CursorShapeMessage& shape) {
     if (view_) view_->upload_cursor_shape(shape);
 }
 
-void LinuxViewPlatform::update_cursor_position(const deskbeam::protocol::CursorPositionMessage& pos) {
+void LinuxViewPlatform::update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) {
     if (view_) view_->update_cursor_position(pos);
 }
 
-void LinuxViewPlatform::update_stats(const deskbeam::StatsView& stats) {
+void LinuxViewPlatform::update_stats(const vivora::StatsView& stats) {
     // Override decoder label and HDR flag — both are decoder-side facts
     // not visible to the cross-platform view loop.
-    deskbeam::StatsView local = stats;
+    vivora::StatsView local = stats;
     if (decoder_) {
         std::snprintf(local.decoder, sizeof(local.decoder), "%s",
                       decoder_->backend_name());
@@ -135,4 +135,4 @@ void LinuxViewPlatform::shutdown() {
     app_.reset();
 }
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

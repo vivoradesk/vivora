@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-using namespace deskbeam::crypto;
+using namespace vivora::crypto;
 
 namespace {
 
@@ -224,7 +224,7 @@ void test_host_identity_persist_and_reload() {
     const char* tmpdir = std::getenv("TEMP");
     if (!tmpdir) tmpdir = std::getenv("TMP");
     if (!tmpdir) tmpdir = ".";
-    std::string path = std::string(tmpdir) + "/deskbeam_noise_test_key";
+    std::string path = std::string(tmpdir) + "/vivora_noise_test_key";
     std::remove(path.c_str());
 
     KeyPair first{};

@@ -851,7 +851,7 @@ ref with POC X" on every P-frame after the IDR.
 The base pipeline owns the HWND outright — `WA_PaintOnScreen +
 paintEngine() = nullptr` blocks Qt's compositor entirely.  A child
 `QQuickWidget` won't paint, a child QML scene won't paint, even a
-child `QLabel` won't paint.  That's why DeskBeam's existing HUD had
+child `QLabel` won't paint.  That's why Vivora's existing HUD had
 to be a separate top-level frameless tool window — cheap to ship, but
 a separate HWND lags behind the parent on rapid moves/resizes and
 complicates input.
@@ -1057,7 +1057,7 @@ Non-obvious bits:
 ## 11c. Per-frame render cycle
 
 Drive the QML scene from the same tick that drives Pass 1/Pass 2.  In
-DeskBeam's `ViewLoopState::iter()` it lives between Pass 1 (VP blit)
+Vivora's `ViewLoopState::iter()` it lives between Pass 1 (VP blit)
 and Pass 2 (shader composite):
 
 ```cpp
@@ -1077,7 +1077,7 @@ bool QmlOverlay::render()
 Two-thread vs single-thread: `QQuickRenderControl` was designed for
 two-thread use (sync on GUI, render on render thread).  **Single-thread
 is fine** as long as `beginFrame/.../endFrame` runs on the thread
-that owns the QQuickWindow.  In DeskBeam the view loop runs on the
+that owns the QQuickWindow.  In Vivora the view loop runs on the
 main GUI thread (since Phase A.2) so just inline.
 
 Don't render when `dirty_ == false`: QML scenes are mostly static

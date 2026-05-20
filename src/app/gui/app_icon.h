@@ -2,7 +2,7 @@
 
 #include <QIcon>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Procedurally-drawn placeholder icon set for the app + tray.  Lives
 // here so we don't have to ship a PNG / wire up Qt's SVG plugin in the
@@ -16,4 +16,4 @@ QIcon make_app_icon();        // blue — idle / default
 QIcon make_tray_idle_icon();
 QIcon make_tray_sharing_icon();   // green — actively sharing
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

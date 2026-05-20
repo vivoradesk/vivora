@@ -11,7 +11,7 @@ extern "C" {
 
 #include <cstring>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 FfmpegDecoder::~FfmpegDecoder() {
     if (sws_)            sws_freeContext(sws_);
@@ -335,4 +335,4 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     return true;
 }
 
-} // namespace deskbeam::client
+} // namespace vivora::client

@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "common/utils/types.h"
 #include <CoreVideo/CoreVideo.h>
@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 struct MacEncoderConfig {
     uint32_t width = 1920;
@@ -61,6 +61,6 @@ private:
     bool idr_pending_ = false;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

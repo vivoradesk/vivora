@@ -5,13 +5,13 @@
 #include <QString>
 #include <QVector>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Persisted list of remembered peers, shown in the main window's "Recent"
 // section.  Lives in a JSON file under the per-user app config directory:
-//   Win:   %APPDATA%\DeskBeam\peers.json
-//   Linux: ~/.config/deskbeam/peers.json
-//   Mac:   ~/Library/Application Support/DeskBeam/peers.json
+//   Win:   %APPDATA%\Vivora\peers.json
+//   Linux: ~/.config/vivora/peers.json
+//   Mac:   ~/Library/Application Support/Vivora/peers.json
 //
 // The pubkey hex is the stable identity — peer codes can change on
 // reinstall.  Alias starts empty for new entries; the user can rename
@@ -62,4 +62,4 @@ private:
     QVector<Peer> peers_;
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

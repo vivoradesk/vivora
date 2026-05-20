@@ -11,7 +11,7 @@
 #include <chrono>
 #include <thread>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 static const uint8_t HELLO_MAGIC[] = { 'D','E','S','K','B','E','A','M', 0x01 };
 static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x00 };
@@ -1206,4 +1206,4 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
     return false;
 }
 
-} // namespace deskbeam::client
+} // namespace vivora::client

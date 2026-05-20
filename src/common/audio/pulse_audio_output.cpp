@@ -5,7 +5,7 @@
 // Windows.  PipeWire ships a pulse-shim out of the box on modern distros,
 // so this same code talks to either daemon transparently.
 
-#if defined(DESKBEAM_LINUX)
+#if defined(VIVORA_LINUX)
 
 #include "common/audio/audio_output.h"
 #include "common/utils/log.h"
@@ -15,7 +15,7 @@
 
 #include <cstring>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 namespace {
 
@@ -42,7 +42,7 @@ public:
 
         int err = 0;
         s_ = pa_simple_new(nullptr,           // server (default)
-                           "DeskBeam",        // app name
+                           "Vivora",        // app name
                            PA_STREAM_PLAYBACK,
                            nullptr,           // device (default sink)
                            "stream",          // stream description
@@ -96,6 +96,6 @@ std::unique_ptr<AudioOutput> create_default_audio_output() {
     return std::make_unique<PulseAudioOutput>();
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

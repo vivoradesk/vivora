@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "client/render/stream_window.h"
 #include "common/utils/log.h"
@@ -16,7 +16,7 @@
 #define NOMINMAX
 #include <windows.h>
 
-namespace deskbeam {
+namespace vivora {
 
 namespace {
 // QLabel subclass that paints a translucent rounded rect under the text.
@@ -538,6 +538,6 @@ void StreamWindow::focusInEvent(QFocusEvent* event) {
     QWidget::focusInEvent(event);
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_MACOS
+#ifdef VIVORA_MACOS
 
 #include "app/view_platform.h"
 #include "common/codec/video_codec.h"
@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <functional>
 
-namespace deskbeam {
+namespace vivora {
 
 // Cocoa window hosting an AVSampleBufferDisplayLayer.
 // Accepts HEVC or H.264 Annex-B encoded frames and displays them.
@@ -65,6 +65,6 @@ private:
     bool should_close_ = false;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_MACOS
+#endif // VIVORA_MACOS

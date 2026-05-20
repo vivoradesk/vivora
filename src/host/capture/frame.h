@@ -2,7 +2,7 @@
 
 #include "common/utils/types.h"
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include <d3d11.h>
 #include <wrl/client.h>
 #endif
@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace deskbeam {
+namespace vivora {
 
 // GPU frame captured from screen
 struct CapturedFrame {
@@ -18,7 +18,7 @@ struct CapturedFrame {
     uint64_t frame_index = 0;
     TimePoint capture_time;
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     // The texture stays in GPU memory — no CPU copy.  ComPtr takes an
     // explicit ref when the capturer hands it out, so the caller can't
     // accidentally outlive the DXGI frame by one call to ReleaseFrame().
@@ -50,4 +50,4 @@ struct MonitorInfo {
     bool primary = false;
 };
 
-} // namespace deskbeam
+} // namespace vivora

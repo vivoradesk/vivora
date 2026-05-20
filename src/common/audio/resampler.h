@@ -6,7 +6,7 @@
 struct SpeexResamplerState_;
 typedef struct SpeexResamplerState_ SpeexResamplerState;
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Float interleaved multichannel resampler (thin speexdsp wrapper).
 // Call init() whenever rates/channels change. No-op if input==output rate.
@@ -43,4 +43,4 @@ private:
     bool passthrough_ = false;
 };
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

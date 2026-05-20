@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // Audio playback sink. Caller pushes interleaved float PCM at the rate and
 // channel count negotiated with the device. Implementations internally
@@ -39,4 +39,4 @@ public:
 
 std::unique_ptr<AudioOutput> create_default_audio_output();
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

@@ -12,7 +12,7 @@
 #include <memory>
 #include <string>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 // Strongly-owning twin of HostLoopConfig.  HostLoopConfig holds raw
 // `const char*` pointers that the loop dereferences on the worker thread
@@ -22,8 +22,8 @@ namespace deskbeam::gui {
 struct HostWorkerConfig {
     uint16_t              port              = 9876;
     uint32_t              manual_bitrate_bps = 0;
-    deskbeam::EncoderKind encoder_kind      = deskbeam::EncoderKind::Auto;
-    deskbeam::VideoCodec  codec             = deskbeam::VideoCodec::HEVC;
+    vivora::EncoderKind encoder_kind      = vivora::EncoderKind::Auto;
+    vivora::VideoCodec  codec             = vivora::VideoCodec::HEVC;
     std::string           stun_server;
     std::string           rendezvous_server;
     std::string           relay_server;
@@ -84,4 +84,4 @@ private:
     std::unique_ptr<HostPlatform>    platform_;   // lives on worker thread
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

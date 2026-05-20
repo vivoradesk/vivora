@@ -1,4 +1,4 @@
-# DeskBeam — Project Status
+# Vivora — Project Status
 
 Last updated: 2026-05-07
 
@@ -94,7 +94,7 @@ These are **not** on the active roadmap — listed so we know what to say when a
 | Rendezvous + memorable codes             | ✅ public server on Oracle Free Tier |
 | Hole-punching (STUN + PunchHint)         | ✅ tested inter-ISP (1123ms handshake) |
 | Same-NAT short-circuit (LAN candidates)  | ✅ tested (11ms handshake same WiFi) |
-| Relay daemon (`deskbeam-relay`)          | ✅ AGPL self-host code, smoke-tested localhost |
+| Relay daemon (`vivora-relay`)          | ✅ AGPL self-host code, smoke-tested localhost |
 | Relay client/host integration            | ✅ `--relay HOST:PORT`, lazy BIND on first need |
 | Relay license auth (Pro-managed)         | ✅ Ed25519-signed 95B tokens, `--require-license` on relay |
 | Rendezvous-minted relay session_id       | ✅ rdv `--relay-endpoint` advertises endpoint+session_id; peers auto-adopt |
@@ -104,14 +104,14 @@ These are **not** on the active roadmap — listed so we know what to say when a
 
 Live public rendezvous: **`89.168.124.37:7000`** on Oracle Cloud Always Free (ARM, 1 GB RAM). Operations:
 
-- Logs:    `ssh ubuntu@89.168.124.37 'sudo journalctl -u deskbeam-rendezvous -f'`
+- Logs:    `ssh ubuntu@89.168.124.37 'sudo journalctl -u vivora-rendezvous -f'`
 - Update:  rerun `deploy/deploy-rendezvous.sh ubuntu@89.168.124.37` (auto-restarts the unit)
 - Memory: 600 KB RSS at idle, 64 MiB cap
 
 ### Open-source hygiene
 
-- Single binary `deskbeam` (host + client + view) — `--host` / `--view` flags pick mode.
-- Standalone server binary `deskbeam-rendezvous`.
+- Single binary `vivora` (host + client + view) — `--host` / `--view` flags pick mode.
+- Standalone server binary `vivora-rendezvous`.
 - AGPL on the table for client + relay; closed-core for the future console.
 - Tests: `noise`, `fec`, `fragment`, `audio` build green on Linux + Windows.
 
@@ -148,7 +148,7 @@ In priority order. Tier numbers match the historical roadmap.
 ### Always-Free relay shopping list (if/when we host)
 
 - Default rendezvous URL baked into the client (today users pass `--rendezvous` manually).
-- Domain (`rdv.deskbeam.dev`) with A-record at the Oracle IP.
+- Domain (`rdv.vivora.dev`) with A-record at the Oracle IP.
 - Document `--rendezvous` self-host path for org users.
 
 ### Shelved (intentionally not on the roadmap)
@@ -167,13 +167,13 @@ The 0.1 launch ships with a paid tier from day one.  Spec change moves us from "
 
 | Component                                  | License            | Hosted by us                    |
 | ------------------------------------------ | ------------------ | ------------------------------- |
-| `deskbeam` (client + host)                 | **AGPL-3.0**       | n/a — runs on user machines     |
-| `deskbeam-rendezvous`                      | **AGPL-3.0**       | ✅ free public (Oracle Free Tier) |
-| `deskbeam-relay`                           | **AGPL-3.0**       | **Pro only** — see below         |
-| `deskbeam-cloud` (accounts, licenses, sync)| Closed proprietary | Pro infrastructure              |
-| `deskbeam-console` (web admin)             | Closed proprietary | Future (≥0.3)                   |
+| `vivora` (client + host)                 | **AGPL-3.0**       | n/a — runs on user machines     |
+| `vivora-rendezvous`                      | **AGPL-3.0**       | ✅ free public (Oracle Free Tier) |
+| `vivora-relay`                           | **AGPL-3.0**       | **Pro only** — see below         |
+| `vivora-cloud` (accounts, licenses, sync)| Closed proprietary | Pro infrastructure              |
+| `vivora-console` (web admin)             | Closed proprietary | Future (≥0.3)                   |
 
-Anyone can self-host the relay + rendezvous from the AGPL repo.  The DeskBeam-operated relay is gated behind a Pro account.
+Anyone can self-host the relay + rendezvous from the AGPL repo.  The Vivora-operated relay is gated behind a Pro account.
 
 ### Free tier — AGPL, personal use
 
@@ -187,7 +187,7 @@ Anyone can self-host the relay + rendezvous from the AGPL repo.  The DeskBeam-op
 ### Pro tier — $9.90 / mo or $99 / year (0.1 launch)
 
 - **Commercial license** (drops the AGPL obligation — standard MongoDB / Grafana model)
-- **Access to the DeskBeam-operated public relay** (closes the symmetric-NAT / CGNAT gap without self-hosting)
+- **Access to the Vivora-operated public relay** (closes the symmetric-NAT / CGNAT gap without self-hosting)
 - **Cloud-synced address book** across user's devices
 - Priority support
 - Checkout via Paddle (Merchant of Record for UA — handles tax + chargebacks)
@@ -198,7 +198,7 @@ Anyone can self-host the relay + rendezvous from the AGPL repo.  The DeskBeam-op
 
 The relay code is **needed** — both as the AGPL self-host artefact and as the foundation of the Pro managed relay. Two things to build:
 
-1. **`deskbeam-relay` daemon** — UDP forwarder, allocate-on-demand. Open-source, self-hostable.  Same shape as the rendezvous: small standalone binary, systemd unit, deploy script.
+1. **`vivora-relay` daemon** — UDP forwarder, allocate-on-demand. Open-source, self-hostable.  Same shape as the rendezvous: small standalone binary, systemd unit, deploy script.
 2. **License auth for the managed instance** — only the Pro-operated relay checks license tokens. Self-hosted instances skip the check (no `--require-license` flag, or off by default).
 
 NAT-traversal coverage with this in place:

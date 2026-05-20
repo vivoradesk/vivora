@@ -14,7 +14,7 @@
 #include <cstring>
 #include <vector>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 static const CLSID kClsidMMDeviceEnumerator =
     {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
@@ -262,4 +262,4 @@ std::unique_ptr<AudioCapture> create_default_loopback_capture() {
     return std::make_unique<WasapiLoopbackCapture>();
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

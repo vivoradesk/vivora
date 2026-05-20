@@ -4,7 +4,7 @@
 #include "app/gui/host_worker.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 #include "app/gui/view_session.h"
 #endif
 
@@ -15,7 +15,7 @@
 #include <QApplication>
 #include <QMessageBox>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 AppController::AppController(QObject* parent) : QObject(parent) {
     settings_   = std::make_unique<Settings>(this);
@@ -33,12 +33,12 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             [this](QString reason) {
         log::error("AppController", "Host init failed: %s",
                    reason.toUtf8().constData());
-        if (tray_) tray_->notify("DeskBeam: host failed to start", reason);
+        if (tray_) tray_->notify("Vivora: host failed to start", reason);
     });
     connect(hostWorker_.get(), &HostWorker::idleWarning, this,
             [this](int secs) {
         log::info("AppController", "Idle warning — disconnect in %ds", secs);
-        if (tray_) tray_->notify("DeskBeam: idle",
+        if (tray_) tray_->notify("Vivora: idle",
             QString("No input from your viewer for %1 min — "
                     "disconnecting in %2s.")
                 .arg(settings_->idleTimeoutMin()).arg(secs));
@@ -92,8 +92,8 @@ void AppController::startSharing() {
     wc.port               = static_cast<uint16_t>(settings_->hostPort());
     wc.manual_bitrate_bps = settings_->bitrateMbps() * 1'000'000u;
     wc.codec              = settings_->codecIndex() == 1
-        ? deskbeam::VideoCodec::HEVC : deskbeam::VideoCodec::H264;
-    wc.encoder_kind       = deskbeam::EncoderKind::Auto;
+        ? vivora::VideoCodec::HEVC : vivora::VideoCodec::H264;
+    wc.encoder_kind       = vivora::EncoderKind::Auto;
     wc.stun_server        = settings_->stunServer().toStdString();
     wc.rendezvous_server  = settings_->rendezvous().toStdString();
     wc.relay_server       = settings_->relay().toStdString();
@@ -111,7 +111,7 @@ void AppController::startSharing() {
 
     log::info("AppController", "Start sharing (port=%u, codec=%s, rdv='%s')",
               wc.port,
-              wc.codec == deskbeam::VideoCodec::HEVC ? "hevc" : "h264",
+              wc.codec == vivora::VideoCodec::HEVC ? "hevc" : "h264",
               wc.rendezvous_server.c_str());
     hostWorker_->start(wc);
 }
@@ -127,7 +127,7 @@ void AppController::stopSharing() {
 void AppController::connectToPeer(const QString& peerCodeOrHex) {
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
     GuiViewConfig vc;
     vc.host_ip            = "";  // rendezvous resolves
     vc.port               = static_cast<uint16_t>(settings_->hostPort());
@@ -152,7 +152,7 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     });
     if (!vs->start(vc)) {
         log::error("AppController", "ViewSession::start failed");
-        if (tray_) tray_->notify("DeskBeam",
+        if (tray_) tray_->notify("Vivora",
             QString("Could not connect to %1").arg(peerCodeOrHex));
         return;
     }
@@ -190,11 +190,11 @@ void AppController::quit() {
             .arg((sharing_ ? activeViews_ + 1 : activeViews_) == 1 ? "" : "s")
             .arg(sharing_ ? "yes" : "no");
         const auto btn = QMessageBox::warning(
-            nullptr, "Quit DeskBeam?", detail,
+            nullptr, "Quit Vivora?", detail,
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (btn != QMessageBox::Yes) return;
     }
     QApplication::quit();
 }
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

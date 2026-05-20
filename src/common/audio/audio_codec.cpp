@@ -3,7 +3,7 @@
 
 #include <opus.h>
 
-namespace deskbeam::audio {
+namespace vivora::audio {
 
 // ---------- Encoder ---------------------------------------------------------
 
@@ -86,4 +86,4 @@ int OpusAudioDecoder::decode(const uint8_t* data, int len, float* pcm_out, bool 
     return n;
 }
 
-} // namespace deskbeam::audio
+} // namespace vivora::audio

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace deskbeam::crypto {
+namespace vivora::crypto {
 
 static constexpr size_t HDR = protocol::PacketHeader::WIRE_SIZE;
 
@@ -40,4 +40,4 @@ size_t open_packet(const uint8_t* wire, size_t wire_len,
     return HDR + written;
 }
 
-} // namespace deskbeam::crypto
+} // namespace vivora::crypto

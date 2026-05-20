@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include "host/encode/video_encoder.h"
 #include "host/encode/amf_encoder.h"
@@ -10,7 +10,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-namespace deskbeam {
+namespace vivora {
 
 namespace {
 
@@ -64,6 +64,6 @@ std::unique_ptr<IVideoEncoder> IVideoEncoder::create(EncoderKind kind) {
     return nullptr;
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

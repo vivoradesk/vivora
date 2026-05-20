@@ -10,7 +10,7 @@
 #include <memory>
 #include <thread>
 
-namespace deskbeam::client {
+namespace vivora::client {
 
 // Consumes PacketType::Audio wire packets, runs them through a jitter buffer,
 // Opus-decodes at frame cadence, resamples to device rate, and pushes to the
@@ -55,4 +55,4 @@ private:
     std::atomic<uint64_t> empty_ticks_{0};
 };
 
-} // namespace deskbeam::client
+} // namespace vivora::client

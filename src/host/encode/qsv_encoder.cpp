@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -18,7 +18,7 @@
 #include "vpl/mfxstructures.h"
 #include "vpl/mfxcommon.h"
 
-namespace deskbeam {
+namespace vivora {
 
 static constexpr const char* TAG = "QSV";
 
@@ -555,6 +555,6 @@ void QsvEncoder::set_bitrate(uint32_t bps) {
     config_.bitrate_bps = bps;
 }
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

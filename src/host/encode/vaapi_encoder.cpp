@@ -1,4 +1,4 @@
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "host/encode/vaapi_encoder.h"
 #include "common/utils/log.h"
@@ -14,7 +14,7 @@ extern "C" {
 
 #include <cstring>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 namespace {
 constexpr const char* TAG = "VAENC";
@@ -293,6 +293,6 @@ void VaapiEncoder::set_bitrate(int bps) {
     // may need a full reinit to honour aggressive bitrate ramps.
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

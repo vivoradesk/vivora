@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-namespace deskbeam::gui {
+namespace vivora::gui {
 
 class Tray;
 class HostWorker;
@@ -30,8 +30,8 @@ class AppController : public QObject {
     Q_PROPERTY(QString myPeerCode    READ myPeerCode    NOTIFY identityChanged)
     Q_PROPERTY(QString myPubkeyHex   READ myPubkeyHex   NOTIFY identityChanged)
     Q_PROPERTY(int     activeViews   READ activeViews   NOTIFY activeViewsChanged)
-    Q_PROPERTY(deskbeam::gui::Settings* settings    READ settings    CONSTANT)
-    Q_PROPERTY(deskbeam::gui::AddressBook* peers    READ peers       CONSTANT)
+    Q_PROPERTY(vivora::gui::Settings* settings    READ settings    CONSTANT)
+    Q_PROPERTY(vivora::gui::AddressBook* peers    READ peers       CONSTANT)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -96,4 +96,4 @@ private:
     QString myPubkeyHex_;
 };
 
-} // namespace deskbeam::gui
+} // namespace vivora::gui

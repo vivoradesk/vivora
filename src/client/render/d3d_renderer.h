@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_WINDOWS
+#ifdef VIVORA_WINDOWS
 
 #include <d3d11_4.h>
 #include <dxgi1_4.h>
@@ -10,7 +10,7 @@
 struct HWND__;
 typedef HWND__* HWND;
 
-namespace deskbeam {
+namespace vivora {
 
 using Microsoft::WRL::ComPtr;
 
@@ -81,6 +81,6 @@ private:
     bool has_frame_ = false;
 };
 
-} // namespace deskbeam
+} // namespace vivora
 
-#endif // DESKBEAM_WINDOWS
+#endif // VIVORA_WINDOWS

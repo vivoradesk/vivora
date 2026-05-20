@@ -14,9 +14,9 @@
 #include <thread>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
-// Handshake magic: "DESKBEAM" + version byte
+// Handshake magic: "VIVORA" + version byte
 static const uint8_t HELLO_MAGIC[] = { 'D','E','S','K','B','E','A','M', 0x01 };
 static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x00 };
 
@@ -990,4 +990,4 @@ void HostSession::punch_to(const net::SocketAddr& client) {
     for (int i = 0; i < 3; ++i) socket_->send_to(&pad, 1, client);
 }
 
-} // namespace deskbeam::host
+} // namespace vivora::host

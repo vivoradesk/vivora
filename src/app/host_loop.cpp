@@ -15,7 +15,7 @@
 #include <cstring>
 #include <thread>
 
-namespace deskbeam {
+namespace vivora {
 
 int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // Capture → encode → fragment → send all runs single-threaded on this
@@ -40,11 +40,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
 
     // Diagnostic env-var: raise the hard warmup/recovery ceiling above
     // 10 Mbps so a real channel-capacity test can ramp further.
-    if (const char* env = std::getenv("DESKBEAM_MAX_BPS")) {
+    if (const char* env = std::getenv("VIVORA_MAX_BPS")) {
         uint32_t max_bps = static_cast<uint32_t>(std::atoll(env));
         if (max_bps > 0) {
             bitrate_ctl.set_ceiling_override(max_bps);
-            log::info("HOST", "DESKBEAM_MAX_BPS=%u -> ceiling override %u kbps",
+            log::info("HOST", "VIVORA_MAX_BPS=%u -> ceiling override %u kbps",
                       max_bps, max_bps / 1000);
         }
     }
@@ -118,11 +118,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // Diagnostic env-var: freeze FEC M at a fixed value, disabling
     // loss-adaptive and RTT-lock behavior. For probing the real channel
     // capacity with known redundancy (e.g. M=10 at K=10 = 50%).
-    if (const char* env = std::getenv("DESKBEAM_FEC_M")) {
+    if (const char* env = std::getenv("VIVORA_FEC_M")) {
         int m = std::atoi(env);
         if (m > 0 && m <= 32 && session.sender()) {
             session.sender()->set_force_m(static_cast<uint8_t>(m));
-            log::info("HOST", "DESKBEAM_FEC_M=%d -> force M (adaptive disabled)", m);
+            log::info("HOST", "VIVORA_FEC_M=%d -> force M (adaptive disabled)", m);
         }
     }
 
@@ -618,4 +618,4 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     return 0;
 }
 
-} // namespace deskbeam
+} // namespace vivora

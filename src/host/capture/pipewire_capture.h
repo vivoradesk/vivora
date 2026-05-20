@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include <cstdint>
 #include <functional>
@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 // PipeWire-based screen capture for Linux.  Acquires permission to capture
 // via xdg-desktop-portal (org.freedesktop.portal.ScreenCast) — works on
@@ -110,6 +110,6 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

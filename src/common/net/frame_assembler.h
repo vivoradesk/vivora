@@ -7,7 +7,7 @@
 #include <queue>
 #include <unordered_map>
 
-namespace deskbeam::net {
+namespace vivora::net {
 
 struct AssembledFrame {
     std::vector<uint8_t> data;
@@ -89,4 +89,4 @@ private:
     static constexpr size_t MAX_NACK_PER_CYCLE = 60;
 };
 
-} // namespace deskbeam::net
+} // namespace vivora::net

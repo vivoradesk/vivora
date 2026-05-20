@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef DESKBEAM_LINUX
+#ifdef VIVORA_LINUX
 
 #include "common/codec/video_codec.h"
 #include <cstdint>
@@ -13,7 +13,7 @@ struct AVFrame;
 struct AVPacket;
 struct SwsContext;
 
-namespace deskbeam::host {
+namespace vivora::host {
 
 // VAAPI hardware H.264/HEVC encoder driven through libavcodec's
 // h264_vaapi / hevc_vaapi wrappers.  The encoder accepts NV12 frames in
@@ -101,6 +101,6 @@ private:
     bool           sw_frame_has_data_ = false;
 };
 
-} // namespace deskbeam::host
+} // namespace vivora::host
 
-#endif // DESKBEAM_LINUX
+#endif // VIVORA_LINUX

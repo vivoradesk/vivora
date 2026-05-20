@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace deskbeam::net::relay {
+namespace vivora::net::relay {
 
 // Relay wire protocol v1.  Lightweight UDP forwarding layer for the case
 // where direct hole-punching can't establish a peer-to-peer link
@@ -112,4 +112,4 @@ bool decode_data     (const uint8_t* p, size_t len,
                       uint8_t alloc_id_out[8],
                       const uint8_t** data_out, size_t* data_len_out);
 
-} // namespace deskbeam::net::relay
+} // namespace vivora::net::relay
