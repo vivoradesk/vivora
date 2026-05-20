@@ -20,11 +20,13 @@ constexpr const char* K_START_SHARING      = "general/startSharingOnLaunch";
 constexpr const char* K_MIN_TO_TRAY        = "general/minimizeToTray";
 constexpr const char* K_START_AT_LOGIN     = "general/startAtLogin";
 
-// Defaults.  Pre-fill rendezvous + relay with the public Oracle endpoints
-// so a fresh install talks to the same infra the CLI uses by default.
-// Self-hosters override both via the Settings dialog.
-constexpr const char* DEF_RENDEZVOUS = "89.168.124.37:7000";
-constexpr const char* DEF_RELAY      = "89.168.124.37:7100";
+// Defaults.  Pre-fill rendezvous + relay with the Vivora-managed public
+// endpoints so a fresh install talks to the same infra the CLI uses by
+// default.  DNS names (Cloudflare A-records pointing at the Oracle box)
+// instead of raw 89.168.124.37 so the IP can move without a client
+// re-release.  Self-hosters override both via the Settings dialog.
+constexpr const char* DEF_RENDEZVOUS = "rdv.vivora.dev:7000";
+constexpr const char* DEF_RELAY      = "relay.vivora.dev:7100";
 constexpr const char* DEF_LICENSE    = "";
 constexpr const char* DEF_STUN       = "stun.l.google.com:19302";
 constexpr int   DEF_CODEC            = 1;            // hevc
