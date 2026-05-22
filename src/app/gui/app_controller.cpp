@@ -4,7 +4,7 @@
 #include "app/gui/host_worker.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
-#ifdef VIVORA_WINDOWS
+#if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS)
 #include "app/gui/view_session.h"
 #endif
 
@@ -127,7 +127,7 @@ void AppController::stopSharing() {
 void AppController::connectToPeer(const QString& peerCodeOrHex) {
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
-#ifdef VIVORA_WINDOWS
+#if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS)
     GuiViewConfig vc;
     vc.host_ip            = "";  // rendezvous resolves
     vc.port               = static_cast<uint16_t>(settings_->hostPort());

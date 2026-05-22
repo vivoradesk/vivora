@@ -1,9 +1,7 @@
 #pragma once
 
-#ifdef VIVORA_WINDOWS
-
 #include "app/view_loop.h"
-#include "app/windows_view_platform.h"
+#include "app/view_platform.h"
 
 #include <QObject>
 #include <QString>
@@ -33,12 +31,13 @@ struct GuiViewConfig {
 
 // One active "Connect to peer" session in the GUI.
 //
-// Lives on the main thread.  Owns its WindowsViewPlatform (which owns
-// the StreamWindow QWidget — also main-thread per Qt rules) and a
-// ViewLoopState driven by a QTimer at ~60Hz.  Each tick runs one pass
-// of the view-loop body: poll the UDP socket, drain FEC groups, feed
-// decoded frames to the GPU, present.  Total budget per tick is on
-// the order of 5-10ms — well under the 16ms slot, so the main-thread
+// Lives on the main thread.  Owns the concrete platform (Windows
+// StreamWindow QWidget, macOS Cocoa NSWindow) which is created
+// on this same thread per Qt / AppKit rules, and a ViewLoopState
+// driven by a QTimer at ~60Hz.  Each tick runs one pass of the
+// view-loop body: poll the UDP socket, drain FEC groups, feed
+// decoded frames to the GPU, present.  Total budget per tick is
+// on the order of 5-10ms — well under the 16ms slot, so the main
 // event loop stays responsive for QML and the tray.
 class ViewSession : public QObject {
     Q_OBJECT
@@ -65,16 +64,19 @@ private slots:
     void onTick();
 
 private:
-    GuiViewConfig                     cfg_;
-    std::string                       host_ip_storage_;  // backs ViewLoopConfig.host_ip
-    std::atomic<bool>                 stop_flag_{false};
-    std::unique_ptr<WindowsViewPlatform> platform_;
-    std::unique_ptr<ViewLoopState>    loop_;
-    QTimer                            tick_;
-    ViewLoopConfig                    loop_cfg_{};
-    bool                              finished_emitted_ = false;
+    // Build the platform-specific ViewPlatform implementation
+    // (WindowsViewPlatform / MacViewPlatform).  Defined per-platform
+    // in view_session.cpp under VIVORA_WINDOWS / VIVORA_MACOS guards.
+    bool init_platform();
+
+    GuiViewConfig                          cfg_;
+    std::string                            host_ip_storage_;  // backs ViewLoopConfig.host_ip
+    std::atomic<bool>                      stop_flag_{false};
+    std::unique_ptr<vivora::ViewPlatform>  platform_;
+    std::unique_ptr<ViewLoopState>         loop_;
+    QTimer                                 tick_;
+    ViewLoopConfig                         loop_cfg_{};
+    bool                                   finished_emitted_ = false;
 };
 
 } // namespace vivora::gui
-
-#endif // VIVORA_WINDOWS

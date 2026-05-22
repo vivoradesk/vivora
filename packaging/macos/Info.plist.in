@@ -15,7 +15,7 @@
     <string>en</string>
 
     <key>CFBundleExecutable</key>
-    <string>vivora</string>
+    <string>Vivora</string>
 
     <key>CFBundleIdentifier</key>
     <string>dev.vivora.app</string>

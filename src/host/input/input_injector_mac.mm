@@ -124,6 +124,26 @@ public:
         if (!event_source_) {
             log::error(TAG, "CGEventSourceCreate failed");
         }
+        // CGEventPost(kCGHIDEventTap, ...) is silently dropped unless the
+        // app is granted Accessibility.  Trigger the system prompt the
+        // first time we start injecting — and log a clear warning so the
+        // user knows why their clicks aren't landing if they decline.
+        CFStringRef key = kAXTrustedCheckOptionPrompt;
+        CFBooleanRef value = kCFBooleanTrue;
+        CFDictionaryRef options = CFDictionaryCreate(
+            kCFAllocatorDefault,
+            (const void**)&key, (const void**)&value, 1,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        const bool trusted = AXIsProcessTrustedWithOptions(options);
+        if (options) CFRelease(options);
+        if (!trusted) {
+            log::warn(TAG, "Vivora is not granted Accessibility — remote "
+                          "mouse and keyboard events will be silently dropped. "
+                          "Open System Settings -> Privacy & Security -> "
+                          "Accessibility and add Vivora.app.");
+        } else {
+            log::info(TAG, "Accessibility permission granted");
+        }
     }
 
     ~MacInputInjector() override {

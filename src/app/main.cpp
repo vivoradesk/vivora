@@ -1,7 +1,8 @@
 #include "app/legacy_cli.h"
 
-#ifdef VIVORA_WINDOWS
+#if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS)
 #include "app/gui/gui_main.h"
+#define VIVORA_HAVE_GUI 1
 #endif
 
 #include <cstring>
@@ -10,9 +11,9 @@
 //
 // CLI mode is selected by the presence of --host or --view in argv (the
 // existing scripted / server-style use case).  Anything else — including
-// no args at all — launches the GUI on Windows.  On Linux / macOS where
-// the GUI shell hasn't landed yet, no-arg falls back to printing CLI
-// help so the binary stays useful.
+// no args at all — launches the GUI on Windows and macOS.  On Linux
+// where the GUI shell hasn't landed yet, no-arg falls back to printing
+// CLI help so the binary stays useful.
 int main(int argc, char* argv[]) {
     bool cli_mode = false;
     for (int i = 1; i < argc; ++i) {
@@ -24,7 +25,7 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-#ifdef VIVORA_WINDOWS
+#ifdef VIVORA_HAVE_GUI
     return cli_mode
         ? vivora::run_legacy_cli(argc, argv)
         : vivora::gui::run_gui(argc, argv);

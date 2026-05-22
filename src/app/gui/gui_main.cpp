@@ -29,6 +29,13 @@
 // pulled in via Q_IMPORT_PLUGIN.  Class names come from each module's
 // qmldir 'classname' entry.  Order matters only in that style plugins
 // must be present before QtQuick.Controls instantiates a control.
+//
+// Windows uses a static Qt build at C:/qt6 so we anchor every plugin
+// here.  macOS uses Homebrew Qt6 which is dynamic — the loader finds
+// plugins from the framework bundle and these macros would be
+// unresolved-symbol errors against missing static libs.  Linux GUI
+// will choose its own path once it gets wired up.
+#ifdef VIVORA_WINDOWS
 Q_IMPORT_PLUGIN(QtQmlPlugin)
 Q_IMPORT_PLUGIN(QtQmlModelsPlugin)
 Q_IMPORT_PLUGIN(QtQmlWorkerScriptPlugin)
@@ -42,6 +49,7 @@ Q_IMPORT_PLUGIN(QtQuickControls2BasicStylePlugin)
 Q_IMPORT_PLUGIN(QtQuickControls2BasicStyleImplPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogsPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
+#endif
 
 namespace vivora::gui {
 

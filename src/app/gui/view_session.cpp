@@ -1,6 +1,11 @@
-#ifdef VIVORA_WINDOWS
-
 #include "app/gui/view_session.h"
+
+#ifdef VIVORA_WINDOWS
+#include "app/windows_view_platform.h"
+#endif
+#ifdef VIVORA_MACOS
+#include "app/mac_view_platform.h"
+#endif
 
 #include "common/utils/log.h"
 
@@ -22,20 +27,41 @@ ViewSession::~ViewSession() {
     platform_.reset();
 }
 
-bool ViewSession::start(const GuiViewConfig& cfg) {
-    cfg_ = cfg;
-
-    // Build the platform.  It will create a StreamWindow (QWidget) on
-    // this (main) thread, reusing the existing QApplication that the
-    // host GUI bootstrapped.
-    host_ip_storage_ = cfg_.host_ip.empty() ? std::string("0.0.0.0") : cfg_.host_ip;
-    platform_ = std::make_unique<WindowsViewPlatform>();
+bool ViewSession::init_platform() {
+#ifdef VIVORA_WINDOWS
+    auto p = std::make_unique<WindowsViewPlatform>();
     // argc/argv aren't used in the in-process path (QApplication exists).
     static int dummy_argc = 0;
     static char* dummy_argv[] = { nullptr };
-    if (!platform_->init(dummy_argc, dummy_argv,
-                         host_ip_storage_.c_str(), cfg_.port)) {
-        log::error("ViewSession", "WindowsViewPlatform::init failed");
+    if (!p->init(dummy_argc, dummy_argv,
+                 host_ip_storage_.c_str(), cfg_.port)) {
+        return false;
+    }
+    platform_ = std::move(p);
+    return true;
+#elif defined(VIVORA_MACOS)
+    auto p = std::make_unique<MacViewPlatform>();
+    if (!p->init(host_ip_storage_.c_str(), cfg_.port)) {
+        return false;
+    }
+    platform_ = std::move(p);
+    return true;
+#else
+    // Linux GUI not wired yet — see src/app/CMakeLists.txt comment.
+    log::error("ViewSession", "GUI not built for this platform");
+    return false;
+#endif
+}
+
+bool ViewSession::start(const GuiViewConfig& cfg) {
+    cfg_ = cfg;
+
+    // Build the platform.  It will create its window (Windows QWidget or
+    // macOS NSWindow) on this (main) thread, reusing the existing
+    // QApplication that the GUI shell bootstrapped.
+    host_ip_storage_ = cfg_.host_ip.empty() ? std::string("0.0.0.0") : cfg_.host_ip;
+    if (!init_platform()) {
+        log::error("ViewSession", "platform init failed");
         return false;
     }
 
@@ -84,5 +110,3 @@ void ViewSession::onTick() {
 }
 
 } // namespace vivora::gui
-
-#endif // VIVORA_WINDOWS

@@ -20,16 +20,52 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
+# Bundle vivora as Vivora.app on macOS so the OS treats it as a real
+# app (tray icon, accessibility prompts, Info.plist).  The CLI binary
+# still lives at Vivora.app/Contents/MacOS/vivora — argv parsing in
+# main.cpp routes --host/--view to the CLI path, no args to the GUI.
+if(APPLE)
+    set(VIVORA_MAC_APP_BUNDLE TRUE)
+else()
+    set(VIVORA_MAC_APP_BUNDLE FALSE)
+endif()
+
 add_executable(vivora
     main.cpp
     legacy_cli.cpp
     host_loop.cpp
     view_loop.cpp
 )
-if(WIN32)
-    # GUI is Windows-only for Phase 5.  Linux/Mac get the CLI binary
-    # below — the GUI sources include QtQuick/QML which Ubuntu 22.04
-    # doesn't ship.  Lifted out cross-platform once the Linux GUI lands.
+if(VIVORA_MAC_APP_BUNDLE)
+    set_target_properties(vivora PROPERTIES
+        MACOSX_BUNDLE TRUE
+        # Bundle display name: Vivora.app (CMake derives from OUTPUT_NAME).
+        OUTPUT_NAME "Vivora"
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/packaging/macos/Info.plist.in
+        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.vivora.app"
+        MACOSX_BUNDLE_BUNDLE_NAME "Vivora"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    )
+    # Ad-hoc codesign with a stable identifier so the OS sees the same
+    # "app" across rebuilds and the Screen Recording / Accessibility
+    # grants in TCC survive iteration.  Without this, every rebuild
+    # changes the signature and macOS treats the binary as a "new" app
+    # — the toggle still shows ON in System Settings but the grant
+    # actually belongs to the old signature and events get rejected.
+    # `--sign -` is the ad-hoc identity (no Apple Developer cert
+    # required); for distribution we'll swap this for a real Developer
+    # ID Application cert in a separate packaging step.
+    add_custom_command(TARGET vivora POST_BUILD
+        COMMAND codesign --force --sign - --identifier dev.vivora.app
+                $<TARGET_BUNDLE_DIR:vivora>
+        COMMENT "Ad-hoc codesigning Vivora.app for stable TCC grants")
+endif()
+
+# GUI sources land on Windows AND macOS — both use Qt 6 + QML + the same
+# AppController / HostWorker / ViewSession backend.  Linux stays CLI-only
+# until Ubuntu 24.04+ becomes the build floor (Qt 6.5+ in the apt repo).
+if(WIN32 OR APPLE)
     target_sources(vivora PRIVATE
         gui/gui_main.cpp
         gui/app_controller.cpp
@@ -47,7 +83,7 @@ target_link_libraries(vivora PRIVATE
     vivora_common
     Qt6::Core Qt6::Widgets
 )
-if(WIN32)
+if(WIN32 OR APPLE)
     target_link_libraries(vivora PRIVATE
         Qt6::Qml Qt6::Quick Qt6::QuickControls2
     )
