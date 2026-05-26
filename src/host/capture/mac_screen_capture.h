@@ -52,6 +52,14 @@ public:
     // and must CFRelease() it when done.
     CVPixelBufferRef try_get_frame(uint64_t* out_pts_us);
 
+    // Force-return the LAST delivered frame even if it was already pulled.
+    // Used by the IDR-on-loss path on Mac: SCK doesn't emit new frames when
+    // screen content is static, but the host_loop still needs SOMETHING to
+    // hand the encoder so it can produce the requested keyframe.  Returns
+    // nullptr only if no frame has EVER been delivered (cold-start before
+    // the first capture).  Caller owns the reference and must CFRelease().
+    CVPixelBufferRef get_last_frame_for_force(uint64_t* out_pts_us);
+
     // Backing pixel dimensions of the captured stream (what the encoder sees).
     uint32_t width()  const { return width_; }
     uint32_t height() const { return height_; }

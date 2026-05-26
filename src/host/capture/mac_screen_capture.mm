@@ -66,6 +66,8 @@ static SCShareableContent* fetch_shareable_content_sync() {
 @property (nonatomic, assign) CVPixelBufferRef* latestFrame;
 @property (nonatomic, assign) uint64_t* latestPtsUs;
 @property (nonatomic, assign) uint64_t* framesDelivered;
+@property (nonatomic, assign) CVPixelBufferRef* cachedLastFrame;
+@property (nonatomic, assign) uint64_t* cachedLastPtsUs;
 @end
 
 @implementation DBSCStreamOutput
@@ -99,7 +101,8 @@ static SCShareableContent* fetch_shareable_content_sync() {
         ? (uint64_t)(CMTimeGetSeconds(pts) * 1'000'000.0)
         : 0;
 
-    CFRetain(pb);
+    CFRetain(pb);  // for latest_frame slot
+    CFRetain(pb);  // for cached_last_frame slot — IDR-on-loss fallback
     {
         std::lock_guard<std::mutex> lock(*_mutex);
         if (*_latestFrame) {
@@ -108,6 +111,11 @@ static SCShareableContent* fetch_shareable_content_sync() {
         *_latestFrame = pb;
         *_latestPtsUs = pts_us;
         (*_framesDelivered)++;
+        if (*_cachedLastFrame) {
+            CFRelease(*_cachedLastFrame);
+        }
+        *_cachedLastFrame = pb;
+        *_cachedLastPtsUs = pts_us;
     }
 }
 
@@ -129,6 +137,13 @@ struct MacScreenCapture::Impl {
 
     std::mutex mutex;
     CVPixelBufferRef latest_frame = nullptr;
+    // Separately-retained copy of the most-recent delivered frame —
+    // survives a normal try_get_frame() pull so the IDR-on-loss path
+    // has SOMETHING to re-encode when SCK has gone dormant on a
+    // static screen.  Updated on every callback delivery; freed at
+    // shutdown.
+    CVPixelBufferRef cached_last_frame = nullptr;
+    uint64_t cached_last_pts_us = 0;
     uint64_t latest_pts_us = 0;
     uint64_t frames_delivered = 0;
     uint64_t last_pulled_count = 0;
@@ -143,6 +158,10 @@ MacScreenCapture::~MacScreenCapture() {
         if (impl_->latest_frame) {
             CFRelease(impl_->latest_frame);
             impl_->latest_frame = nullptr;
+        }
+        if (impl_->cached_last_frame) {
+            CFRelease(impl_->cached_last_frame);
+            impl_->cached_last_frame = nullptr;
         }
     }
     delete impl_;
@@ -260,6 +279,8 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
     impl_->output.latestFrame = &impl_->latest_frame;
     impl_->output.latestPtsUs = &impl_->latest_pts_us;
     impl_->output.framesDelivered = &impl_->frames_delivered;
+    impl_->output.cachedLastFrame = &impl_->cached_last_frame;
+    impl_->output.cachedLastPtsUs = &impl_->cached_last_pts_us;
 
     impl_->queue = dispatch_queue_create("dev.vivora.capture", DISPATCH_QUEUE_SERIAL);
 
@@ -335,6 +356,16 @@ CVPixelBufferRef MacScreenCapture::try_get_frame(uint64_t* out_pts_us) {
     impl_->last_pulled_count = impl_->frames_delivered;
     if (out_pts_us) *out_pts_us = impl_->latest_pts_us;
     return pb;  // caller takes ownership
+}
+
+CVPixelBufferRef MacScreenCapture::get_last_frame_for_force(uint64_t* out_pts_us) {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    if (!impl_->cached_last_frame) return nullptr;
+    // Hand out an extra retain — the cached slot stays populated so the
+    // next force call after another static interval still has something.
+    CFRetain(impl_->cached_last_frame);
+    if (out_pts_us) *out_pts_us = impl_->cached_last_pts_us;
+    return impl_->cached_last_frame;
 }
 
 } // namespace vivora::host

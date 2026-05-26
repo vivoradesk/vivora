@@ -388,6 +388,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 if (k > 0) encoder_bps = static_cast<uint32_t>(
                     static_cast<uint64_t>(br) * k / (k + m));
             }
+            // Floor — at FAILURE_DRIVEN_M_MAX=30 with K=10 the carve-out
+            // takes the encoder to 25% of wire (e.g. 250 kbps from a
+            // 1 Mbps starting budget) which makes a frozen mud picture.
+            // Clamp at 500 kbps so the encoder always has enough to keep
+            // a recognisable stream even when M is fully ramped.
+            constexpr uint32_t MIN_ENCODER_BPS = 500'000;
+            if (encoder_bps < MIN_ENCODER_BPS) encoder_bps = MIN_ENCODER_BPS;
             // Apply whenever encoder_bps moves by more than the 5%
             // deadband — this catches both wire-budget changes (`changed`
             // from `tick()`) and FEC-parity-count changes (M growing

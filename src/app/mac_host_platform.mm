@@ -81,12 +81,23 @@ void MacHostPlatform::request_idr() { encoder_.request_idr(); }
 
 bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
                                           bool& content_changed,
-                                          bool /*force*/) {
+                                          bool force) {
     CVPixelBufferRef pb = capture_.try_get_frame(&pts_us);
-    if (!pb)
-        return false;
-    content_changed = true;  // Mac capture always delivers changed frames.
-    encoder_.encode(pb, pts_us);
+    if (pb) {
+        content_changed = true;
+        encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
+        return true;
+    }
+    // No fresh frame from SCK.  In the normal path that's fine — host
+    // loop idles.  In the IDR-on-loss path (force=true) the client is
+    // waiting on a keyframe to recover, and SCK may stay dormant
+    // indefinitely on static content.  Re-encode the last delivered
+    // frame so the encoder has SOMETHING to base its IDR on.
+    if (!force) return false;
+    pb = capture_.get_last_frame_for_force(&pts_us);
+    if (!pb) return false;
+    content_changed = false;  // refresh of last frame, not new content.
+    encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
     return true;
 }
 
