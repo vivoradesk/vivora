@@ -1,8 +1,16 @@
 #include "app/legacy_cli.h"
+#include "common/utils/log.h"
 
 #if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS)
 #include "app/gui/gui_main.h"
 #define VIVORA_HAVE_GUI 1
+#endif
+
+#ifdef VIVORA_WINDOWS
+#include <windows.h>
+#include <cstdio>
+#include <io.h>
+#include <fcntl.h>
 #endif
 
 #include <cstring>
@@ -25,6 +33,23 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
+#ifdef VIVORA_WINDOWS
+    // The Windows build is a /SUBSYSTEM:WINDOWS exe (so the GUI doesn't
+    // spawn an empty console).  In CLI mode we still want logs to land
+    // in the PowerShell / cmd that launched us — attach to that parent
+    // console and reopen the C stdio handles against it.  When launched
+    // from Explorer there is no parent console; AttachConsole simply
+    // fails and the CLI runs silently (which is consistent with the
+    // current --host server-style use case anyway).
+    if (cli_mode && AttachConsole(ATTACH_PARENT_PROCESS)) {
+        std::freopen("CONOUT$", "w", stdout);
+        std::freopen("CONOUT$", "w", stderr);
+        std::freopen("CONIN$",  "r", stdin);
+        // Log defaults to nullptr on Windows (see log.cpp); now that
+        // stderr is bound to the parent console, point logs at it.
+        vivora::log::use_stderr();
+    }
+#endif
 #ifdef VIVORA_HAVE_GUI
     return cli_mode
         ? vivora::run_legacy_cli(argc, argv)

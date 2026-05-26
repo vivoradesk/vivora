@@ -93,6 +93,26 @@ int run_gui(int argc, char** argv) {
     QCoreApplication::setOrganizationDomain("vivora.dev");
     QCoreApplication::setApplicationName("Vivora");
 
+    // Send log output to a persistent file.  Windows GUI builds are
+    // /SUBSYSTEM:WINDOWS so there's no attached console; macOS bundles
+    // launched from Finder send stderr to a private launchd pipe.
+    // Without a file we have no logs to look at when a user reports an
+    // issue.  We can't just freopen(stderr) on Windows /SUBSYSTEM:WINDOWS
+    // (stderr's underlying FD is invalid without a console — freopen
+    // creates the file but subsequent fprintf silently fails).  Use the
+    // log::set_file() API instead, which opens its own FILE* and writes
+    // there directly.  Path: AppLocalDataLocation/vivora.log:
+    //   Windows: %LOCALAPPDATA%\Vivora\Vivora\vivora.log
+    //   macOS:   ~/Library/Application Support/Vivora/vivora.log
+    //   Linux:   ~/.local/share/Vivora/vivora.log
+    {
+        const QString dir = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
+        QDir().mkpath(dir);
+        const QString path = dir + "/vivora.log";
+        log::set_file(path.toUtf8().constData());
+    }
+
 #ifdef VIVORA_WINDOWS
     vivora::net::WinsockInit wsa;
     if (!wsa.ok) {

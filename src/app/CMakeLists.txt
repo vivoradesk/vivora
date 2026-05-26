@@ -36,6 +36,16 @@ add_executable(vivora
     host_loop.cpp
     view_loop.cpp
 )
+if(WIN32)
+    # Build as a /SUBSYSTEM:WINDOWS exe so launching the GUI from
+    # Explorer / Start menu / tray doesn't spawn an empty black
+    # console window.  CLI mode (`--host` / `--view`) re-attaches to
+    # the parent console at runtime in main.cpp so stdout/stderr
+    # still land in the calling PowerShell.  WIN32_EXECUTABLE makes
+    # MSVC link with WinMainCRTStartup; Qt6's qtmain shim bridges
+    # that back to plain `int main(...)`.
+    set_target_properties(vivora PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
 if(VIVORA_MAC_APP_BUNDLE)
     set_target_properties(vivora PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -60,6 +70,20 @@ if(VIVORA_MAC_APP_BUNDLE)
         COMMAND codesign --force --sign - --identifier dev.vivora.app
                 $<TARGET_BUNDLE_DIR:vivora>
         COMMENT "Ad-hoc codesigning Vivora.app for stable TCC grants")
+    # Ad-hoc signatures don't preserve TCC grants across rebuilds —
+    # the cdhash changes every build and macOS treats the binary as
+    # "different".  The Settings toggle keeps showing ON but events
+    # are silently rejected and the system re-prompts on the next
+    # capture / inject attempt.  Reset cleanly so the next launch
+    # gets a fresh prompt that actually registers.  Real fix is a
+    # Developer ID Application cert (then the designated requirement
+    # is identifier+team, not cdhash) — pending Apple Developer
+    # enrolment; see [[project_post_rename_plan]].  || true so a
+    # not-yet-granted state doesn't fail the build.
+    add_custom_command(TARGET vivora POST_BUILD
+        COMMAND tccutil reset ScreenCapture dev.vivora.app || true
+        COMMAND tccutil reset Accessibility dev.vivora.app || true
+        COMMENT "Resetting TCC grants for ad-hoc signed dev.vivora.app")
 endif()
 
 # GUI sources land on Windows AND macOS — both use Qt 6 + QML + the same
