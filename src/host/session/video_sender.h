@@ -145,13 +145,16 @@ private:
     // between WiFi loss clusters and got caught flat-footed by the next
     // burst.  15 s correlates with how WiFi RF environments cycle.
     static constexpr int     CLEAN_DECAY_TICKS    = 30;
-    // Cap raised from 6 to 7 after smoke logs showed 4 of 16 failures
-    // happening at M=6 with "need 1 more" — exactly one more parity
-    // would have saved them.  Cost is modest (M=7 means 30% encoder
-    // bitrate carved for FEC vs 25% at M=6).  Higher than 7 buys
-    // sharply diminishing returns and bursts that big are NACK
-    // territory rather than FEC.
-    static constexpr uint8_t FAILURE_DRIVEN_M_MAX = 7;
+    // Cap chosen as M=3*K (= 30 for K=10).  With K data + M parity, the
+    // group recovers as long as ANY K of K+M packets arrive — so
+    // M=3K gives parity ratio M/(K+M) = 0.75 = survives roughly 75%
+    // wire loss before recovery probability collapses.  Cost: the
+    // host_loop carve-out (`encoder_bps = wire * K/(K+M)`) shrinks the
+    // encoder to 25% of wire budget when fully ramped, so a 10 Mbps
+    // wire becomes 2.5 Mbps video — still usable for 1080p HEVC.
+    // Only reached when failure_driven_m_ climbs all the way up under
+    // sustained loss, never the steady-state target on a clean link.
+    static constexpr uint8_t FAILURE_DRIVEN_M_MAX = 30;
     uint64_t packets_sent_ = 0;
     uint64_t bytes_sent_ = 0;
     uint64_t retransmits_ = 0;
@@ -163,7 +166,12 @@ private:
     // Adaptive M: hysteresis + cooldown.  Raise fast, lower slow.
     uint8_t  pending_relax_count_ = 0;
     uint16_t cooldown_ = 0;
-    static constexpr uint8_t  HYSTERESIS_UP     = 8;
+    // Hysteresis: how many "relax pressure" reports before stepping
+    // M down by one.  Was 8 (~4s/step at 500ms reports) which left M
+    // pinned high for a minute after loss ended.  2 = ~1s/step, fast
+    // enough to recover quality within a few seconds of the link
+    // cleaning up; still buffers single-tick noise.
+    static constexpr uint8_t  HYSTERESIS_UP     = 2;
     static constexpr uint16_t TIGHTEN_COOLDOWN  = 4;
     static constexpr uint16_t RELAX_COOLDOWN    = 20;
 

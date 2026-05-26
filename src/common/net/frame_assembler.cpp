@@ -93,6 +93,23 @@ bool FrameAssembler::feed(const protocol::Packet& packet) {
         pf.arrived.assign(frag_count, false);
         pf.nack_sent_at.assign(frag_count, TimePoint{});
         pf.first_arrival = Clock::now();
+    } else if (frag_count != pf.frag_count) {
+        // A later fragment for the same seq claims a different frag_count
+        // than the first one we saw.  This used to crash with a NULL deref
+        // when frag_index was inside the new declared range but past the
+        // already-sized pf.arrived (vector<bool> backed by uint32 array,
+        // NULL base × indexed write).  Triggered under heavy loss when
+        // FEC reassembled a packet whose payload didn't decode cleanly —
+        // it'd present as a "fragment" with garbage frag_index/frag_count.
+        // Drop the offending packet; the rest of the frame still has a
+        // chance via FEC recovery on the remaining shards.
+        return false;
+    }
+
+    // Belt-and-braces — even with matching frag_count, FEC garbage could
+    // theoretically produce a frag_index that's somehow past the bound.
+    if (frag_index >= pf.arrived.size()) {
+        return false;
     }
 
     if (packet.header.flags & protocol::FLAG_KEYFRAME)

@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <cstring>
+#include <chrono>
 
 namespace vivora::net {
 
@@ -155,7 +156,22 @@ int PosixUdpSocket::send_to(const uint8_t* data, size_t len, const SocketAddr& d
                            reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-        log::error(TAG, "sendto failed: %s", std::strerror(errno));
+        // Throttle: a WiFi drop fires sendto failures at packet rate
+        // (~100/s) which can fill a log file in seconds.  One line
+        // per second with a rolled-up count is enough to surface the
+        // condition without drowning out everything else.
+        static auto last_log = std::chrono::steady_clock::now() - std::chrono::seconds(2);
+        static uint64_t suppressed = 0;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_log >= std::chrono::seconds(1)) {
+            log::error(TAG, "sendto failed: %s (x%llu suppressed)",
+                       std::strerror(errno),
+                       static_cast<unsigned long long>(suppressed));
+            last_log = now;
+            suppressed = 0;
+        } else {
+            ++suppressed;
+        }
         return -1;
     }
     return static_cast<int>(ret);

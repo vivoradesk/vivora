@@ -4,6 +4,7 @@
 #include "common/crypto/packet_crypto.h"
 #include "common/utils/log.h"
 #include <algorithm>
+#include <chrono>
 
 namespace vivora::host {
 
@@ -128,7 +129,23 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             r = socket_.send_to(out_data, out_len, dest);
         }
         if (r < 0) {
-            log::error("VideoSender", "send_to failed at packet %d/%zu", sent, prepared_wires_.size());
+            // Throttled — see PosixUdpSocket::send_to.  The socket layer
+            // already logs the OS-level error rate-limited; here we just
+            // surface the application-level batch hint at the same cadence
+            // so logs make sense without drowning anyone out.
+            static auto last_log = std::chrono::steady_clock::now() - std::chrono::seconds(2);
+            static uint64_t suppressed = 0;
+            const auto now = std::chrono::steady_clock::now();
+            if (now - last_log >= std::chrono::seconds(1)) {
+                log::error("VideoSender",
+                           "send_to failed at packet %d/%zu (x%llu suppressed)",
+                           sent, prepared_wires_.size(),
+                           static_cast<unsigned long long>(suppressed));
+                last_log = now;
+                suppressed = 0;
+            } else {
+                ++suppressed;
+            }
             return -1;
         }
         bytes_sent_ += r;
@@ -245,13 +262,28 @@ void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
     // raising M no longer increases total wire — encoder simply
     // shrinks proportionally.  This unblocks aggressive M growth on
     // bursty links.
+    // Cap failure_driven_m_ based on sustained loss rate.  Two
+    // experiments on 2026-05-25 showed aggressive M growth (15+) at
+    // moderate loss shrinks the encoder so much (≤33% wire) that the
+    // picture becomes a slideshow — and audio still glitches because
+    // Opus uses in-band FEC, not Reed-Solomon, so the host's M ladder
+    // doesn't help audio at all.  Settled on a modest ladder that
+    // keeps the encoder fat enough for a usable picture; recovery at
+    // 50%+ loss is *fundamentally* limited by UDP+RS math, not by
+    // how high we let M climb.
+    uint8_t failure_cap;
+    if      (loss_rate < 0.10f) failure_cap = 7;   // ~58% encoder wire
+    else if (loss_rate < 0.30f) failure_cap = 9;   // ~53%
+    else if (loss_rate < 0.50f) failure_cap = 12;  // ~45%
+    else                        failure_cap = 16;  // ~38% (still readable)
+
     if (delta_failed > 0) {
         // Heavier bumps for severe bursts (3+ fails in one 500ms window
         // typically means the link is degrading, not a stray drop).  A
         // single fail still bumps by 1; 3+ bumps by 2 to react faster.
         uint8_t bump = (delta_failed >= 3) ? 2 : 1;
-        if (failure_driven_m_ + bump > FAILURE_DRIVEN_M_MAX)
-            failure_driven_m_ = FAILURE_DRIVEN_M_MAX;
+        if (failure_driven_m_ + bump > failure_cap)
+            failure_driven_m_ = failure_cap;
         else
             failure_driven_m_ += bump;
         clean_streak_ = 0;
@@ -268,6 +300,12 @@ void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
             clean_streak_ = 0;
         }
     }
+    // Also clamp DOWN to the loss-rate-derived cap — if the link
+    // recovered enough that loss_rate dropped, immediately allow
+    // M to settle to a lower headroom rather than waiting on the
+    // slow CLEAN_DECAY_TICKS decay.
+    if (failure_driven_m_ > failure_cap)
+        failure_driven_m_ = failure_cap;
 
     uint8_t target_m = std::max(loss_m, failure_driven_m_);
     if (target_m > FAILURE_DRIVEN_M_MAX) target_m = FAILURE_DRIVEN_M_MAX;
