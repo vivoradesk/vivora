@@ -31,7 +31,12 @@ bool AudioReceiver::start(std::unique_ptr<AudioOutput> output,
     device_channels_ = output_->channels();
 
     if (!decoder_.init()) return false;
-    if (!jitter_.init(FRAME_MS, jitter_target_ms, 200)) return false;
+    // capacity_ms=800 (default) — leaves headroom (capacity - max_target
+    // = 600ms = 60 slots) so the shrink path can actually fire when the
+    // link cleans up, and the "far ahead" reset is tolerant of network
+    // hiccups up to 800ms before triggering.  Earlier crash under load
+    // was a FrameAssembler bounds bug, now fixed.
+    if (!jitter_.init(FRAME_MS, jitter_target_ms)) return false;
 
     if (!resampler_.init(TRANSPORT_CHANNELS,
                          TRANSPORT_SAMPLE_RATE,

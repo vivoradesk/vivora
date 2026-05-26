@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -86,6 +87,15 @@ private:
     int plc_window_   = 0;
     int consecutive_full_windows_ = 0;
     int growth_pause_remaining_   = 0;
+
+    // Rate-limit "far ahead" resyncs.  Under heavy loss + reorder
+    // (Clumsy 50% + delay) packets can arrive out of band in a way
+    // that constantly trips the reset path — each reset flips
+    // started_ back to false and the buffer never recovers.  Cap
+    // resets to one per 500ms so a single genuine stream restart
+    // still works but storms can't pin the buffer.
+    std::chrono::steady_clock::time_point last_reset_ = {};
+    static constexpr std::chrono::milliseconds RESET_MIN_INTERVAL{500};
     static constexpr int ADAPT_WINDOW_POPS = 100;          // ~1s at 10ms ticks
     static constexpr double GROW_PLC_RATE  = 0.05;         // 5%
     static constexpr double SHRINK_PLC_RATE = 0.005;       // 0.5%

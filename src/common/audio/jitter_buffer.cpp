@@ -55,21 +55,34 @@ void JitterBuffer::push(uint16_t seq, const uint8_t* data, size_t len) {
     } else {
         int16_t diff = seq_diff(seq, next_seq_);
         if (diff < 0) {
-            // Packet is behind play head.  If it's far behind (PLC ran away
-            // while source was silent), resync to this packet's seq.
-            if (diff < -static_cast<int16_t>(capacity_)) {
-                ring_.assign(capacity_, Slot{});
-                stored_    = 0;
-                started_   = false;
-                next_seq_  = seq;
-            } else {
-                // Mildly stale — drop.
+            // Packet is behind play head — late or reordered delivery.
+            // Always drop; never reset.  Resetting on "far behind"
+            // (which an earlier version did when diff < -capacity)
+            // caused a wedge: clumsy / WiFi delays make some packets
+            // arrive 200-500ms late, each one triggered a backwards
+            // resync, the next normal packet then looked "far ahead"
+            // and re-reset forwards, and the ping-pong kept started_
+            // pinned to false so pop() returned Empty forever.
+            return;
+        }
+        // If seq jumped far ahead of play head (> capacity), it's
+        // either a legitimate stream restart or a single delayed
+        // packet that we mistakenly trusted as "the new head".  Rate-
+        // limit resyncs to once per RESET_MIN_INTERVAL — a real
+        // restart still recovers in one tick, but a delay storm can
+        // no longer keep retripping.
+        if (static_cast<size_t>(diff) >= capacity_) {
+            const auto now = std::chrono::steady_clock::now();
+            // Rate-limit resets only while audio is playing — if we
+            // already prebuffering (started_=false), we *need* the
+            // reset to re-anchor next_seq_ to the live sender
+            // position, otherwise the buffer stays stuck on a stale
+            // next_seq_ that no incoming packet will ever match.
+            if (started_ && now - last_reset_ < RESET_MIN_INTERVAL) {
+                // Drop this outlier; pop marches forward via Missing.
                 return;
             }
-        }
-        // If seq jumped far ahead of play head (> capacity), the stream
-        // had a gap (e.g. audio source restart).  Reset and resync.
-        if (static_cast<size_t>(diff) >= capacity_) {
+            last_reset_ = now;
             ring_.assign(capacity_, Slot{});
             stored_    = 0;
             started_   = false;
