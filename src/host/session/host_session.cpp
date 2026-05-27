@@ -207,11 +207,26 @@ void HostSession::poll() {
         }
     }
 
-    // Remove timed-out clients.
+    // Remove timed-out clients.  Also evict their audio destinations
+    // from AudioSender — that list holds a raw pointer into the
+    // CipherState that lives inside the per-client struct in clients_.
+    // Without the eviction the pointer dangles, sealed audio packets
+    // ship encrypted with a freed cipher and the receiver silently
+    // drops them on AEAD authentication failure.  This was the cause
+    // of "audio doesn't recover after Mac wake" — client timed out
+    // during sleep, host kept sending garbled-encrypted audio to the
+    // still-listening client socket, only manual reconnect (which
+    // re-adds the destination with a fresh cipher) restored sound.
     for (const auto& addr : timed_out) {
         log::warn("HostSession", "Client %u.%u.%u.%u:%u timed out",
             (addr.ip >> 0) & 0xFF, (addr.ip >> 8) & 0xFF,
             (addr.ip >> 16) & 0xFF, (addr.ip >> 24) & 0xFF, addr.port);
+        if (audio_sender_) {
+            auto it = clients_.find(addr);
+            if (it != clients_.end()) {
+                audio_sender_->remove_destination(it->second.audio_dest);
+            }
+        }
         clients_.erase(addr);
     }
 
@@ -575,13 +590,12 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
 
     // Register audio destination if the client sent its audio port.
     if (audio_sender_ && client_audio_port != 0) {
-        net::SocketAddr audio_dest{};
-        audio_dest.ip   = sender.ip;
-        audio_dest.port = client_audio_port;
-        audio_sender_->add_destination(audio_dest, &client.audio_send_cs);
+        client.audio_dest.ip   = sender.ip;
+        client.audio_dest.port = client_audio_port;
+        audio_sender_->add_destination(client.audio_dest, &client.audio_send_cs);
         log::info("HostSession", "Audio destination registered: %u.%u.%u.%u:%u",
-                  (audio_dest.ip >> 0) & 0xFF, (audio_dest.ip >> 8) & 0xFF,
-                  (audio_dest.ip >> 16) & 0xFF, (audio_dest.ip >> 24) & 0xFF,
+                  (client.audio_dest.ip >> 0) & 0xFF, (client.audio_dest.ip >> 8) & 0xFF,
+                  (client.audio_dest.ip >> 16) & 0xFF, (client.audio_dest.ip >> 24) & 0xFF,
                   client_audio_port);
     }
 

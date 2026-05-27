@@ -57,6 +57,14 @@ struct ClientInfo {
     crypto::CipherState audio_send_cs;
     crypto::CipherState audio_recv_cs;
     bool handshake_complete = false;
+
+    // Where audio packets are sent for this client (client IP + the
+    // audio_port the client advertised in its HELLO).  Mirrored into
+    // AudioSender's destination list at handshake completion; we keep
+    // a copy here so we can evict the AudioSender entry when this
+    // client is removed (its CipherState would otherwise be freed
+    // while AudioSender still holds a pointer to it).
+    net::SocketAddr audio_dest{};
 };
 
 class HostSession {
