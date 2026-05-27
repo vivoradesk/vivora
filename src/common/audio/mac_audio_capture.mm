@@ -8,6 +8,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <Foundation/Foundation.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -35,6 +36,13 @@ static SCShareableContent* sck_fetch_sync() {
 
 } // namespace vivora::audio
 
+@class DBAudioStreamOutput;
+
+namespace vivora::audio {
+class MacAudioCapture;  // forward — restart hook used by delegate
+void mac_audio_capture_request_restart(MacAudioCapture* p);  // forward
+}
+
 // Obj-C delegate receiving audio sample buffers from SCStream.
 @interface DBAudioStreamOutput : NSObject <SCStreamOutput, SCStreamDelegate>
 @property (nonatomic, assign) std::atomic<bool>* running;
@@ -42,6 +50,7 @@ static SCShareableContent* sck_fetch_sync() {
                                               uint32_t frames,
                                               uint32_t sample_rate,
                                               uint16_t channels);
+@property (nonatomic, assign) vivora::audio::MacAudioCapture* parent;
 @end
 
 @implementation DBAudioStreamOutput
@@ -135,8 +144,12 @@ static SCShareableContent* sck_fetch_sync() {
 
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error {
     (void)stream;
-    vivora::log::warn(vivora::audio::TAG, "SCStream(audio) stopped: %s",
+    vivora::log::warn(vivora::audio::TAG, "SCStream(audio) stopped: %s — attempting auto-restart",
         error ? [[error localizedDescription] UTF8String] : "no error");
+    // Forward to free function declared earlier in the namespace —
+    // Obj-C @implementation here can't see MacAudioCapture's methods
+    // directly because the class is defined further down in the file.
+    if (_parent) vivora::audio::mac_audio_capture_request_restart(_parent);
 }
 
 @end
@@ -146,11 +159,90 @@ namespace vivora::audio {
 class MacAudioCapture : public AudioCapture {
 public:
     MacAudioCapture() = default;
-    ~MacAudioCapture() override { stop(); }
+    ~MacAudioCapture() override {
+        if (wake_observer_) {
+            [[[NSWorkspace sharedWorkspace] notificationCenter]
+                removeObserver:wake_observer_];
+            wake_observer_ = nil;
+        }
+        stop();
+    }
 
     bool start(AudioCaptureCallback cb) override {
         if (running_.load()) return true;
+        saved_cb_ = cb;  // preserved for restart_stream()
+        if (!build_and_start_locked()) return false;
 
+        if (!control_q_) {
+            control_q_ = dispatch_queue_create("dev.vivora.audio_capture.ctrl", DISPATCH_QUEUE_SERIAL);
+        }
+        if (!wake_observer_) {
+            MacAudioCapture* self_ptr = this;
+            wake_observer_ = [[[NSWorkspace sharedWorkspace] notificationCenter]
+                addObserverForName:NSWorkspaceDidWakeNotification
+                            object:nil
+                             queue:nil
+                        usingBlock:^(NSNotification* /*note*/) {
+                log::info(TAG, "System wake — restarting audio SCStream");
+                self_ptr->restart_stream();
+            }];
+        }
+        return true;
+    }
+
+    void stop() override {
+        if (!running_.exchange(false)) {
+            teardown();
+            return;
+        }
+        if (stream_) {
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            [stream_ stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
+                dispatch_semaphore_signal(sem);
+            }];
+            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+        }
+        teardown();
+    }
+
+    uint32_t sample_rate() const override { return sample_rate_; }
+    uint16_t channels()    const override { return channels_; }
+
+    // Public so the delegate's stop callback + wake observer can poke us.
+    void restart_stream() {
+        if (!control_q_) return;
+        MacAudioCapture* self_ptr = this;
+        dispatch_async(control_q_, ^{
+            if (self_ptr->stream_) {
+                dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                [self_ptr->stream_ stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
+                    dispatch_semaphore_signal(sem);
+                }];
+                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+            }
+            // teardown_stream_only — keep saved_cb_, control_q_, wake_observer_.
+            if (self_ptr->stream_)  { [self_ptr->stream_ release];  self_ptr->stream_  = nil; }
+            if (self_ptr->output_)  { [self_ptr->output_ release];  self_ptr->output_  = nil; }
+            if (self_ptr->display_) { [self_ptr->display_ release]; self_ptr->display_ = nil; }
+            // queue_ is kept (no explicit release in original code path).
+
+            if (!self_ptr->build_and_start_locked()) {
+                int attempt = ++self_ptr->restart_attempt_;
+                int64_t delay_ms = 250LL << std::min(attempt - 1, 6);
+                if (delay_ms > 10'000) delay_ms = 10'000;
+                log::warn(TAG, "Audio SCStream restart failed, retry #%d in %lldms",
+                          attempt, (long long)delay_ms);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
+                    self_ptr->control_q_, ^{ self_ptr->restart_stream(); });
+                return;
+            }
+            self_ptr->restart_attempt_ = 0;
+            log::info(TAG, "Audio SCStream restart succeeded");
+        });
+    }
+
+private:
+    bool build_and_start_locked() {
         SCShareableContent* content = sck_fetch_sync();
         if (!content || content.displays.count == 0) {
             log::warn(TAG, "No SCShareableContent / no displays for audio capture");
@@ -163,7 +255,6 @@ public:
             initWithDisplay:display_ excludingWindows:@[]];
 
         SCStreamConfiguration* cfg = [[SCStreamConfiguration alloc] init];
-        // Audio: 48 kHz stereo float32. capturesAudio is macOS 13+.
         if (@available(macOS 13.0, *)) {
             cfg.capturesAudio = YES;
             cfg.sampleRate = 48000;
@@ -176,16 +267,16 @@ public:
             [content release];
             return false;
         }
-        // We still have to include some video; cheap settings.
         cfg.width = 16;
         cfg.height = 16;
-        cfg.minimumFrameInterval = CMTimeMake(1, 1); // 1 fps — we don't consume video
+        cfg.minimumFrameInterval = CMTimeMake(1, 1);
         cfg.showsCursor = NO;
         cfg.queueDepth = 3;
 
         output_ = [[DBAudioStreamOutput alloc] init];
         output_.running = &running_;
-        auto cb_copy = cb;
+        output_.parent  = this;
+        auto cb_copy = saved_cb_;
         sample_rate_ = 48000;
         channels_ = 2;
         output_.onSamples = ^(const float* samples, uint32_t frames,
@@ -193,7 +284,9 @@ public:
             if (cb_copy) cb_copy(samples, frames, rate, channels);
         };
 
-        queue_ = dispatch_queue_create("dev.vivora.audio_capture", DISPATCH_QUEUE_SERIAL);
+        if (!queue_) {
+            queue_ = dispatch_queue_create("dev.vivora.audio_capture", DISPATCH_QUEUE_SERIAL);
+        }
         stream_ = [[SCStream alloc] initWithFilter:filter
                                      configuration:cfg
                                           delegate:output_];
@@ -234,25 +327,6 @@ public:
         return true;
     }
 
-    void stop() override {
-        if (!running_.exchange(false)) {
-            teardown();
-            return;
-        }
-        if (stream_) {
-            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-            [stream_ stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
-                dispatch_semaphore_signal(sem);
-            }];
-            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
-        }
-        teardown();
-    }
-
-    uint32_t sample_rate() const override { return sample_rate_; }
-    uint16_t channels()    const override { return channels_; }
-
-private:
     void teardown() {
         if (stream_)  { [stream_ release];  stream_  = nil; }
         if (output_)  { [output_ release];  output_  = nil; }
@@ -264,10 +338,21 @@ private:
     DBAudioStreamOutput* output_ = nil;
     SCDisplay* display_ = nil;
     dispatch_queue_t queue_ = nullptr;
+    dispatch_queue_t control_q_ = nullptr;
+    id wake_observer_ = nil;
+    AudioCaptureCallback saved_cb_;
+    int restart_attempt_ = 0;
     std::atomic<bool> running_{false};
     uint32_t sample_rate_ = 0;
     uint16_t channels_ = 0;
 };
+
+// Adapter for the @implementation delegate (which can't call class
+// methods directly because @implementation appears before the class
+// definition in this file).
+void mac_audio_capture_request_restart(MacAudioCapture* p) {
+    if (p) p->restart_stream();
+}
 
 std::unique_ptr<AudioCapture> create_default_loopback_capture() {
     if (@available(macOS 13.0, *)) {
