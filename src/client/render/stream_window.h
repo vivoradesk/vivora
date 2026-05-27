@@ -56,6 +56,8 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
     void moveEvent(QMoveEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+    void changeEvent(QEvent* event) override;
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
     QPaintEngine* paintEngine() const override { return nullptr; }
 

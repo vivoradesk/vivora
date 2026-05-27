@@ -24,6 +24,7 @@ public:
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;
+    bool re_encode_last(uint64_t pts_us) override;
     bool get_encoded_packet(EncodedPacketView& out) override;
     void on_idle() override;
     void shutdown() override;

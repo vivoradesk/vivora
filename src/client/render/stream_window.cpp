@@ -504,6 +504,45 @@ void StreamWindow::hideEvent(QHideEvent* event) {
     if (hud_label_) hud_label_->hide();
 }
 
+void StreamWindow::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    // Restore HUD only when the user previously toggled it on (F9) AND
+    // we're currently the active window.  Coming back from
+    // minimized/hidden with HUD-on shouldn't surprise the user.
+    if (hud_label_ && hud_visible_ && isActiveWindow()) {
+        position_hud();
+        hud_label_->show();
+        hud_label_->raise();
+    }
+}
+
+void StreamWindow::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    // The HUD is a separate top-level Qt::Tool window with
+    // WindowStaysOnTopHint — without help it floats above OTHER apps
+    // even when StreamWindow loses activation.  Tie its visibility to
+    // ours: hide on ActivationChange-to-inactive, show on return.
+    if (event->type() == QEvent::ActivationChange && hud_label_ && hud_visible_) {
+        if (isActiveWindow()) {
+            position_hud();
+            hud_label_->show();
+            hud_label_->raise();
+        } else {
+            hud_label_->hide();
+        }
+    }
+    // Also handle window state changes: minimized → hide HUD.
+    if (event->type() == QEvent::WindowStateChange && hud_label_) {
+        if (windowState() & Qt::WindowMinimized) {
+            hud_label_->hide();
+        } else if (hud_visible_ && isActiveWindow()) {
+            position_hud();
+            hud_label_->show();
+            hud_label_->raise();
+        }
+    }
+}
+
 void StreamWindow::focusOutEvent(QFocusEvent* event) {
     // Release every key we believe is still down on the host — otherwise
     // pressing Win (or any shortcut that steals focus) strands the modifier

@@ -101,6 +101,19 @@ bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
     return true;
 }
 
+bool MacHostPlatform::re_encode_last(uint64_t pts_us) {
+    // Host_loop's heartbeat path — invoked when capture stays silent for
+    // longer than min_frame_interval (static screen with no SCK dirty
+    // rect emission).  Re-feed the cached last frame so the wire
+    // maintains the expected cadence: keeps WiFi power-saving from
+    // killing the link and gives FEC groups a steady fill rate.
+    uint64_t cached_pts = 0;
+    CVPixelBufferRef pb = capture_.get_last_frame_for_force(&cached_pts);
+    if (!pb) return false;
+    encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
+    return true;
+}
+
 bool MacHostPlatform::get_encoded_packet(EncodedPacketView& out) {
     vivora::host::MacEncodedPacket pkt;
     if (!encoder_.get_packet(pkt))
