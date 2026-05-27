@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Vivora">
+  
+  <g fill="none" stroke="#111114" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 5 5 Q 2 10 8 14 Q 14 19 16 24"></path>
+    <path d="M 27 5 Q 30 10 24 14 Q 18 19 16 24"></path>
+  </g>
+  <circle cx="5" cy="5" r="2.5" fill="#111114"></circle>
+  <circle cx="27" cy="5" r="2.5" fill="#111114"></circle>
+  <circle cx="16" cy="25.5" r="4" fill="#3D6BFA"></circle>
+</svg>

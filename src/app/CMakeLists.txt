@@ -56,7 +56,23 @@ if(VIVORA_MAC_APP_BUNDLE)
         MACOSX_BUNDLE_BUNDLE_NAME "Vivora"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE "Vivora"
     )
+    # Generate Vivora.icns from the source iconset and drop it into the
+    # bundle's Contents/Resources/ so Finder, Dock, and the About panel
+    # all pick up the brand glyph.  Info.plist already references it via
+    # CFBundleIconFile=Vivora.  Rebuilt every time the iconset PNGs
+    # change.
+    set(_VIVORA_ICONSET ${CMAKE_SOURCE_DIR}/icons/mac/Vivora.iconset)
+    set(_VIVORA_ICNS    ${CMAKE_CURRENT_BINARY_DIR}/Vivora.icns)
+    file(GLOB _VIVORA_ICONSET_PNGS ${_VIVORA_ICONSET}/*.png)
+    add_custom_command(OUTPUT ${_VIVORA_ICNS}
+        COMMAND iconutil --convert icns --output ${_VIVORA_ICNS} ${_VIVORA_ICONSET}
+        DEPENDS ${_VIVORA_ICONSET_PNGS}
+        COMMENT "Generating Vivora.icns from iconset")
+    target_sources(vivora PRIVATE ${_VIVORA_ICNS})
+    set_source_files_properties(${_VIVORA_ICNS} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
     # Ad-hoc codesign with a stable identifier so the OS sees the same
     # "app" across rebuilds and the Screen Recording / Accessibility
     # grants in TCC survive iteration.  Without this, every rebuild

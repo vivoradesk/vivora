@@ -32,6 +32,11 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
 
+    <key>CFBundleIconFile</key>
+    <string>Vivora</string>
+    <key>CFBundleIconName</key>
+    <string>Vivora</string>
+
     <key>CFBundleShortVersionString</key>
     <string>@PROJECT_VERSION@</string>
 

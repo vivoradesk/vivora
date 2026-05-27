@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Vivora">
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1A1A1F"></stop>
+      <stop offset="1" stop-color="#0B0B0E"></stop>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228.6" ry="228.6" fill="url(#ink)"></rect>
+  <rect x="0.5" y="0.5" width="1023" height="1023" rx="228.1" ry="228.1" fill="none" stroke="rgba(255,255,255,0.06)"></rect>
+  <g transform="translate(512 524) scale(19.2) translate(-16 -16)">
+    <g fill="none" stroke="#F6F4EF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 5 5 Q 2 10 8 14 Q 14 19 16 24"></path>
+      <path d="M 27 5 Q 30 10 24 14 Q 18 19 16 24"></path>
+    </g>
+    <circle cx="5" cy="5" r="2.5" fill="#F6F4EF"></circle>
+    <circle cx="27" cy="5" r="2.5" fill="#F6F4EF"></circle>
+    <circle cx="16" cy="25.5" r="4" fill="#7A95FF"></circle>
+  </g>
+</svg>

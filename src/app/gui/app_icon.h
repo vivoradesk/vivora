@@ -4,16 +4,16 @@
 
 namespace vivora::gui {
 
-// Procedurally-drawn placeholder icon set for the app + tray.  Lives
-// here so we don't have to ship a PNG / wire up Qt's SVG plugin in the
-// static build just for a placeholder.  Replace with a designer asset
-// later by handing back QIcon(":/assets/icon.png") + the .ico baked
-// into the .exe via a .rc file.
+// Brand icons loaded from the embedded qrc (`/icons/...`).
+// Multiple PNG sizes per icon; QIcon picks the best per render
+// surface (taskbar, tray, About dialog, Explorer).
 //
-// All variants render at multiple sizes (16/24/32/48/64/128/256) so
-// the OS picks the right one for taskbar / tray / explorer.
-QIcon make_app_icon();        // blue — idle / default
-QIcon make_tray_idle_icon();
-QIcon make_tray_sharing_icon();   // green — actively sharing
+// Source PNGs live in `icons/win/` and `icons/tray/` at the repo root
+// and are baked into the binary via `qml/qml.qrc`.  Replace those PNGs
+// (or rebuild from the SVG sources in `icons/`) to change the brand.
+QIcon make_app_icon();         // full-colour app icon (window, taskbar, Explorer)
+QIcon make_tray_idle_icon();   // blue dot   — connected, no active session
+QIcon make_tray_sharing_icon();// green dot  — actively sharing
+QIcon make_tray_error_icon();  // red dot    — error state (rarely shown)
 
 } // namespace vivora::gui

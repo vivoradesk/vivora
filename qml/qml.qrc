@@ -6,4 +6,30 @@
         <file>SettingsDialog.qml</file>
         <file>AddPeerDialog.qml</file>
     </qresource>
+    <qresource prefix="/icons">
+        <file alias="app/16.png">../icons/win/vivora-16.png</file>
+        <file alias="app/32.png">../icons/win/vivora-32.png</file>
+        <file alias="app/48.png">../icons/win/vivora-48.png</file>
+        <file alias="app/64.png">../icons/win/vivora-64.png</file>
+        <file alias="app/128.png">../icons/win/vivora-128.png</file>
+        <file alias="app/256.png">../icons/win/vivora-256.png</file>
+
+        <file alias="tray/idle-16.png">../icons/tray/tray-idle-16.png</file>
+        <file alias="tray/idle-22.png">../icons/tray/tray-idle-22.png</file>
+        <file alias="tray/idle-32.png">../icons/tray/tray-idle-32.png</file>
+        <file alias="tray/idle-44.png">../icons/tray/tray-idle-44.png</file>
+        <file alias="tray/idle-64.png">../icons/tray/tray-idle-64.png</file>
+
+        <file alias="tray/sharing-16.png">../icons/tray/tray-sharing-16.png</file>
+        <file alias="tray/sharing-22.png">../icons/tray/tray-sharing-22.png</file>
+        <file alias="tray/sharing-32.png">../icons/tray/tray-sharing-32.png</file>
+        <file alias="tray/sharing-44.png">../icons/tray/tray-sharing-44.png</file>
+        <file alias="tray/sharing-64.png">../icons/tray/tray-sharing-64.png</file>
+
+        <file alias="tray/error-16.png">../icons/tray/tray-error-16.png</file>
+        <file alias="tray/error-22.png">../icons/tray/tray-error-22.png</file>
+        <file alias="tray/error-32.png">../icons/tray/tray-error-32.png</file>
+        <file alias="tray/error-44.png">../icons/tray/tray-error-44.png</file>
+        <file alias="tray/error-64.png">../icons/tray/tray-error-64.png</file>
+    </qresource>
 </RCC>
