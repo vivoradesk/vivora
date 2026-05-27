@@ -178,12 +178,18 @@ private:
     // Keyframe parity boost: steady-state M is tuned for P-frame size;
     // a keyframe is ~40 fragments and losing one group kills the whole
     // frame, triggering a decoder-reject cascade that lasts until the
-    // next IDR arrives. Boost+6 with cap=12 covers WiFi bursts up to
-    // 8 packets even when steady-state M=2, while ratched-up M=7 reaches
-    // the cap. Keyframes fire ~once per recovery so the extra parity
-    // is essentially free on average bandwidth.
-    static constexpr uint8_t KEYFRAME_M_BOOST = 6;
-    static constexpr uint8_t KEYFRAME_M_MAX   = 12;
+    // next IDR arrives.  Math at 50% loss with K=10:
+    //   M=12 (boost+6 over baseline) → per-group recovery 74% → 5-group
+    //                                   IDR success 22% → user sees freeze
+    //                                   averaging 3-5 seconds per recovery
+    //   M=24 (boost+14)              → per-group 95% → 5-group success 77%
+    //                                   → most IDRs land on first try
+    // Cost: keyframe wire grows (1+M/K)x = 3.4x for ONE frame, but
+    // keyframes fire every few seconds so average wire is barely
+    // touched.  P-frames keep their own much lower steady-state M
+    // (the failure-driven ladder caps at 7-16 depending on loss rate).
+    static constexpr uint8_t KEYFRAME_M_BOOST = 14;
+    static constexpr uint8_t KEYFRAME_M_MAX   = 24;
 
     // RTT-based proactive M raise: spike detection.
     // 50ms threshold — tight enough to catch early WiFi congestion, while
