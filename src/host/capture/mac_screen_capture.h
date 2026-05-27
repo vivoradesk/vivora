@@ -60,6 +60,17 @@ public:
     // the first capture).  Caller owns the reference and must CFRelease().
     CVPixelBufferRef get_last_frame_for_force(uint64_t* out_pts_us);
 
+    // Tear down and rebuild the SCStream from the saved init config.
+    // Triggered internally by:
+    //  - SCStreamDelegate didStopWithError (the stream told us it died)
+    //  - NSWorkspaceDidWakeNotification (system wake from sleep / lid open)
+    //  - any external watchdog code
+    // Uses exponential backoff if the rebuild itself keeps failing.
+    // Safe to call from any thread; serialised on an internal control
+    // queue so concurrent triggers (stop event arriving right as wake
+    // fires) coalesce.
+    bool restart_stream();
+
     // Backing pixel dimensions of the captured stream (what the encoder sees).
     uint32_t width()  const { return width_; }
     uint32_t height() const { return height_; }
@@ -70,6 +81,11 @@ public:
     bool hdr_active() const { return hdr_active_; }
 
 private:
+    // Schedule another `restart_stream()` attempt on the control queue
+    // after an exponential-backoff delay.  Called when a restart try
+    // failed (e.g. addStreamOutput / startCapture returned an error).
+    void schedule_restart_retry();
+
     struct Impl;
     Impl* impl_ = nullptr;
     uint32_t width_ = 0;

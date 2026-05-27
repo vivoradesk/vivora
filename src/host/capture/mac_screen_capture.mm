@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 
 #include <mutex>
+#include <algorithm>
 
 namespace vivora::host {
 
@@ -68,6 +69,7 @@ static SCShareableContent* fetch_shareable_content_sync() {
 @property (nonatomic, assign) uint64_t* framesDelivered;
 @property (nonatomic, assign) CVPixelBufferRef* cachedLastFrame;
 @property (nonatomic, assign) uint64_t* cachedLastPtsUs;
+@property (nonatomic, assign) vivora::host::MacScreenCapture* parent;
 @end
 
 @implementation DBSCStreamOutput
@@ -121,8 +123,9 @@ static SCShareableContent* fetch_shareable_content_sync() {
 
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error {
     (void)stream;
-    vivora::log::warn(vivora::host::TAG, "SCStream stopped: %s",
+    vivora::log::warn(vivora::host::TAG, "SCStream stopped: %s — attempting auto-restart",
         error ? [[error localizedDescription] UTF8String] : "no error");
+    if (_parent) _parent->restart_stream();
 }
 
 @end
@@ -147,11 +150,30 @@ struct MacScreenCapture::Impl {
     uint64_t latest_pts_us = 0;
     uint64_t frames_delivered = 0;
     uint64_t last_pulled_count = 0;
+
+    // Saved init args so we can rebuild the SCStream on restart
+    // without the caller having to re-supply them.
+    MacCaptureConfig saved_config{};
+
+    // Serial queue for restart attempts — coalesces concurrent
+    // triggers (didStopWithError + NSWorkspaceDidWake firing within
+    // ms of each other) and serialises the tear-down + rebuild so
+    // we never race a stop and a start.
+    dispatch_queue_t control_q = nullptr;
+    int restart_attempt = 0;
+
+    // NSWorkspace observer token for `removeObserver:` at shutdown.
+    id wake_observer = nil;
 };
 
 MacScreenCapture::MacScreenCapture() : impl_(new Impl()) {}
 
 MacScreenCapture::~MacScreenCapture() {
+    if (impl_ && impl_->wake_observer) {
+        [[[NSWorkspace sharedWorkspace] notificationCenter]
+            removeObserver:impl_->wake_observer];
+        impl_->wake_observer = nil;
+    }
     stop();
     if (impl_) {
         std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -192,6 +214,9 @@ std::vector<MacDisplayInfo> MacScreenCapture::enumerate_displays() {
 }
 
 bool MacScreenCapture::init(const MacCaptureConfig& config) {
+    // Save for restart_stream() and the wake-from-sleep observer below.
+    impl_->saved_config = config;
+
     SCShareableContent* content = fetch_shareable_content_sync();
     if (!content || content.displays.count == 0) {
         log::error(TAG, "No displays available");
@@ -281,8 +306,10 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
     impl_->output.framesDelivered = &impl_->frames_delivered;
     impl_->output.cachedLastFrame = &impl_->cached_last_frame;
     impl_->output.cachedLastPtsUs = &impl_->cached_last_pts_us;
+    impl_->output.parent = this;
 
     impl_->queue = dispatch_queue_create("dev.vivora.capture", DISPATCH_QUEUE_SERIAL);
+    impl_->control_q = dispatch_queue_create("dev.vivora.capture.ctrl", DISPATCH_QUEUE_SERIAL);
 
     impl_->stream = [[SCStream alloc] initWithFilter:filter
                                         configuration:cfg
@@ -303,11 +330,129 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
         return false;
     }
 
+    // Subscribe to system wake notifications — lid open / sleep timer
+    // wake leaves SCStream in a silent-dead state without firing any
+    // stop event.  This observer triggers an explicit restart on every
+    // wake so the user doesn't have to Stop/Start Sharing manually.
+    MacScreenCapture* self_ptr = this;
+    impl_->wake_observer = [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceDidWakeNotification
+                    object:nil
+                     queue:nil
+                usingBlock:^(NSNotification* /*note*/) {
+        log::info(TAG, "System wake — restarting SCStream");
+        self_ptr->restart_stream();
+    }];
+
     log::info(TAG, "Initialized: %ux%u @ %u fps, %s, cursor=%s",
               width_, height_, config.fps,
               hdr_active_ ? "HDR10" : "SDR",
               config.show_cursor ? "on" : "off");
     return true;
+}
+
+bool MacScreenCapture::restart_stream() {
+    if (!impl_ || !impl_->control_q) return false;
+    dispatch_async(impl_->control_q, ^{
+        // Tear down the existing stream.  Stop is synchronous to make
+        // sure the OS won't call back into the output we're about to
+        // release.  3-second timeout covers a wedged stop callback.
+        if (impl_->stream) {
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            [impl_->stream stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
+                dispatch_semaphore_signal(sem);
+            }];
+            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+            [impl_->stream removeStreamOutput:impl_->output
+                                         type:SCStreamOutputTypeScreen
+                                        error:nil];
+            [impl_->stream release];
+            impl_->stream = nil;
+        }
+        if (impl_->output) {
+            [impl_->output release];
+            impl_->output = nil;
+        }
+
+        // Rebuild content filter + config from saved init args.
+        SCContentFilter* filter = [[SCContentFilter alloc]
+            initWithDisplay:impl_->display excludingWindows:@[]];
+        SCStreamConfiguration* cfg = [[SCStreamConfiguration alloc] init];
+        cfg.width = width_;
+        cfg.height = height_;
+        cfg.minimumFrameInterval = CMTimeMake(1, (int32_t)impl_->saved_config.fps);
+        cfg.showsCursor = impl_->saved_config.show_cursor ? YES : NO;
+        cfg.queueDepth = 5;
+        if (hdr_active_) {
+            cfg.pixelFormat = kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
+            if (@available(macOS 13.0, *)) cfg.colorSpaceName = kCGColorSpaceITUR_2100_PQ;
+        } else {
+            cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+            if (@available(macOS 13.0, *)) cfg.colorSpaceName = kCGColorSpaceSRGB;
+        }
+
+        impl_->output = [[DBSCStreamOutput alloc] init];
+        impl_->output.mutex = &impl_->mutex;
+        impl_->output.latestFrame = &impl_->latest_frame;
+        impl_->output.latestPtsUs = &impl_->latest_pts_us;
+        impl_->output.framesDelivered = &impl_->frames_delivered;
+        impl_->output.cachedLastFrame = &impl_->cached_last_frame;
+        impl_->output.cachedLastPtsUs = &impl_->cached_last_pts_us;
+        impl_->output.parent = this;
+
+        impl_->stream = [[SCStream alloc] initWithFilter:filter
+                                            configuration:cfg
+                                                 delegate:impl_->output];
+        NSError* err = nil;
+        BOOL add_ok = [impl_->stream addStreamOutput:impl_->output
+                                                type:SCStreamOutputTypeScreen
+                                  sampleHandlerQueue:impl_->queue
+                                               error:&err];
+        [filter release];
+        [cfg release];
+
+        if (!add_ok) {
+            log::error(TAG, "Restart addStreamOutput failed: %s",
+                       err ? [[err localizedDescription] UTF8String] : "unknown");
+            this->schedule_restart_retry();
+            return;
+        }
+
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        __block BOOL start_ok = NO;
+        __block NSError* start_err = nil;
+        [impl_->stream startCaptureWithCompletionHandler:^(NSError* e) {
+            start_err = e;
+            start_ok = (e == nil);
+            dispatch_semaphore_signal(sem);
+        }];
+        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
+        if (!start_ok) {
+            log::error(TAG, "Restart startCapture failed: %s",
+                start_err ? [[start_err localizedDescription] UTF8String] : "unknown");
+            this->schedule_restart_retry();
+            return;
+        }
+
+        impl_->restart_attempt = 0;
+        log::info(TAG, "SCStream restart succeeded");
+    });
+    return true;
+}
+
+void MacScreenCapture::schedule_restart_retry() {
+    // Exponential backoff: 250ms, 500ms, 1s, 2s, 4s, ..., cap at 10s.
+    int attempt = ++impl_->restart_attempt;
+    int64_t delay_ms = 250LL << std::min(attempt - 1, 6);  // 250 * 2^(attempt-1)
+    if (delay_ms > 10'000) delay_ms = 10'000;
+    log::warn(TAG, "Scheduling SCStream restart retry #%d in %lldms",
+              attempt, (long long)delay_ms);
+    MacScreenCapture* self_ptr = this;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
+        impl_->control_q, ^{
+        self_ptr->restart_stream();
+    });
 }
 
 bool MacScreenCapture::start() {
