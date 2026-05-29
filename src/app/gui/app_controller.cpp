@@ -55,11 +55,22 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     });
     loadIdentity();
 
-    // Honour "Start sharing on launch" — stub for Phase A.  Phase A.1
-    // will actually spin up the host worker; for now this just flips the
-    // bool so the UI shows "● Sharing".
-    if (settings_->startSharingOnLaunch()) {
-        startSharing();
+    // Always-available model (VIV-53): host starts immediately at app
+    // launch.  Peer code is visible the moment the user sees the
+    // window — no Start button to click.  Stop/Pause is reachable via
+    // the tray menu and the Pause button in the sharing card.
+    //
+    // The 500ms delay matters on macOS: starting the host worker
+    // immediately fires SCK init which raises the TCC Screen Recording
+    // prompt — and if our main window is shown in the same event-loop
+    // tick it lands ON TOP of the prompt, hiding it.  By the time the
+    // singleShot fires, QApplication::exec has rendered the window so
+    // the OS dialog stacks above it correctly.
+    //
+    // Dev opt-out: VIVORA_NO_AUTOSTART=1 keeps the host loop off so
+    // testing UI changes doesn't burn the encoder + show TCC prompts.
+    if (qEnvironmentVariableIsEmpty("VIVORA_NO_AUTOSTART")) {
+        QTimer::singleShot(500, this, [this] { startSharing(); });
     }
 }
 
@@ -183,12 +194,16 @@ void AppController::showMainWindow() {
 }
 
 void AppController::quit() {
-    if (sharing_ || activeViews_ > 0) {
+    // Confirm only if there are REAL active sessions: someone is
+    // currently connected to us, or we have outgoing view sessions.
+    // The mere fact that the host loop is running (sharing_=true under
+    // the always-available model from VIV-53) no longer warrants a
+    // popup — it's the default state on every launch.
+    const int total = clientCount_ + activeViews_;
+    if (total > 0) {
         const QString detail = QString(
-            "You have %1 active session%2 (sharing=%3).  Quit anyway?")
-            .arg(sharing_ ? activeViews_ + 1 : activeViews_)
-            .arg((sharing_ ? activeViews_ + 1 : activeViews_) == 1 ? "" : "s")
-            .arg(sharing_ ? "yes" : "no");
+            "You have %1 active session%2.  Quit anyway?")
+            .arg(total).arg(total == 1 ? "" : "s");
         const auto btn = QMessageBox::warning(
             nullptr, "Quit Vivora?", detail,
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);

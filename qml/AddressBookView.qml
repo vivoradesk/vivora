@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 // Compact list of remembered peers.
 //   left-click  / Enter / Return — select
@@ -14,7 +15,12 @@ ListView {
     clip: true
     spacing: 2
     focus: true
-    currentIndex: count > 0 ? 0 : -1
+    // Default to no selection — the design is mouse-first, so a
+    // persistent highlight on the first row reads as "selected" when
+    // it's really just a focus cursor.  Keyboard nav still works
+    // (arrow keys / Enter); selection appears the moment the list
+    // gains keyboard focus via Tab or arrow press.
+    currentIndex: -1
 
     signal peerActivated(string alias, string pubkey, string code)
 
@@ -90,10 +96,16 @@ ListView {
         id: row
         width: list.width
         height: 36
-        radius: 4
-        color: ListView.isCurrentItem
-                  ? "#552196f3"
-                  : (hoverArea.containsMouse ? "#22ffffff" : "transparent")
+        radius: 6
+        // Hover-only highlight via HoverHandler — keyboard selection
+        // visual is intentionally dropped to match the mouse-first
+        // design.  Keyboard nav (arrows / Enter) still works, just
+        // without a persistent selection bar.
+        color: hoverHandler.hovered ? "#dcd2b4" : "transparent"
+
+        HoverHandler {
+            id: hoverHandler
+        }
 
         property string roleAlias:  model.alias   || ""
         property string roleCode:   model.code    || ""
@@ -106,16 +118,21 @@ ListView {
             anchors.rightMargin: 8
             spacing: 8
 
+            // Explicit text colour — without it macOS Dark mode QPalette
+            // picks white-on-cream and the labels become unreadable on
+            // the warm-bg window.
             Label {
                 text: row.displayLabel
+                color: "#15151a"
+                font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
                 font.bold: row.roleAlias.length > 0
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
             Label {
                 text: row.roleAlias.length > 0 ? row.roleCode : ""
-                opacity: 0.6
-                font.family: "monospace"
+                color: "#6b6b75"
+                font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
                 font.pointSize: 8
             }
         }
@@ -123,11 +140,13 @@ ListView {
         MouseArea {
             id: hoverArea
             anchors.fill: parent
-            hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: (mouse) => {
-                list.currentIndex = index
                 if (mouse.button === Qt.RightButton) {
+                    // For the context menu we still want the keyboard
+                    // selection to anchor here (so F2 / Delete target
+                    // the right row).
+                    list.currentIndex = index
                     rowMenu.popup()
                 }
             }
@@ -187,7 +206,7 @@ ListView {
     Label {
         anchors.centerIn: parent
         visible: list.count === 0
-        opacity: 0.5
+        color: "#6b6b75"
         text: "no recent peers yet"
     }
 
