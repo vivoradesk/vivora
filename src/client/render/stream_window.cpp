@@ -259,6 +259,18 @@ bool StreamWindow::init_renderer(ID3D11Device* device, uint32_t width, uint32_t 
     }
     resize(target_w, target_h);
 
+    // Re-centre on the current screen after the resize.  The window
+    // was created at the small placeholder size and Qt's default
+    // position (~screen origin); after we grow to fit the host
+    // resolution, half the window often hangs off the right/bottom
+    // edge.  Place it so the resized rect fits within availableGeometry.
+    if (screen()) {
+        const QRect avail = screen()->availableGeometry();
+        const int x = avail.x() + (avail.width()  - static_cast<int>(target_w)) / 2;
+        const int y = avail.y() + (avail.height() - static_cast<int>(target_h)) / 2;
+        move(qMax(avail.x(), x), qMax(avail.y(), y));
+    }
+
     // Swap chain needs PHYSICAL pixels, not Qt logical pixels.
     // On high-DPI monitors devicePixelRatio() > 1.
     qreal dpr = devicePixelRatio();
