@@ -580,12 +580,31 @@ MacVideoView::MacVideoView() {
 MacVideoView::~MacVideoView() {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (impl) {
+        // Defensive teardown — VIV-56.  Closing the window after the
+        // host went away occasionally crashes in NSEventThread CFRetain
+        // on an event being pushed to our CGEventQueue while half-torn
+        // objects are still associated.  Restore CG state to defaults
+        // BEFORE releasing the NS objects so AppKit's event dispatch
+        // doesn't see a half-bound cursor mode.
+        CGAssociateMouseAndMouseCursorPosition(true);
+        [NSCursor unhide];   // balance any pending mouseEntered hide
+        // Detach the delegate so its windowWillClose: can't fire on a
+        // half-released window callback chain.
+        if (impl->window) [impl->window setDelegate:nil];
         if (impl->format_desc) CFRelease(impl->format_desc);
         for (auto& kv : impl->cursor_shapes) {
             if (kv.second.image) CGImageRelease(kv.second.image);
         }
         impl->cursor_shapes.clear();
-        // ARC releases Obj-C members when the struct is destroyed.
+        // ARC alone leaves the NSWindow up because NSApp keeps it in
+        // its window list — explicit -close removes it from the
+        // screen and the global list so the window disappears the
+        // moment the session ends (host timeout, manual disconnect).
+        // Matches the Windows StreamWindow behaviour where the window
+        // tears down as soon as ViewSession::onTick drops the
+        // platform.  Without this the user sees a frozen frame
+        // indefinitely after the host went away.
+        if (impl->window) [impl->window close];
         impl->window = nil;
         impl->view = nil;
         impl->delegate = nil;
