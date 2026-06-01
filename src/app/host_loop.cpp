@@ -53,6 +53,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     host::HostSession session;
     session.set_screen_resolution(platform.input_width(), platform.input_height());
     session.set_codec(platform.actual_codec());
+    if (cfg.approval_gate) session.set_approval_gate(cfg.approval_gate);
     if (cfg.stun_server && *cfg.stun_server) {
         net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
         if (stun.ip == 0) {

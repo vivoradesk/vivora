@@ -2,9 +2,11 @@
 
 #include "app/host_platform.h"
 #include "host/encode/video_encoder.h"
+#include "host/session/host_approval_gate.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 
 namespace vivora {
 
@@ -49,6 +51,13 @@ struct HostLoopConfig {
     int  idle_timeout_min = 0;
     int  idle_warning_sec = 30;
     std::function<void(int seconds_until_disconnect)> on_idle_warning;
+
+    // Per-client connection approval (VIV-53).  When non-null, every
+    // new client that finishes its handshake lands in Pending state
+    // and won't receive frames until the GUI sets it Approved via
+    // gate.set_state().  CLI mode leaves this null → all clients are
+    // implicitly approved (matches pre-VIV-53 behaviour).
+    std::shared_ptr<host::HostApprovalGate> approval_gate;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

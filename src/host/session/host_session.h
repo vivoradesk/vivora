@@ -5,6 +5,7 @@
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/stream_info.h"
+#include "host/session/host_approval_gate.h"
 #include "host/session/video_sender.h"
 #include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
@@ -65,6 +66,18 @@ struct ClientInfo {
     // client is removed (its CipherState would otherwise be freed
     // while AudioSender still holds a pointer to it).
     net::SocketAddr audio_dest{};
+
+    // VIV-53 approval gate.  Latches once the HostApprovalGate reports
+    // Approved so we don't keep re-querying the mutex per frame.
+    // false → client is in Pending state (or gate is null = CLI mode,
+    // in which case ::poll initialises to true on first frame).
+    bool approved = false;
+    // Audio destination registered with AudioSender?  Cleared until
+    // approval lands so a Rejected client never gets audio bytes.
+    bool audio_registered = false;
+    // Client's advertised audio port from HELLO — held until approval
+    // promotes it into AudioSender's destination list.
+    uint16_t audio_port_pending = 0;
 };
 
 class HostSession {
@@ -120,6 +133,15 @@ public:
     // Advertise which codec the host is encoding in.  Sent to the client
     // in HELLO_ACK so it can initialise the matching decoder.
     void set_codec(VideoCodec codec) { codec_ = codec; }
+
+    // VIV-53 per-client approval gate.  When set, every new client
+    // that completes handshake lands in Pending state — HostSession
+    // skips frame sends + audio registration for it until the GUI
+    // calls gate.set_state(key, Approved).  null = CLI mode, every
+    // handshake is implicitly approved on completion.
+    void set_approval_gate(std::shared_ptr<host::HostApprovalGate> gate) {
+        approval_gate_ = std::move(gate);
+    }
 
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
@@ -256,6 +278,9 @@ private:
     net::SocketAddr rendezvous_addr_{};
     TimePoint       last_rdv_send_{};
     static constexpr int64_t RDV_KEEPALIVE_S = 30;
+
+    // VIV-53 connection-approval gate (optional).  Set by GUI mode.
+    std::shared_ptr<host::HostApprovalGate> approval_gate_;
 
     // Relay (v1: single concurrent client, manual session_id from CLI).
     net::SocketAddr relay_addr_{};

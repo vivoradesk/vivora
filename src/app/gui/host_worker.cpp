@@ -106,6 +106,7 @@ void HostWorker::runOnWorkerThread() {
     lcfg.state_out          = &state_;
     lcfg.idle_timeout_min   = cfg_.idle_timeout_min;
     lcfg.idle_warning_sec   = cfg_.idle_warning_sec;
+    lcfg.approval_gate      = cfg_.approval_gate;
     // Bounce the idle warning through a queued connection so the toast
     // is raised on the GUI thread.  Lambda capture is fine — the worker
     // thread outlives the run_host_loop call.

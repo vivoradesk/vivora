@@ -2,6 +2,7 @@
 
 #include "app/host_platform.h"
 #include "host/encode/video_encoder.h"
+#include "host/session/host_approval_gate.h"
 
 #include <QObject>
 #include <QString>
@@ -32,6 +33,10 @@ struct HostWorkerConfig {
     uint32_t              display_index     = 0;   // mac/linux only
     int                   idle_timeout_min  = 0;   // 0 disables
     int                   idle_warning_sec  = 30;
+    // Optional approval gate (VIV-53).  When set, every new client
+    // lands Pending and the gate's callback fires on the worker
+    // thread so the GUI can raise the approval popup.
+    std::shared_ptr<vivora::host::HostApprovalGate> approval_gate;
 };
 
 // Owns a HostPlatform and runs run_host_loop on its own QThread.  The GUI

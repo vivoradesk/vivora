@@ -166,6 +166,38 @@ void HostSession::poll() {
             continue;
         }
 
+        // VIV-53 approval gate: latch transitions Pending → Approved /
+        // Rejected without re-querying the mutex on every send_frame.
+        if (approval_gate_ && client.handshake_complete && !client.approved) {
+            const uint64_t key = host::HostApprovalGate::make_key(addr.ip, addr.port);
+            const auto s = approval_gate_->get_state(key);
+            if (s == host::ApprovalState::Approved) {
+                client.approved = true;
+                client.idr_needed = true;   // fresh stream → start with keyframe
+                new_client_flag_ = true;    // host_loop fires the IDR encode
+                // Register the audio destination that was stashed at
+                // handshake completion but held back pending approval.
+                if (audio_sender_ && client.audio_port_pending != 0
+                    && !client.audio_registered) {
+                    client.audio_dest.ip   = addr.ip;
+                    client.audio_dest.port = client.audio_port_pending;
+                    audio_sender_->add_destination(client.audio_dest,
+                                                   &client.audio_send_cs);
+                    client.audio_registered = true;
+                    log::info("HostSession",
+                        "Audio destination registered (post-approval): %u.%u.%u.%u:%u",
+                        (addr.ip >> 0) & 0xFF, (addr.ip >> 8) & 0xFF,
+                        (addr.ip >> 16) & 0xFF, (addr.ip >> 24) & 0xFF,
+                        client.audio_port_pending);
+                }
+                log::info("HostSession", "Client approved — streaming starts");
+            } else if (s == host::ApprovalState::Rejected) {
+                log::info("HostSession", "Client rejected — disconnecting");
+                timed_out.push_back(addr);
+                continue;
+            }
+        }
+
         // Send periodic ping.
         auto since_ping = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - client.last_ping_time).count();
@@ -227,6 +259,9 @@ void HostSession::poll() {
                 audio_sender_->remove_destination(it->second.audio_dest);
             }
         }
+        if (approval_gate_) {
+            approval_gate_->forget(host::HostApprovalGate::make_key(addr.ip, addr.port));
+        }
         clients_.erase(addr);
     }
 
@@ -276,6 +311,7 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     int total = 0;
     for (auto& [addr, client] : clients_) {
         if (!client.handshake_complete) continue;
+        if (!client.approved) continue;   // VIV-53 approval gate
         int n = sender_->send_prepared(addr, &client.send_cs);
         if (n > 0) total += n;
     }
@@ -289,6 +325,7 @@ int HostSession::flush_video_fec(uint16_t frame_seq, uint32_t timestamp) {
     int total = 0;
     for (auto& [addr, client] : clients_) {
         if (!client.handshake_complete) continue;
+        if (!client.approved) continue;   // VIV-53 approval gate
         int n = sender_->send_prepared(addr, &client.send_cs);
         if (n > 0) total += n;
     }
@@ -433,7 +470,13 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             handle_pong(payload, payload_len, sender);
             break;
         case protocol::PacketType::Input:
-            handle_input(payload, payload_len);
+            // VIV-53: drop input from clients still awaiting approval.
+            // Without this gate the host's mouse/keyboard would jump
+            // around immediately on connect, before the user even saw
+            // the approval popup.
+            if (client && client->approved) {
+                handle_input(payload, payload_len);
+            }
             break;
         case protocol::PacketType::IdrRequest:
             client->idr_needed = true;
@@ -588,15 +631,51 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     state_ = SessionState::Connected;
     new_client_flag_ = true;
 
-    // Register audio destination if the client sent its audio port.
-    if (audio_sender_ && client_audio_port != 0) {
-        client.audio_dest.ip   = sender.ip;
-        client.audio_dest.port = client_audio_port;
-        audio_sender_->add_destination(client.audio_dest, &client.audio_send_cs);
-        log::info("HostSession", "Audio destination registered: %u.%u.%u.%u:%u",
-                  (client.audio_dest.ip >> 0) & 0xFF, (client.audio_dest.ip >> 8) & 0xFF,
-                  (client.audio_dest.ip >> 16) & 0xFF, (client.audio_dest.ip >> 24) & 0xFF,
-                  client_audio_port);
+    // VIV-53: connection approval gate.  When the GUI has installed
+    // one, every new client lands in Pending and won't receive video
+    // or audio frames until the user clicks Accept in the popup that
+    // the gate's callback raises.  audio_port is stashed in
+    // audio_port_pending and registered with AudioSender only once
+    // approval flips Approved (handled in poll()).
+    //
+    // CLI mode (no gate) or VIVORA_AUTO_ACCEPT=1 dev override → mark
+    // Approved immediately and register audio right here, matching
+    // pre-VIV-53 behaviour.
+    client.audio_port_pending = client_audio_port;
+    const bool dev_auto = std::getenv("VIVORA_AUTO_ACCEPT") != nullptr;
+    if (!approval_gate_ || dev_auto) {
+        client.approved = true;
+        if (audio_sender_ && client_audio_port != 0) {
+            client.audio_dest.ip   = sender.ip;
+            client.audio_dest.port = client_audio_port;
+            audio_sender_->add_destination(client.audio_dest, &client.audio_send_cs);
+            client.audio_registered = true;
+            log::info("HostSession", "Audio destination registered: %u.%u.%u.%u:%u",
+                      (client.audio_dest.ip >> 0) & 0xFF, (client.audio_dest.ip >> 8) & 0xFF,
+                      (client.audio_dest.ip >> 16) & 0xFF, (client.audio_dest.ip >> 24) & 0xFF,
+                      client_audio_port);
+        }
+        if (approval_gate_) approval_gate_->preapprove(
+            host::HostApprovalGate::make_key(sender.ip, sender.port));
+    } else {
+        // Pending — fire the popup.  Build display strings (peer code
+        // is derived from the client pubkey we just authenticated;
+        // pubkey_hex for fingerprint display in the dialog).
+        std::string peer_code, pubkey_hex;
+        // Pull pubkey from the just-completed handshake.  Noise_NK
+        // stores it via finalize → handshake is destroyed already, but
+        // we have the bytes in client.send_cs context (not exposed).
+        // Cheap workaround: rendezvous already serves the pubkey to
+        // peers as the code lookup key.  For now leave both empty and
+        // surface client IP only — Phase D will plumb the actual hex.
+        char ip[32];
+        std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u:%u",
+            (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
+            (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
+        approval_gate_->notify_pending(
+            host::HostApprovalGate::make_key(sender.ip, sender.port),
+            peer_code, pubkey_hex, ip);
+        log::info("HostSession", "Client %s awaiting approval", ip);
     }
 
     // BW probe is delayed by ~250ms (see poll()).  Sending it here would

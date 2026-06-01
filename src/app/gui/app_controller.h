@@ -2,6 +2,7 @@
 
 #include "app/gui/address_book.h"
 #include "app/gui/settings.h"
+#include "host/session/host_approval_gate.h"
 
 #include <QObject>
 #include <QString>
@@ -62,6 +63,12 @@ public slots:
     // Brings the main window back from the tray.  Wired from QML.
     void showMainWindow();
 
+    // VIV-53 connection approval — QML calls these from the
+    // ConnectionApprovalDialog buttons.  `key` is the per-client
+    // identifier the controller surfaced via connectionApprovalRequested.
+    Q_INVOKABLE void approveConnection(const QString& key);
+    Q_INVOKABLE void rejectConnection(const QString& key);
+
 signals:
     void sharingChanged();
     void clientCountChanged();
@@ -72,6 +79,14 @@ signals:
     void settingsRequested();
     // Bring the window to the foreground.
     void showWindowRequested();
+    // VIV-53: new client awaiting approval.  QML shows
+    // ConnectionApprovalDialog with these details.  key is a
+    // stringified address used to identify the client when the user
+    // clicks Accept / Reject.
+    void connectionApprovalRequested(QString key,
+                                     QString peerCode,
+                                     QString pubkeyHex,
+                                     QString ipPort);
 
 private:
     void loadIdentity();        // populates myPeerCode_ + myPubkeyHex_
@@ -79,6 +94,10 @@ private:
     std::unique_ptr<Settings>    settings_;
     std::unique_ptr<AddressBook> peers_;
     std::unique_ptr<HostWorker>  hostWorker_;
+    // Shared with the HostWorker thread.  Holds per-client approval
+    // state and the callback we wire to bounce notifications back into
+    // the GUI thread (where QML can show the approval dialog).
+    std::shared_ptr<vivora::host::HostApprovalGate> approvalGate_;
     // One ViewSession per "Connect to peer" click.  Owned here so the
     // stream window survives even when QML drops its reference.
     std::vector<std::unique_ptr<ViewSession>> viewSessions_;

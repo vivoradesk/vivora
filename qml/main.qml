@@ -32,6 +32,20 @@ ApplicationWindow {
         function onSettingsRequested() {
             settingsLoader.active = true
         }
+        function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort) {
+            // Raise the dialog on top.  Multiple concurrent pending
+            // clients would race to share the single Loader — for now
+            // the latest request wins (rare in practice; multi-pending
+            // is Phase D territory along with the queue UI).
+            approvalLoader.approvalKey = key
+            approvalLoader.peerCode    = peerCode
+            approvalLoader.pubkeyHex   = pubkeyHex
+            approvalLoader.ipPort      = ipPort
+            approvalLoader.active      = true
+            window.show()
+            window.raise()
+            window.requestActivate()
+        }
     }
 
     Loader {
@@ -52,6 +66,24 @@ ApplicationWindow {
             initialCode: addPeerLoader.pendingCode
             initialPubkey: addPeerLoader.pendingPubkey
             onClosed: addPeerLoader.active = false
+        }
+    }
+    Loader {
+        id: approvalLoader
+        active: false
+        property string approvalKey: ""
+        property string peerCode:    ""
+        property string pubkeyHex:   ""
+        property string ipPort:      ""
+        sourceComponent: ConnectionApprovalDialog {
+            visible: true
+            approvalKey: approvalLoader.approvalKey
+            peerCode:    approvalLoader.peerCode
+            pubkeyHex:   approvalLoader.pubkeyHex
+            ipPort:      approvalLoader.ipPort
+            onApproved: (key) => App.approveConnection(key)
+            onRejected: (key) => App.rejectConnection(key)
+            onClosed:   approvalLoader.active = false
         }
     }
 

@@ -21,6 +21,24 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     settings_   = std::make_unique<Settings>(this);
     peers_      = std::make_unique<AddressBook>(this);
     hostWorker_ = std::make_unique<HostWorker>(this);
+
+    // VIV-53 approval gate.  Lives here (shared_ptr) and gets handed
+    // to the worker via HostWorkerConfig.  The callback runs on the
+    // worker thread; we bounce to the GUI thread via QMetaObject so
+    // QML signals only ever fire from the GUI side.
+    approvalGate_ = std::make_shared<vivora::host::HostApprovalGate>();
+    approvalGate_->set_callback([this](uint64_t key,
+                                       const std::string& peer_code,
+                                       const std::string& pubkey_hex,
+                                       const std::string& ip_port) {
+        QString k        = QString::number(key);
+        QString code     = QString::fromStdString(peer_code);
+        QString pubkey   = QString::fromStdString(pubkey_hex);
+        QString ip       = QString::fromStdString(ip_port);
+        QMetaObject::invokeMethod(this, [this, k, code, pubkey, ip] {
+            emit connectionApprovalRequested(k, code, pubkey, ip);
+        }, Qt::QueuedConnection);
+    });
     connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
         sharing_     = false;
         clientCount_ = 0;
@@ -112,6 +130,7 @@ void AppController::startSharing() {
     wc.display_index      = settings_->displayIndex();
     wc.idle_timeout_min   = settings_->idleTimeoutMin();
     wc.idle_warning_sec   = settings_->idleWarningSec();
+    wc.approval_gate      = approvalGate_;
 
     sharing_     = true;
     clientCount_ = 0;
@@ -191,6 +210,26 @@ void AppController::openSettings() {
 
 void AppController::showMainWindow() {
     emit showWindowRequested();
+}
+
+void AppController::approveConnection(const QString& key) {
+    if (!approvalGate_) return;
+    bool ok = false;
+    uint64_t k = key.toULongLong(&ok);
+    if (!ok) return;
+    approvalGate_->set_state(k, vivora::host::ApprovalState::Approved);
+    log::info("AppController", "Approved connection key=%llu",
+              static_cast<unsigned long long>(k));
+}
+
+void AppController::rejectConnection(const QString& key) {
+    if (!approvalGate_) return;
+    bool ok = false;
+    uint64_t k = key.toULongLong(&ok);
+    if (!ok) return;
+    approvalGate_->set_state(k, vivora::host::ApprovalState::Rejected);
+    log::info("AppController", "Rejected connection key=%llu",
+              static_cast<unsigned long long>(k));
 }
 
 void AppController::quit() {
