@@ -18,8 +18,7 @@ Tray::Tray(QObject* parent) : QObject(parent) {
 
     menu_ = new QMenu();
     showAct_         = menu_->addAction("Show Vivora");
-    stopSharingAct_  = menu_->addAction("Stop sharing");
-    stopSharingAct_->setEnabled(false);
+    pauseResumeAct_  = menu_->addAction("Pause sharing");
     menu_->addSeparator();
     settingsAct_     = menu_->addAction("Settings…");
     menu_->addSeparator();
@@ -35,8 +34,16 @@ Tray::Tray(QObject* parent) : QObject(parent) {
             emit showRequested();
         }
     });
-    connect(showAct_,        &QAction::triggered, this, &Tray::showRequested);
-    connect(stopSharingAct_, &QAction::triggered, this, &Tray::stopSharingRequested);
+    connect(showAct_, &QAction::triggered, this, &Tray::showRequested);
+    connect(pauseResumeAct_, &QAction::triggered, this, [this] {
+        // setSharing flips the label every state change, so the current
+        // text tells us which signal to emit.
+        if (pauseResumeAct_->text().startsWith("Pause")) {
+            emit pauseRequested();
+        } else {
+            emit resumeRequested();
+        }
+    });
     connect(settingsAct_,    &QAction::triggered, this, &Tray::settingsRequested);
     connect(quitAct_,        &QAction::triggered, this, &Tray::quitRequested);
 }
@@ -46,11 +53,15 @@ Tray::~Tray() {
 }
 
 void Tray::setSharing(bool sharing, int clientCount) {
-    stopSharingAct_->setEnabled(sharing);
+    pauseResumeAct_->setText(sharing ? "Pause sharing" : "Resume sharing");
     QString tip = "Vivora";
     if (sharing) {
-        tip = QString("Vivora — sharing (%1 client%2)")
+        tip = clientCount == 0
+            ? QString("Vivora — available")
+            : QString("Vivora — sharing (%1 client%2)")
                 .arg(clientCount).arg(clientCount == 1 ? "" : "s");
+    } else {
+        tip = "Vivora — paused";
     }
     tray_->setToolTip(tip);
     // Visible state change — green sharing variant when at least one

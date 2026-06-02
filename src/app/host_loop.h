@@ -58,6 +58,11 @@ struct HostLoopConfig {
     // gate.set_state().  CLI mode leaves this null → all clients are
     // implicitly approved (matches pre-VIV-53 behaviour).
     std::shared_ptr<host::HostApprovalGate> approval_gate;
+
+    // VIV-53 Refresh button (GUI Phase B).  Setting this atomic
+    // forces an immediate rendezvous re-registration on the next
+    // poll iteration.  Cleared by the loop after firing.
+    std::atomic<bool>* rendezvous_refresh_flag = nullptr;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

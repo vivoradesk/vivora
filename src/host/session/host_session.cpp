@@ -278,12 +278,15 @@ void HostSession::poll() {
 
     // Refresh rendezvous registration well before TTL — TTL is 60s, send
     // every 30s so a single dropped keepalive doesn't drop us off the map.
+    // GUI Refresh button can also force-fire via request_rendezvous_refresh.
     if (rendezvous_addr_.ip != 0) {
+        const bool forced = rendezvous_refresh_pending_.exchange(false);
         auto since_rdv = std::chrono::duration_cast<std::chrono::seconds>(
             now - last_rdv_send_).count();
-        if (since_rdv >= RDV_KEEPALIVE_S) {
+        if (forced || since_rdv >= RDV_KEEPALIVE_S) {
             send_rendezvous_register();
             last_rdv_send_ = now;
+            if (forced) log::info("HostSession", "Forced rendezvous refresh");
         }
     }
 

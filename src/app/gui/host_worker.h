@@ -59,6 +59,14 @@ public:
     // shutdown).  Safe to call from the GUI thread.
     void stop();
 
+    // Force the next poll iteration to re-register with rendezvous,
+    // bypassing the 30 s pacing.  Wired to the GUI Refresh button so
+    // the user can prod the registration if they suspect the server
+    // forgot us.  No-op if no rendezvous configured.
+    void requestRendezvousRefresh() {
+        rendezvous_refresh_flag_.store(true, std::memory_order_release);
+    }
+
     bool running() const { return running_.load(std::memory_order_relaxed); }
     int  clientCount() const { return client_count_.load(std::memory_order_relaxed); }
     int  state() const       { return state_.load(std::memory_order_relaxed); }
@@ -86,6 +94,7 @@ private:
     std::atomic<int>                 client_count_{0};
     std::atomic<int>                 state_{0};
     std::atomic<bool>                running_{false};
+    std::atomic<bool>                rendezvous_refresh_flag_{false};
     std::unique_ptr<HostPlatform>    platform_;   // lives on worker thread
 };
 

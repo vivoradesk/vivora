@@ -10,6 +10,7 @@
 #include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
 #include "common/utils/types.h"
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -142,6 +143,13 @@ public:
     void set_approval_gate(std::shared_ptr<host::HostApprovalGate> gate) {
         approval_gate_ = std::move(gate);
     }
+
+    // Force an immediate rendezvous re-registration on the next poll
+    // iteration, bypassing the RDV_KEEPALIVE_S pacing.  Wired to the
+    // GUI Refresh button so the user can "kick" the registration if
+    // they suspect the server lost their entry.  Atomic flag — safe
+    // to set from any thread.
+    void request_rendezvous_refresh() { rendezvous_refresh_pending_ = true; }
 
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
@@ -281,6 +289,9 @@ private:
 
     // VIV-53 connection-approval gate (optional).  Set by GUI mode.
     std::shared_ptr<host::HostApprovalGate> approval_gate_;
+    // Force-refresh flag wired to the GUI Refresh button.  Atomic
+    // because the GUI thread writes and the worker thread reads.
+    std::atomic<bool> rendezvous_refresh_pending_{false};
 
     // Relay (v1: single concurrent client, manual session_id from CLI).
     net::SocketAddr relay_addr_{};

@@ -28,7 +28,8 @@ public:
 
 signals:
     void showRequested();        // double-click on icon, or "Show" menu entry
-    void stopSharingRequested();
+    void pauseRequested();       // user clicked "Pause sharing" in the menu
+    void resumeRequested();      // user clicked "Resume sharing" in the menu
     void settingsRequested();
     void quitRequested();
 
@@ -36,7 +37,7 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QMenu*           menu_ = nullptr;
     QAction*         showAct_         = nullptr;
-    QAction*         stopSharingAct_  = nullptr;
+    QAction*         pauseResumeAct_  = nullptr;
     QAction*         settingsAct_     = nullptr;
     QAction*         quitAct_         = nullptr;
 };

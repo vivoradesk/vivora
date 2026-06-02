@@ -26,6 +26,7 @@ QVariant AddressBook::data(const QModelIndex& idx, int role) const {
     case PubkeyRole:   return p.pubkeyHex;
     case CodeRole:     return p.lastPeerCode;
     case LastSeenRole: return p.lastSeen;
+    case DirectionRole: return static_cast<int>(p.lastDirection);
     case Qt::DisplayRole: return p.alias.isEmpty() ? p.lastPeerCode : p.alias;
     default: return {};
     }
@@ -33,21 +34,25 @@ QVariant AddressBook::data(const QModelIndex& idx, int role) const {
 
 QHash<int, QByteArray> AddressBook::roleNames() const {
     return {
-        {AliasRole,    "alias"},
-        {PubkeyRole,   "pubkey"},
-        {CodeRole,     "code"},
-        {LastSeenRole, "lastSeen"},
+        {AliasRole,     "alias"},
+        {PubkeyRole,    "pubkey"},
+        {CodeRole,      "code"},
+        {LastSeenRole,  "lastSeen"},
+        {DirectionRole, "direction"},
     };
 }
 
-void AddressBook::touch(const QString& pubkeyHex, const QString& lastPeerCode) {
+void AddressBook::applyTouch(const QString& pubkeyHex,
+                             const QString& lastPeerCode,
+                             PeerDirection dir) {
     if (pubkeyHex.isEmpty()) return;
-    // Update in place if we've met this peer before; otherwise append.
     for (int i = 0; i < peers_.size(); ++i) {
         if (peers_[i].pubkeyHex == pubkeyHex) {
             peers_[i].lastPeerCode = lastPeerCode;
             peers_[i].lastSeen     = QDateTime::currentDateTimeUtc();
-            emit dataChanged(index(i), index(i), {CodeRole, LastSeenRole, Qt::DisplayRole});
+            if (dir != PeerDirection::Unknown) peers_[i].lastDirection = dir;
+            emit dataChanged(index(i), index(i),
+                {CodeRole, LastSeenRole, DirectionRole, Qt::DisplayRole});
             save();
             return;
         }
@@ -56,10 +61,23 @@ void AddressBook::touch(const QString& pubkeyHex, const QString& lastPeerCode) {
     p.pubkeyHex     = pubkeyHex;
     p.lastPeerCode  = lastPeerCode;
     p.lastSeen      = QDateTime::currentDateTimeUtc();
+    p.lastDirection = dir;
     beginInsertRows({}, peers_.size(), peers_.size());
     peers_.push_back(p);
     endInsertRows();
     save();
+}
+
+void AddressBook::touch(const QString& pubkeyHex, const QString& lastPeerCode) {
+    applyTouch(pubkeyHex, lastPeerCode, PeerDirection::Unknown);
+}
+
+void AddressBook::touchOutgoing(const QString& pubkeyHex, const QString& lastPeerCode) {
+    applyTouch(pubkeyHex, lastPeerCode, PeerDirection::Outgoing);
+}
+
+void AddressBook::touchIncoming(const QString& pubkeyHex, const QString& lastPeerCode) {
+    applyTouch(pubkeyHex, lastPeerCode, PeerDirection::Incoming);
 }
 
 void AddressBook::setAlias(int row, const QString& alias) {
@@ -107,10 +125,11 @@ void AddressBook::load() {
         if (!v.isObject()) continue;
         const QJsonObject o = v.toObject();
         Peer p;
-        p.alias        = o.value("alias").toString();
-        p.pubkeyHex    = o.value("pubkey").toString();
-        p.lastPeerCode = o.value("code").toString();
-        p.lastSeen     = QDateTime::fromString(o.value("lastSeen").toString(), Qt::ISODate);
+        p.alias         = o.value("alias").toString();
+        p.pubkeyHex     = o.value("pubkey").toString();
+        p.lastPeerCode  = o.value("code").toString();
+        p.lastSeen      = QDateTime::fromString(o.value("lastSeen").toString(), Qt::ISODate);
+        p.lastDirection = static_cast<PeerDirection>(o.value("direction").toInt(0));
         if (!p.pubkeyHex.isEmpty()) peers_.push_back(p);
     }
 }
@@ -119,10 +138,11 @@ void AddressBook::save() const {
     QJsonArray arr;
     for (const auto& p : peers_) {
         QJsonObject o;
-        o["alias"]    = p.alias;
-        o["pubkey"]   = p.pubkeyHex;
-        o["code"]     = p.lastPeerCode;
-        o["lastSeen"] = p.lastSeen.toString(Qt::ISODate);
+        o["alias"]     = p.alias;
+        o["pubkey"]    = p.pubkeyHex;
+        o["code"]      = p.lastPeerCode;
+        o["lastSeen"]  = p.lastSeen.toString(Qt::ISODate);
+        o["direction"] = static_cast<int>(p.lastDirection);
         arr.append(o);
     }
     QFile f(filePath());

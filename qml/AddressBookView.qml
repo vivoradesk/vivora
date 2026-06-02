@@ -110,6 +110,7 @@ ListView {
         property string roleAlias:  model.alias   || ""
         property string roleCode:   model.code    || ""
         property string rolePubkey: model.pubkey  || ""
+        property int    roleDirection: model.direction || 0  // 0=unknown 1=out 2=in
         property string displayLabel: roleAlias.length > 0 ? roleAlias : roleCode
 
         RowLayout {
@@ -117,6 +118,14 @@ ListView {
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             spacing: 8
+
+            // Status dot (mirrors the mockup) — neutral grey for now;
+            // an "online" indicator hooks in once presence lands.
+            Rectangle {
+                width: 7; height: 7; radius: 4
+                color: "#9b9686"
+                Layout.alignment: Qt.AlignVCenter
+            }
 
             // Explicit text colour — without it macOS Dark mode QPalette
             // picks white-on-cream and the labels become unreadable on
@@ -134,6 +143,15 @@ ListView {
                 color: "#6b6b75"
                 font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
                 font.pointSize: 8
+            }
+            // Direction arrow: ↑ outgoing, ↓ incoming, blank for
+            // unknown / legacy entries.
+            Label {
+                text: row.roleDirection === 1 ? "↑"
+                       : (row.roleDirection === 2 ? "↓" : "")
+                color: "#6b6b75"
+                font.pixelSize: 12
+                Layout.alignment: Qt.AlignVCenter
             }
         }
 

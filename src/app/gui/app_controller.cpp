@@ -97,10 +97,11 @@ AppController::~AppController() = default;
 void AppController::setTray(Tray* tray) {
     tray_ = tray;
     if (!tray_) return;
-    connect(tray_, &Tray::showRequested,        this, &AppController::showMainWindow);
-    connect(tray_, &Tray::stopSharingRequested, this, &AppController::stopSharing);
-    connect(tray_, &Tray::settingsRequested,    this, &AppController::openSettings);
-    connect(tray_, &Tray::quitRequested,        this, &AppController::quit);
+    connect(tray_, &Tray::showRequested,     this, &AppController::showMainWindow);
+    connect(tray_, &Tray::pauseRequested,    this, &AppController::stopSharing);
+    connect(tray_, &Tray::resumeRequested,   this, &AppController::startSharing);
+    connect(tray_, &Tray::settingsRequested, this, &AppController::openSettings);
+    connect(tray_, &Tray::quitRequested,     this, &AppController::quit);
     tray_->setSharing(sharing_, clientCount_);
 }
 
@@ -191,7 +192,7 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     emit activeViewsChanged();
     // Pre-populate the address book so the peer shows up under Recent
     // once the session lands (real pubkey resolution happens later).
-    peers_->touch(peerCodeOrHex, peerCodeOrHex);
+    peers_->touchOutgoing(peerCodeOrHex, peerCodeOrHex);
 #else
     (void)peerCodeOrHex;
     log::warn("AppController", "Connect not yet implemented on this platform");
@@ -230,6 +231,13 @@ void AppController::rejectConnection(const QString& key) {
     approvalGate_->set_state(k, vivora::host::ApprovalState::Rejected);
     log::info("AppController", "Rejected connection key=%llu",
               static_cast<unsigned long long>(k));
+}
+
+void AppController::refreshRendezvous() {
+    if (hostWorker_) {
+        hostWorker_->requestRendezvousRefresh();
+        log::info("AppController", "Manual rendezvous refresh requested");
+    }
 }
 
 void AppController::quit() {

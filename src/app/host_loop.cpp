@@ -219,6 +219,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             break;
         }
 
+        // GUI Refresh button → force rendezvous re-register on next poll.
+        if (cfg.rendezvous_refresh_flag
+            && cfg.rendezvous_refresh_flag->exchange(false)) {
+            session.request_rendezvous_refresh();
+        }
+
         session.poll();
 
         // Auto-exit on "all clients disconnected" is CLI-only behaviour:

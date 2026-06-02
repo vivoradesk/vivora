@@ -234,8 +234,9 @@ ApplicationWindow {
                     font.bold: true
                 }
                 Item { Layout.fillWidth: true }
-                // WAITING countdown — Phase D will tie this to ephemeral
-                // code rotation TTL.  Placeholder for now.
+                // "WAITING" badge — no countdown until ephemeral code
+                // rotation lands server-side (VIV-XX).  For now just
+                // indicates that we're listening with no client.
                 RowLayout {
                     visible: App.sharing && App.clientCount === 0
                     spacing: 5
@@ -249,16 +250,6 @@ ApplicationWindow {
                         font.pixelSize: 10
                         font.letterSpacing: 1
                         font.bold: true
-                    }
-                    Label {
-                        text: "·"
-                        color: theme.textMuted
-                    }
-                    Label {
-                        text: "—"  // placeholder until Phase D
-                        color: theme.textMuted
-                        font.pixelSize: 11
-                        font.family: theme.monoFont
                     }
                 }
                 RowLayout {
@@ -314,7 +305,10 @@ ApplicationWindow {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: clipboardHelper.copy(App.myPeerCode)
+                            onClicked: {
+                                clipboardHelper.copy(App.myPeerCode)
+                                window.showToast("Code copied")
+                            }
                         }
                     }
                 }
@@ -348,46 +342,24 @@ ApplicationWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: clipboardHelper.copy(App.myPubkeyHex)
+                        onClicked: {
+                            clipboardHelper.copy(App.myPubkeyHex)
+                            window.showToast("Pubkey copied")
+                        }
                     }
                 }
             }
 
-            // 4-button action row: Link / QR / Refresh / Pause
-            RowLayout {
+            // Pause button.  Link (needs web + vivora:// deeplink) and QR
+            // (needs the mobile client + feature/qr-overlay merge) are
+            // deferred — shipping dead buttons confuses users, so the
+            // action row is just Pause until those backends land.
+            AppButton {
                 Layout.fillWidth: true
-                spacing: 8
                 visible: App.sharing
-                Repeater {
-                    model: [
-                        { glyph: "🔗", label: "Link",    width: 0 },
-                        { glyph: "▦",  label: "QR",      width: 0 },
-                        { glyph: "↻",  label: "",        width: 44 },
-                        { glyph: "⏸",  label: "",        width: 44 }
-                    ]
-                    delegate: AppButton {
-                        Layout.fillWidth: modelData.width === 0
-                        Layout.preferredWidth: modelData.width || -1
-                        glyph: modelData.glyph
-                        label: modelData.label
-                        onClicked: {
-                            if (modelData.label === "Link") {
-                                // Phase E will land a real short URL.  For
-                                // now just copy a vivora.dev/c/<code>
-                                // placeholder so users get something useful.
-                                clipboardHelper.copy("https://vivora.dev/c/" + App.myPeerCode)
-                            } else if (modelData.glyph === "⏸") {
-                                // Pause = deregister from rendezvous + tear
-                                // down host loop.  Resume via the CTA that
-                                // replaces this card when App.sharing is
-                                // false.
-                                App.stopSharing()
-                            }
-                            // QR (Phase E) and Refresh (Phase D) stay
-                            // no-op until those phases land.
-                        }
-                    }
-                }
+                glyph: "⏸"
+                label: "Pause sharing"
+                onClicked: App.stopSharing()
             }
 
             }  // hostCard ColumnLayout
@@ -520,6 +492,40 @@ ApplicationWindow {
                 Layout.preferredWidth: 80
                 onClicked: window.hide()
             }
+        }
+    }
+
+    // Transient toast — bottom-centre confirmation for actions that
+    // otherwise give no visual feedback (copy, refresh).  showToast(text)
+    // pops it for ~1.6s then fades.
+    function showToast(text) {
+        toast.text = text
+        toast.opacity = 1.0
+        toastTimer.restart()
+    }
+    Rectangle {
+        id: toast
+        property alias text: toastLabel.text
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 56
+        width: toastLabel.implicitWidth + 28
+        height: toastLabel.implicitHeight + 16
+        radius: height / 2
+        color: "#15151a"
+        opacity: 0.0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: 250 } }
+        Label {
+            id: toastLabel
+            anchors.centerIn: parent
+            color: "#ffffff"
+            font.pixelSize: 12
+        }
+        Timer {
+            id: toastTimer
+            interval: 1600
+            onTriggered: toast.opacity = 0.0
         }
     }
 

@@ -69,6 +69,10 @@ public slots:
     Q_INVOKABLE void approveConnection(const QString& key);
     Q_INVOKABLE void rejectConnection(const QString& key);
 
+    // Force an immediate rendezvous re-registration.  QML calls this
+    // from the Refresh button in the sharing card.
+    Q_INVOKABLE void refreshRendezvous();
+
 signals:
     void sharingChanged();
     void clientCountChanged();
