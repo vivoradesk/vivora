@@ -6,190 +6,741 @@ import QtQuick.Window
 
 Window {
     id: dlg
-    width: 600
-    height: 540
-    minimumWidth: 480
-    minimumHeight: 420
+    width: 720
+    height: 600
+    minimumWidth: 640
+    minimumHeight: 480
     title: "Vivora — Settings"
+    color: theme.bg
 
     signal closed()
-
     onVisibleChanged: if (!visible) closed()
 
-    TabBar {
-        id: bar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        TabButton { text: "General" }
-        TabButton { text: "Network" }
-        TabButton { text: "Capture" }
-        TabButton { text: "Idle"    }
+    // Local theme — mirrors main.qml (no shared QML singleton yet).
+    QtObject {
+        id: theme
+        // Palette tuned toward the mockup — warmer-neutral, less yellow.
+        readonly property color bg:        "#efece3"   // panel background
+        readonly property color sidebar:   "#e8e3d6"   // slightly darker sidebar
+        readonly property color hoverBg:   "#ded8c8"   // row / button hover
+        readonly property color ctrlBg:    "#fbfaf5"   // near-white control fill
+        readonly property color selected:  "#1a1a1f"   // selected sidebar item
+        readonly property color selFg:     "#ffffff"
+        readonly property color text:      "#1a1a1f"
+        readonly property color textMuted: "#6f6b60"
+        readonly property color border:    "#d4cdba"
+        readonly property color accent:    "#3D6BFA"
+        readonly property string monoFont: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
     }
 
-    StackLayout {
-        anchors.top: bar.bottom
-        anchors.bottom: footer.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: 16
-        currentIndex: bar.currentIndex
+    property int currentIndex: 3   // default to Network (most-used)
 
-        // ── General ────────────────────────────────────────────────
-        ColumnLayout {
-            spacing: 12
-            CheckBox {
-                text: "Start sharing automatically on launch"
-                checked: App.settings.startSharingOnLaunch
-                onToggled: App.settings.startSharingOnLaunch = checked
-            }
-            CheckBox {
-                text: "Minimize to tray on window close"
-                checked: App.settings.minimizeToTray
-                onToggled: App.settings.minimizeToTray = checked
-            }
-            CheckBox {
-                text: "Start at login (TODO: wire to OS auto-start)"
-                enabled: false
-                checked: App.settings.startAtLogin
-                onToggled: App.settings.startAtLogin = checked
-            }
-            Item { Layout.fillHeight: true }
+    // Sidebar model: section headers + items.  `header` rows are
+    // non-selectable group labels; `index` rows map to the panel stack.
+    // Monochrome glyphs only — colour-emoji codepoints (🔗 etc.) force
+    // emoji presentation and clash with the flat sidebar.  The ︎
+    // variation selector pins any emoji-capable glyph to text style.
+    readonly property var navModel: [
+        { header: "GENERAL" },
+        { icon: "◐", label: "Account",          index: 0 },
+        { icon: "▢", label: "Appearance",       index: 1 },
+        { icon: "⌘", label: "Shortcuts",        index: 2 },
+        { header: "SESSION" },
+        { icon: "⇄", label: "Network",          index: 3 },
+        { icon: "▤", label: "Codec",            index: 4 },
+        { icon: "✓", label: "Security",         index: 5 },
+        { header: "ADVANCED" },
+        { icon: "∞", label: "Self-hosted relay", index: 6 },
+        { icon: "ⓘ", label: "About",            index: 7 }
+    ]
+
+    // Helper components ----------------------------------------------------
+
+    component SectionTitle: ColumnLayout {
+        property string title: ""
+        property string subtitle: ""
+        Layout.fillWidth: true
+        spacing: 4
+        Label {
+            text: title
+            color: theme.text
+            font.pixelSize: 22
+            font.bold: true
         }
+        Label {
+            text: subtitle
+            visible: subtitle.length > 0
+            color: theme.textMuted
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.bottomMargin: 8
+        }
+    }
 
-        // ── Network ────────────────────────────────────────────────
-        GridLayout {
-            columns: 2
-            columnSpacing: 12
-            rowSpacing: 8
-
-            Label { text: "Rendezvous (host:port):" }
-            TextField {
+    // A labelled row: title + helper text on the left, control(s) on the
+    // right.  Mirrors the mockup's two-column field layout.  Controls
+    // injected by the caller land in the inner `ctrl` RowLayout, so they
+    // MUST size via Layout.preferredWidth (plain `width:` is ignored by
+    // the layout).  A trailing spacer keeps them left-aligned.
+    component Field: RowLayout {
+        property string title: ""
+        property string help: ""
+        default property alias control: ctrl.data
+        Layout.fillWidth: true
+        Layout.topMargin: 12
+        spacing: 16
+        ColumnLayout {
+            Layout.preferredWidth: 180
+            Layout.alignment: Qt.AlignTop
+            spacing: 2
+            Label {
+                text: title
+                color: theme.text
+                font.pixelSize: 13
+                font.bold: true
+                wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                placeholderText: "rdv.vivora.dev:7000"
-                text: App.settings.rendezvous
-                onEditingFinished: App.settings.rendezvous = text
             }
-
-            Label { text: "Relay (host:port):" }
-            TextField {
+            Label {
+                text: help
+                visible: help.length > 0
+                color: theme.textMuted
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                placeholderText: "relay.vivora.dev:7100"
-                text: App.settings.relay
-                onEditingFinished: App.settings.relay = text
             }
+        }
+        // Controls left-align into a single column at a fixed offset
+        // (right after the 180px label column) so they don't jump with
+        // window width.  The RowLayout still fills width, leaving the
+        // empty space on the right.
+        RowLayout {
+            id: ctrl
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
+            spacing: 6
+        }
+    }
 
-            Label { text: "License token file:" }
-            RowLayout {
-                Layout.fillWidth: true
-                TextField {
-                    Layout.fillWidth: true
-                    text: App.settings.licenseFile
-                    onEditingFinished: App.settings.licenseFile = text
+    component CreamField: TextField {
+        implicitHeight: 38            // match combo / spin / browse height
+        color: theme.text
+        placeholderTextColor: theme.textMuted
+        verticalAlignment: TextInput.AlignVCenter
+        leftPadding: 12
+        selectByMouse: true
+        selectionColor: theme.accent
+        selectedTextColor: "#ffffff"
+        font.pixelSize: 13
+        background: Rectangle {
+            color: theme.ctrlBg
+            border.color: parent.activeFocus ? theme.accent : theme.border
+            border.width: 1
+            radius: 8
+        }
+    }
+
+    // Cream-styled combo box.  `entries` is an array of
+    // { text, sub?, badge? } — sub shows mono after a · separator,
+    // badge shows small-caps at the row's right edge.  Selected row
+    // gets a leading ✓.
+    component CreamCombo: ComboBox {
+        id: combo
+        property var entries: []
+        Layout.preferredWidth: 250
+        model: entries
+        textRole: "text"
+        font.pixelSize: 13
+
+        contentItem: Label {
+            leftPadding: 12
+            rightPadding: 34
+            text: combo.displayText
+            color: theme.text
+            font.pixelSize: 13
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+        background: Rectangle {
+            implicitHeight: 38
+            color: theme.ctrlBg
+            border.color: combo.activeFocus || combo.hovered ? theme.accent : theme.border
+            border.width: 1
+            radius: 8
+        }
+        indicator: Label {
+            x: combo.width - width - 12
+            y: (combo.height - height) / 2
+            text: combo.popup.visible ? "▲" : "▼"
+            color: theme.textMuted
+            font.pixelSize: 9
+        }
+        delegate: ItemDelegate {
+            width: combo.width
+            height: (modelData.sub !== undefined && modelData.sub.length > 0) ? 46 : 38
+            highlighted: combo.highlightedIndex === index
+            background: Rectangle {
+                color: highlighted ? theme.hoverBg : "transparent"
+                radius: 6
+            }
+            contentItem: RowLayout {
+                spacing: 6
+                Label {
+                    text: combo.currentIndex === index ? "✓" : "   "
+                    color: theme.text
+                    font.pixelSize: 12
+                    Layout.preferredWidth: 14
                 }
-                Button {
-                    text: "Browse…"
-                    onClicked: licenseDlg.open()
-                }
-            }
-            FileDialog {
-                id: licenseDlg
-                title: "Select license token"
-                onAccepted: App.settings.licenseFile = selectedFile.toString().replace("file:///", "")
-            }
-
-            Label { text: "STUN server:" }
-            TextField {
-                Layout.fillWidth: true
-                placeholderText: "stun.l.google.com:19302"
-                text: App.settings.stunServer
-                onEditingFinished: App.settings.stunServer = text
-            }
-
-            Label { text: "Host UDP port:" }
-            RowLayout {
-                Layout.fillWidth: true
-                SpinBox {
+                ColumnLayout {
+                    spacing: 0
                     Layout.fillWidth: true
-                    from: 1024; to: 65535; value: App.settings.hostPort
-                    editable: true
-                    onValueModified: App.settings.hostPort = value
+                    RowLayout {
+                        spacing: 6
+                        Label {
+                            text: modelData.text
+                            color: theme.text
+                            font.pixelSize: 13
+                            font.bold: combo.currentIndex === index
+                        }
+                        Label {
+                            visible: modelData.sub !== undefined && modelData.sub.length > 0
+                            text: modelData.sub !== undefined ? "· " + modelData.sub : ""
+                            color: theme.textMuted
+                            font.pixelSize: 11
+                            font.family: theme.monoFont
+                        }
+                    }
                 }
                 Label {
-                    text: "(viewer must use --port " + App.settings.hostPort + ")"
-                    opacity: 0.6
-                    font.italic: true
+                    visible: modelData.badge !== undefined && modelData.badge.length > 0
+                    text: modelData.badge !== undefined ? modelData.badge : ""
+                    color: theme.textMuted
+                    font.pixelSize: 10
+                    font.letterSpacing: 1
                 }
             }
-            Item { Layout.columnSpan: 2; Layout.fillHeight: true }
         }
-
-        // ── Capture ────────────────────────────────────────────────
-        GridLayout {
-            columns: 2
-            columnSpacing: 12
-            rowSpacing: 8
-
-            Label { text: "Codec:" }
-            ComboBox {
-                Layout.fillWidth: true
-                model: ["H.264", "HEVC"]
-                currentIndex: App.settings.codecIndex
-                onActivated: App.settings.codecIndex = currentIndex
+        popup: Popup {
+            y: combo.height + 4
+            width: combo.width
+            implicitHeight: Math.min(contentItem.implicitHeight + 12, 320)
+            padding: 6
+            background: Rectangle {
+                color: theme.ctrlBg
+                border.color: theme.border
+                border.width: 1
+                radius: 10
             }
-
-            Label { text: "Encoder:" }
-            ComboBox {
-                Layout.fillWidth: true
-                model: ["Auto", "AMD (AMF)", "NVIDIA (NVENC)", "Intel (QSV)"]
-                currentIndex: App.settings.encoderIndex
-                onActivated: App.settings.encoderIndex = currentIndex
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: combo.popup.visible ? combo.delegateModel : null
+                currentIndex: combo.highlightedIndex
+                ScrollIndicator.vertical: ScrollIndicator {}
             }
-
-            Label { text: "Bitrate (Mbps, 0 = auto):" }
-            SpinBox {
-                Layout.fillWidth: true
-                from: 0; to: 200; value: App.settings.bitrateMbps
-                onValueModified: App.settings.bitrateMbps = value
-            }
-
-            Label { text: "Display index:" }
-            SpinBox {
-                Layout.fillWidth: true
-                from: 0; to: 8; value: App.settings.displayIndex
-                onValueModified: App.settings.displayIndex = value
-            }
-            Item { Layout.columnSpan: 2; Layout.fillHeight: true }
-        }
-
-        // ── Idle ───────────────────────────────────────────────────
-        GridLayout {
-            columns: 2
-            columnSpacing: 12
-            rowSpacing: 8
-
-            Label { text: "Disconnect after idle (minutes):" }
-            SpinBox {
-                Layout.fillWidth: true
-                from: 1; to: 120; value: App.settings.idleTimeoutMin
-                onValueModified: App.settings.idleTimeoutMin = value
-            }
-
-            Label { text: "Warning before disconnect (seconds):" }
-            SpinBox {
-                Layout.fillWidth: true
-                from: 5; to: 120; value: App.settings.idleWarningSec
-                onValueModified: App.settings.idleWarningSec = value
-            }
-            Item { Layout.columnSpan: 2; Layout.fillHeight: true }
         }
     }
 
+    // Cream-styled stepper: [−] value [+].  (Inline components can't be
+    // nested, so the two step buttons are spelled out rather than shared.)
+    component CreamSpin: RowLayout {
+        id: spin
+        property int from: 0
+        property int to: 100
+        property int value: 0
+        signal modified(int v)
+        spacing: 0
+
+        // Decrement — rounded on the left edge only, joins the value
+        // cell on the right (per-corner radius is Qt 6.7+).
+        Rectangle {
+            implicitWidth: 38; implicitHeight: 38
+            topLeftRadius: 8; bottomLeftRadius: 8
+            topRightRadius: 0; bottomRightRadius: 0
+            color: decHover.hovered ? theme.hoverBg : theme.ctrlBg
+            border.color: theme.border
+            border.width: 1
+            HoverHandler { id: decHover }
+            Label { anchors.centerIn: parent; text: "−"; color: theme.text; font.pixelSize: 16 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: { var nv = Math.max(spin.from, spin.value - 1); if (nv !== spin.value) spin.modified(nv) }
+            }
+        }
+        // Value cell — flat, shares edges with the buttons.  -1 left
+        // margin overlaps the borders so the divider is a single line.
+        Rectangle {
+            implicitWidth: 56; implicitHeight: 38
+            Layout.leftMargin: -1
+            Layout.rightMargin: -1
+            color: theme.ctrlBg
+            border.color: theme.border
+            border.width: 1
+            Label {
+                anchors.centerIn: parent
+                text: spin.value
+                color: theme.text
+                font.pixelSize: 13
+                font.family: theme.monoFont
+            }
+        }
+        // Increment — rounded on the right edge only.
+        Rectangle {
+            implicitWidth: 38; implicitHeight: 38
+            topLeftRadius: 0; bottomLeftRadius: 0
+            topRightRadius: 8; bottomRightRadius: 8
+            color: incHover.hovered ? theme.hoverBg : theme.ctrlBg
+            border.color: theme.border
+            border.width: 1
+            HoverHandler { id: incHover }
+            Label { anchors.centerIn: parent; text: "+"; color: theme.text; font.pixelSize: 16 }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: { var nv = Math.min(spin.to, spin.value + 1); if (nv !== spin.value) spin.modified(nv) }
+            }
+        }
+    }
+
+    // Cream toggle switch.
+    component CreamSwitch: Switch {
+        // Use default Switch behaviour; just recolour the groove/handle.
+    }
+
+    // Layout ---------------------------------------------------------------
+
     RowLayout {
-        id: footer
-        anchors.bottom: parent.bottom
-        anchors.right: parent.right
-        anchors.margins: 12
-        Button { text: "Close"; onClicked: dlg.close() }
+        anchors.fill: parent
+        spacing: 0
+
+        // ── Sidebar ──────────────────────────────────────────────────
+        Rectangle {
+            Layout.fillHeight: true
+            Layout.preferredWidth: 170
+            color: theme.sidebar
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.topMargin: 14
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 2
+
+                Repeater {
+                    model: dlg.navModel
+                    delegate: Item {
+                        Layout.fillWidth: true
+                        implicitHeight: modelData.header !== undefined ? 28 : 32
+
+                        // Group header row
+                        Label {
+                            visible: modelData.header !== undefined
+                            text: modelData.header || ""
+                            color: theme.textMuted
+                            font.pixelSize: 10
+                            font.bold: true
+                            font.letterSpacing: 1
+                            anchors.left: parent.left
+                            anchors.leftMargin: 6
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 4
+                        }
+
+                        // Selectable item row
+                        Rectangle {
+                            visible: modelData.index !== undefined
+                            anchors.fill: parent
+                            radius: 7
+                            color: modelData.index === dlg.currentIndex
+                                     ? theme.selected
+                                     : (itemHover.hovered ? theme.hoverBg : "transparent")
+                            HoverHandler { id: itemHover }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+                                Label {
+                                    text: modelData.icon || ""
+                                    color: modelData.index === dlg.currentIndex ? theme.selFg : theme.textMuted
+                                    font.pixelSize: 13
+                                    // Fixed width + centred so the variable-
+                                    // width glyphs don't shift the labels.
+                                    Layout.preferredWidth: 18
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                                Label {
+                                    text: modelData.label || ""
+                                    color: modelData.index === dlg.currentIndex ? theme.selFg : theme.text
+                                    font.pixelSize: 13
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: dlg.currentIndex = modelData.index
+                            }
+                        }
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+        }
+
+        // ── Panel ────────────────────────────────────────────────────
+        Flickable {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            contentHeight: panelStack.implicitHeight + 56
+            clip: true
+            ScrollBar.vertical: ScrollBar {}
+
+            StackLayout {
+                id: panelStack
+                width: parent.width - 56
+                x: 28
+                y: 28
+                currentIndex: dlg.currentIndex
+
+                // ── 0: Account ───────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Account"
+                        subtitle: "Sign in to sync your devices and unlock Pro features."
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 12
+                        Layout.preferredHeight: 110
+                        color: "#e6dec8"
+                        radius: 10
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label {
+                                text: "Not signed in"
+                                color: theme.text
+                                font.bold: true
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Label {
+                                text: "Pro accounts arrive with cloud sync and managed relay."
+                                color: theme.textMuted
+                                font.pixelSize: 11
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Button {
+                                text: "Sign in (coming soon)"
+                                enabled: false
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                        }
+                    }
+                }
+
+                // ── 1: Appearance ────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Appearance"
+                        subtitle: "How Vivora looks. Dark and system themes are on the way."
+                    }
+                    Field {
+                        title: "Theme"
+                        help: "Light is the only theme today."
+                        CreamCombo {
+                            enabled: false
+                            entries: [ { text: "Light" },
+                                       { text: "Dark", sub: "soon" },
+                                       { text: "System", sub: "soon" } ]
+                            currentIndex: App.settings.theme
+                            onActivated: App.settings.theme = currentIndex
+                        }
+                    }
+                }
+
+                // ── 2: Shortcuts ─────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Shortcuts"
+                        subtitle: "Keyboard shortcuts. Customisation lands with the hotkey engine."
+                    }
+                    Field {
+                        title: "Toggle fullscreen"
+                        help: "In an active stream window."
+                        Label { text: "F11"; color: theme.text; font.family: theme.monoFont }
+                    }
+                    Field {
+                        title: "Toggle HUD"
+                        help: "Latency / FPS overlay."
+                        Label { text: "F9"; color: theme.text; font.family: theme.monoFont }
+                    }
+                }
+
+                // ── 3: Network ───────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Network"
+                        subtitle: "How Vivora reaches your peers. Defaults are tuned for low-latency LAN; tweak only if you know what you need."
+                    }
+                    Field {
+                        title: "Rendezvous server"
+                        help: "Where peers find each other by code."
+                        CreamField {
+                            Layout.preferredWidth: 220
+                            placeholderText: "rdv.vivora.dev:7000"
+                            text: App.settings.rendezvous
+                            onEditingFinished: App.settings.rendezvous = text
+                        }
+                    }
+                    Field {
+                        title: "STUN server"
+                        help: "Discovers your public address for hole-punching."
+                        CreamField {
+                            Layout.preferredWidth: 220
+                            placeholderText: "stun.l.google.com:19302"
+                            text: App.settings.stunServer
+                            onEditingFinished: App.settings.stunServer = text
+                        }
+                    }
+                    Field {
+                        title: "Host UDP port"
+                        help: "The port Vivora binds for incoming streams."
+                        CreamField {
+                            Layout.preferredWidth: 110
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            text: App.settings.hostPort
+                            onEditingFinished: {
+                                var v = parseInt(text)
+                                if (v >= 1024 && v <= 65535) App.settings.hostPort = v
+                                else text = App.settings.hostPort
+                            }
+                        }
+                    }
+                }
+
+                // ── 4: Codec ─────────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Codec"
+                        subtitle: "Video encoding. Auto picks the best available hardware encoder."
+                    }
+                    Field {
+                        title: "Codec"
+                        help: "HEVC is smaller; H.264 is most compatible."
+                        CreamCombo {
+                            entries: [ { text: "H.264", sub: "most compatible" },
+                                       { text: "HEVC",  sub: "H.265", badge: "HW" } ]
+                            currentIndex: App.settings.codecIndex
+                            onActivated: App.settings.codecIndex = currentIndex
+                        }
+                    }
+                    Field {
+                        title: "Encoder"
+                        help: "Hardware encoder backend."
+                        CreamCombo {
+                            entries: [ { text: "Auto" },
+                                       { text: "AMD",    sub: "AMF" },
+                                       { text: "NVIDIA", sub: "NVENC" },
+                                       { text: "Intel",  sub: "QSV" } ]
+                            currentIndex: App.settings.encoderIndex
+                            onActivated: App.settings.encoderIndex = currentIndex
+                        }
+                    }
+                    Field {
+                        title: "Bitrate"
+                        help: "Megabits/sec. 0 = automatic from resolution."
+                        CreamSpin {
+                            from: 0; to: 200
+                            value: App.settings.bitrateMbps
+                            onModified: (v) => App.settings.bitrateMbps = v
+                        }
+                    }
+                    Field {
+                        title: "Display"
+                        help: "Which monitor to capture (host)."
+                        CreamSpin {
+                            from: 0; to: 8
+                            value: App.settings.displayIndex
+                            onModified: (v) => App.settings.displayIndex = v
+                        }
+                    }
+                    Field {
+                        title: "HDR passthrough"
+                        help: "Stream HDR10 metadata when the host display supports it."
+                        CreamSwitch {
+                            checked: App.settings.hdrPassthrough
+                            onToggled: App.settings.hdrPassthrough = checked
+                        }
+                    }
+                }
+
+                // ── 5: Security ──────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Security"
+                        subtitle: "Who can connect to your desktop, and how connections are approved."
+                    }
+                    Field {
+                        title: "Approve connections"
+                        help: "What happens when someone connects with your code."
+                        CreamCombo {
+                            Layout.preferredWidth: 250
+                            entries: [ { text: "Always ask" },
+                                       { text: "Ask for unknown only" },
+                                       { text: "Auto-accept", sub: "advanced" } ]
+                            currentIndex: App.settings.approvalMode
+                            onActivated: App.settings.approvalMode = currentIndex
+                        }
+                    }
+                    Field {
+                        title: "One session at a time"
+                        help: "Reject new connections while a session is active."
+                        CreamSwitch {
+                            checked: App.settings.singleSessionLock
+                            onToggled: App.settings.singleSessionLock = checked
+                        }
+                    }
+                    Field {
+                        title: "Idle disconnect"
+                        help: "Disconnect viewers after this many minutes of no input."
+                        CreamSpin {
+                            from: 1; to: 120
+                            value: App.settings.idleTimeoutMin
+                            onModified: (v) => App.settings.idleTimeoutMin = v
+                        }
+                    }
+                    Field {
+                        title: "Your pubkey"
+                        help: "Share out-of-band to let peers verify it's really you."
+                        Label {
+                            text: App.myPubkeyHex.length > 12
+                                  ? "ED25:" + App.myPubkeyHex.substring(0,6) + "…" + App.myPubkeyHex.substring(App.myPubkeyHex.length-4)
+                                  : "—"
+                            color: theme.text
+                            font.family: theme.monoFont
+                            font.pixelSize: 13
+                        }
+                    }
+                }
+
+                // ── 6: Self-hosted relay ─────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Self-hosted relay"
+                        subtitle: "Run your own relay for full sovereignty. Leave blank to use the Vivora-managed relay."
+                    }
+                    Field {
+                        title: "Relay server"
+                        help: "host:port of your relay daemon."
+                        CreamField {
+                            Layout.preferredWidth: 220
+                            placeholderText: "relay.vivora.dev:7100"
+                            text: App.settings.relay
+                            onEditingFinished: App.settings.relay = text
+                        }
+                    }
+                    Field {
+                        title: "License token"
+                        help: "Required by the managed relay; not by self-hosted."
+                        RowLayout {
+                            Layout.preferredWidth: 260
+                            spacing: 6
+                            CreamField {
+                                Layout.fillWidth: true
+                                text: App.settings.licenseFile
+                                onEditingFinished: App.settings.licenseFile = text
+                            }
+                            // Cream-styled browse button to match the rest
+                            // of the panel (default Qt Button is a grey
+                            // pill that clashes).
+                            Rectangle {
+                                Layout.preferredWidth: 40
+                                Layout.preferredHeight: 38
+                                radius: 8
+                                color: browseHover.hovered ? theme.hoverBg : theme.ctrlBg
+                                border.color: theme.border
+                                border.width: 1
+                                HoverHandler { id: browseHover }
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: "…"
+                                    color: theme.text
+                                    font.pixelSize: 16
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: licenseDlg.open()
+                                }
+                            }
+                        }
+                    }
+                    FileDialog {
+                        id: licenseDlg
+                        title: "Select license token"
+                        onAccepted: App.settings.licenseFile =
+                            selectedFile.toString().replace("file:///", "")
+                    }
+                }
+
+                // ── 7: About ─────────────────────────────────────────
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "About Vivora"
+                        subtitle: "Open-source, low-latency remote desktop."
+                    }
+                    Field {
+                        title: "Version"
+                        Label { text: "0.1.0"; color: theme.text; font.family: theme.monoFont }
+                    }
+                    Field {
+                        title: "Peer code"
+                        Label { text: App.myPeerCode; color: theme.text; font.family: theme.monoFont }
+                    }
+                    Field {
+                        title: "License"
+                        help: "Client + rendezvous + relay are AGPL-3.0."
+                        Label { text: "AGPL-3.0"; color: theme.text }
+                    }
+                    Field {
+                        title: "Links"
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: "github.com/vivoradesk/vivora"
+                                color: theme.accent
+                                font.pixelSize: 12
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://github.com/vivoradesk/vivora")
+                                }
+                            }
+                            Label {
+                                text: "vivora.dev"
+                                color: theme.accent
+                                font.pixelSize: 12
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Qt.openUrlExternally("https://vivora.dev")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

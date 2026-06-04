@@ -19,6 +19,10 @@ constexpr const char* K_IDLE_WARNING_SEC   = "idle/warningSec";
 constexpr const char* K_START_SHARING      = "general/startSharingOnLaunch";
 constexpr const char* K_MIN_TO_TRAY        = "general/minimizeToTray";
 constexpr const char* K_START_AT_LOGIN     = "general/startAtLogin";
+constexpr const char* K_APPROVAL_MODE      = "security/approvalMode";
+constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
+constexpr const char* K_THEME              = "appearance/theme";
+constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
 
 // Defaults.  Pre-fill rendezvous + relay with the Vivora-managed public
 // endpoints so a fresh install talks to the same infra the CLI uses by
@@ -43,6 +47,10 @@ constexpr int   DEF_IDLE_WARNING_SEC = 30;
 constexpr bool  DEF_START_SHARING    = false;
 constexpr bool  DEF_MIN_TO_TRAY      = true;
 constexpr bool  DEF_START_AT_LOGIN   = false;
+constexpr int   DEF_APPROVAL_MODE    = 0;   // always_prompt — safest default
+constexpr bool  DEF_SINGLE_SESSION   = false;
+constexpr int   DEF_THEME            = 0;   // light
+constexpr bool  DEF_HDR_PASSTHROUGH  = true;
 } // namespace
 
 Settings::Settings(QObject* parent)
@@ -96,5 +104,17 @@ void Settings::setMinimizeToTray(bool v)      { if (v != minimizeToTray()) { q_.
 
 bool Settings::startAtLogin() const           { return q_.value(K_START_AT_LOGIN, DEF_START_AT_LOGIN).toBool(); }
 void Settings::setStartAtLogin(bool v)        { if (v != startAtLogin()) { q_.setValue(K_START_AT_LOGIN, v); emit changed(); } }
+
+int Settings::approvalMode() const            { return q_.value(K_APPROVAL_MODE, DEF_APPROVAL_MODE).toInt(); }
+void Settings::setApprovalMode(int v)         { if (v != approvalMode()) { q_.setValue(K_APPROVAL_MODE, v); emit changed(); } }
+
+bool Settings::singleSessionLock() const      { return q_.value(K_SINGLE_SESSION, DEF_SINGLE_SESSION).toBool(); }
+void Settings::setSingleSessionLock(bool v)   { if (v != singleSessionLock()) { q_.setValue(K_SINGLE_SESSION, v); emit changed(); } }
+
+int Settings::theme() const                   { return q_.value(K_THEME, DEF_THEME).toInt(); }
+void Settings::setTheme(int v)                { if (v != theme()) { q_.setValue(K_THEME, v); emit changed(); } }
+
+bool Settings::hdrPassthrough() const         { return q_.value(K_HDR_PASSTHROUGH, DEF_HDR_PASSTHROUGH).toBool(); }
+void Settings::setHdrPassthrough(bool v)      { if (v != hdrPassthrough()) { q_.setValue(K_HDR_PASSTHROUGH, v); emit changed(); } }
 
 } // namespace vivora::gui

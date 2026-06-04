@@ -101,7 +101,7 @@ ListView {
         // visual is intentionally dropped to match the mouse-first
         // design.  Keyboard nav (arrows / Enter) still works, just
         // without a persistent selection bar.
-        color: hoverHandler.hovered ? "#dcd2b4" : "transparent"
+        color: hoverHandler.hovered ? "#ded8c8" : "transparent"
 
         HoverHandler {
             id: hoverHandler
@@ -132,7 +132,7 @@ ListView {
             // the warm-bg window.
             Label {
                 text: row.displayLabel
-                color: "#15151a"
+                color: "#1a1a1f"
                 font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
                 font.bold: row.roleAlias.length > 0
                 Layout.fillWidth: true
@@ -140,7 +140,7 @@ ListView {
             }
             Label {
                 text: row.roleAlias.length > 0 ? row.roleCode : ""
-                color: "#6b6b75"
+                color: "#6f6b60"
                 font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
                 font.pointSize: 8
             }
@@ -149,7 +149,7 @@ ListView {
             Label {
                 text: row.roleDirection === 1 ? "↑"
                        : (row.roleDirection === 2 ? "↓" : "")
-                color: "#6b6b75"
+                color: "#6f6b60"
                 font.pixelSize: 12
                 Layout.alignment: Qt.AlignVCenter
             }
@@ -224,7 +224,7 @@ ListView {
     Label {
         anchors.centerIn: parent
         visible: list.count === 0
-        color: "#6b6b75"
+        color: "#6f6b60"
         text: "no recent peers yet"
     }
 

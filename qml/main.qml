@@ -12,7 +12,7 @@ ApplicationWindow {
     visible: true
     title: "Vivora"
 
-    color: "#ede6d4"
+    color: "#efece3"
 
     // The app stays running in the tray; closing the window only hides it.
     onClosing: (close) => {
@@ -90,14 +90,14 @@ ApplicationWindow {
     // ── Brand colours + helpers ──────────────────────────────────────
     QtObject {
         id: theme
-        readonly property color bg:        "#ede6d4"
-        readonly property color hostBg:    "#e6dec8"   // sharing card — slightly darker, visually separates host area
-        readonly property color hoverBg:   "#dcd2b4"   // subtle highlight on hover (matches bg family)
-        readonly property color rowHover:  "#dcd2b4"   // recent-list row hover
-        readonly property color text:      "#15151a"
-        readonly property color textMuted: "#6b6b75"
-        readonly property color border:    "#cfc6a9"
-        readonly property color pillBg:    "#15151a"
+        readonly property color bg:        "#efece3"   // unified with Settings palette
+        readonly property color hostBg:    "#e8e3d6"   // sharing card — slightly darker
+        readonly property color hoverBg:   "#ded8c8"   // subtle highlight on hover
+        readonly property color rowHover:  "#ded8c8"   // recent-list row hover
+        readonly property color text:      "#1a1a1f"
+        readonly property color textMuted: "#6f6b60"
+        readonly property color border:    "#d4cdba"
+        readonly property color pillBg:    "#1a1a1f"
         readonly property color pillFg:    "#ffffff"
         readonly property color accent:    "#3D6BFA"   // brand blue
         readonly property color sharing:   "#22a85c"   // green for active session

@@ -36,6 +36,23 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         QString pubkey   = QString::fromStdString(pubkey_hex);
         QString ip       = QString::fromStdString(ip_port);
         QMetaObject::invokeMethod(this, [this, k, code, pubkey, ip] {
+            // Apply the approval policy here (GUI thread) so HostSession
+            // stays dumb — it just reports Pending, we decide.
+            //   0 = always_prompt        → show dialog
+            //   1 = prompt_unknown_only  → auto-accept known pubkeys,
+            //                              prompt for unknown.  Until the
+            //                              client pubkey is plumbed
+            //                              (VIV-55) "known" can't be
+            //                              evaluated, so this falls back
+            //                              to prompting.
+            //   2 = auto_accept          → accept without a dialog
+            const int mode = settings_ ? settings_->approvalMode() : 0;
+            const bool known = !pubkey.isEmpty() && peers_
+                               && peers_->findByPubkey(pubkey) != nullptr;
+            if (mode == 2 || (mode == 1 && known)) {
+                approveConnection(k);
+                return;
+            }
             emit connectionApprovalRequested(k, code, pubkey, ip);
         }, Qt::QueuedConnection);
     });

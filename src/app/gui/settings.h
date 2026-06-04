@@ -31,6 +31,17 @@ class Settings : public QObject {
                                             WRITE setStartSharingOnLaunch NOTIFY changed)
     Q_PROPERTY(bool    minimizeToTray  READ minimizeToTray  WRITE setMinimizeToTray  NOTIFY changed)
     Q_PROPERTY(bool    startAtLogin    READ startAtLogin    WRITE setStartAtLogin    NOTIFY changed)
+    // VIV-53/59 Security.  approvalMode: 0=always_prompt, 1=prompt_unknown_only,
+    // 2=auto_accept.  singleSessionLock: reject new clients while a session
+    // is live.
+    Q_PROPERTY(int     approvalMode    READ approvalMode    WRITE setApprovalMode    NOTIFY changed)
+    Q_PROPERTY(bool    singleSessionLock READ singleSessionLock WRITE setSingleSessionLock NOTIFY changed)
+    // Appearance.  theme: 0=light, 1=dark, 2=system.  Stored now; the
+    // app is light-only today, dark/system land with the theme engine.
+    Q_PROPERTY(int     theme           READ theme           WRITE setTheme           NOTIFY changed)
+    // Codec.  hdrPassthrough: carry HDR10 metadata when the host display
+    // is HDR (the existing FP16→HEVC Main10 auto-promote path).
+    Q_PROPERTY(bool    hdrPassthrough  READ hdrPassthrough  WRITE setHdrPassthrough  NOTIFY changed)
 
 public:
     explicit Settings(QObject* parent = nullptr);
@@ -49,6 +60,10 @@ public:
     bool    startSharingOnLaunch() const;void setStartSharingOnLaunch(bool);
     bool    minimizeToTray() const;      void setMinimizeToTray(bool);
     bool    startAtLogin() const;        void setStartAtLogin(bool);
+    int     approvalMode() const;        void setApprovalMode(int);
+    bool    singleSessionLock() const;   void setSingleSessionLock(bool);
+    int     theme() const;               void setTheme(int);
+    bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
 
 signals:
     void changed();
