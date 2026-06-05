@@ -6,8 +6,8 @@ import QtQuick.Window
 // Compact list of remembered peers.
 //   left-click  / Enter / Return — select
 //   double-click / Enter on selected — activate (connect)
-//   right-click — context menu (Rename / Forget)
-//   F2 on selected — Rename
+//   right-click OR the ⋯ button at row end — context menu
+//   F2 on selected — Set alias / Rename
 //   Delete on selected — Forget
 ListView {
     id: list
@@ -24,6 +24,25 @@ ListView {
 
     signal peerActivated(string alias, string pubkey, string code)
 
+    readonly property string monoFont: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+
+    // Relative "seen 2h ago" formatting for the context-menu header.
+    // model.lastSeen arrives as a JS Date (QDateTime, UTC instant).
+    function relTime(d) {
+        if (!d || isNaN(d.getTime()) || d.getTime() <= 0) return ""
+        var s = Math.max(0, (Date.now() - d.getTime()) / 1000)
+        if (s < 45)      return "just now"
+        var m = Math.floor(s / 60)
+        if (m < 60)      return m + "m ago"
+        var h = Math.floor(m / 60)
+        if (h < 24)      return h + "h ago"
+        var dys = Math.floor(h / 24)
+        if (dys < 7)     return dys + "d ago"
+        var w = Math.floor(dys / 7)
+        if (w < 5)       return w + "w ago"
+        return Math.floor(dys / 30) + "mo ago"
+    }
+
     // ── Inline rename / forget dialogs ─────────────────────────────────
     // Kept inside the view so the parent (main.qml) doesn't have to
     // wire row-index marshalling for what is effectively row-local UI.
@@ -32,26 +51,106 @@ ListView {
     property string pendingAlias:   ""
     property string pendingLabel:   ""
 
+    // Themed footer button shared by the rename / forget dialogs — custom
+    // Rectangle background (stock Qt buttons are white pills that clash
+    // with the cream theme).  primary = dark fill, danger = red.
+    component DlgBtn: Rectangle {
+        id: btn
+        property string label: ""
+        property bool primary: false
+        property bool danger: false
+        signal clicked
+        implicitHeight: 38
+        radius: 8
+        color: primary
+               ? (danger ? (ma.containsMouse ? "#b83232" : "#cf3b3b")
+                         : (ma.containsMouse ? "#2a2a32" : "#1a1a1f"))
+               : (ma.containsMouse ? "#efe9dc" : "#fbfaf7")
+        border.color: primary ? "transparent" : "#d8d2c2"
+        border.width: 1
+        Label {
+            anchors.centerIn: parent
+            text: btn.label
+            color: btn.primary ? "#ffffff" : "#1a1a1f"
+            font.pixelSize: 13
+            font.bold: btn.primary
+        }
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: btn.clicked()
+        }
+    }
+
     Dialog {
         id: renameDlg
         modal: true
-        anchors.centerIn: parent.parent ? parent.parent : undefined
-        title: "Rename peer"
-        standardButtons: Dialog.Save | Dialog.Cancel
-
-        ColumnLayout {
-            spacing: 8
+        // Centre in the window overlay — a Popup is reparented there on
+        // open, so anchoring to parent.parent lands it in the top-left.
+        anchors.centerIn: Overlay.overlay
+        padding: 18
+        width: 330
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: "#fbfaf7"
+            radius: 13
+            border.color: "#d8d2c2"
+            border.width: 1
+        }
+        header: Item { implicitHeight: 0 }   // custom title below
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                text: "Rename peer"
+                color: "#1a1a1f"
+                font.bold: true
+                font.pixelSize: 15
+            }
             Label {
                 text: "Alias for " + list.pendingLabel
-                opacity: 0.7
+                color: "#6f6b60"
+                font.pixelSize: 12
+                font.family: list.monoFont
+                elide: Text.ElideRight
+                Layout.fillWidth: true
             }
             TextField {
                 id: renameField
                 Layout.fillWidth: true
-                Layout.minimumWidth: 280
+                Layout.minimumWidth: 290
                 text: list.pendingAlias
                 placeholderText: "e.g. Mom's Mac"
+                placeholderTextColor: "#9b9686"
+                color: "#1a1a1f"
+                font.pixelSize: 13
+                selectByMouse: true
+                selectionColor: "#3D6BFA"
+                selectedTextColor: "#ffffff"
+                background: Rectangle {
+                    color: "#ffffff"
+                    radius: 7
+                    border.color: renameField.activeFocus ? "#3D6BFA" : "#d8d2c2"
+                    border.width: renameField.activeFocus ? 2 : 1
+                }
                 onAccepted: renameDlg.accept()
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 2
+                spacing: 9
+                DlgBtn {
+                    Layout.fillWidth: true
+                    label: "Cancel"
+                    onClicked: renameDlg.reject()
+                }
+                DlgBtn {
+                    Layout.fillWidth: true
+                    label: "Save"
+                    primary: true
+                    onClicked: renameDlg.accept()
+                }
             }
         }
 
@@ -66,12 +165,58 @@ ListView {
     Dialog {
         id: forgetDlg
         modal: true
-        anchors.centerIn: parent.parent ? parent.parent : undefined
-        title: "Forget peer"
-        standardButtons: Dialog.Yes | Dialog.No
-        Label {
-            text: "Forget " + list.pendingLabel + "?\n" +
-                  "The peer can reconnect later; only the local record is removed."
+        // Centre in the window overlay — a Popup is reparented there on
+        // open, so anchoring to parent.parent lands it in the top-left.
+        anchors.centerIn: Overlay.overlay
+        padding: 18
+        width: 340
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: "#fbfaf7"
+            radius: 13
+            border.color: "#d8d2c2"
+            border.width: 1
+        }
+        header: Item { implicitHeight: 0 }
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label {
+                text: "Forget peer"
+                color: "#1a1a1f"
+                font.bold: true
+                font.pixelSize: 15
+            }
+            Label {
+                text: "Forget " + list.pendingLabel + "?"
+                color: "#1a1a1f"
+                font.pixelSize: 13
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Label {
+                text: "The peer can reconnect later; only the local record is removed."
+                color: "#6f6b60"
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                spacing: 9
+                DlgBtn {
+                    Layout.fillWidth: true
+                    label: "Cancel"
+                    onClicked: forgetDlg.reject()
+                }
+                DlgBtn {
+                    Layout.fillWidth: true
+                    label: "Forget"
+                    primary: true
+                    danger: true
+                    onClicked: forgetDlg.accept()
+                }
+            }
         }
         onAccepted: {
             if (list.pendingRow >= 0) App.peers.remove(list.pendingRow)
@@ -89,6 +234,50 @@ ListView {
         list.pendingRow   = row
         list.pendingLabel = label
         forgetDlg.open()
+    }
+
+    // ── Context-menu row, styled to match the cream theme ──────────────
+    // A MenuItem with a glyph + label (+ optional shortcut hint), custom
+    // hover highlight and danger/disabled colouring.  Declared at the
+    // view root so the per-row Menu in the delegate can reuse it.
+    component MItem: MenuItem {
+        id: mi
+        property string glyph: ""
+        property string shortcut: ""
+        property color  glyphColor: "#5a5750"
+        property color  labelColor: "#1a1a1f"
+        property bool   strong: false
+        implicitHeight: 34
+        indicator: Item {}   // suppress the default checkmark gutter
+        arrow: Item {}
+        contentItem: RowLayout {
+            spacing: 10
+            Label {
+                text: mi.glyph
+                color: mi.enabled ? mi.glyphColor : "#bcb6a6"
+                font.pixelSize: 14
+                Layout.preferredWidth: 16
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Label {
+                text: mi.text
+                color: mi.enabled ? mi.labelColor : "#bcb6a6"
+                font.pixelSize: 13
+                font.bold: mi.strong
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Label {
+                text: mi.shortcut
+                visible: mi.shortcut.length > 0
+                color: "#a39e8e"
+                font.pixelSize: 13
+            }
+        }
+        background: Rectangle {
+            radius: 6
+            color: mi.highlighted ? "#e6ded0" : "transparent"
+        }
     }
 
     // ── Per-row delegate ──────────────────────────────────────────────
@@ -111,12 +300,14 @@ ListView {
         property string roleCode:   model.code    || ""
         property string rolePubkey: model.pubkey  || ""
         property int    roleDirection: model.direction || 0  // 0=unknown 1=out 2=in
+        property var    roleLastSeen:  model.lastSeen
         property string displayLabel: roleAlias.length > 0 ? roleAlias : roleCode
 
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 8
-            anchors.rightMargin: 8
+            // Reserve room on the right for the always-present ⋯ button.
+            anchors.rightMargin: 32
             spacing: 8
 
             // Status dot (mirrors the mockup) — neutral grey for now;
@@ -133,7 +324,7 @@ ListView {
             Label {
                 text: row.displayLabel
                 color: "#1a1a1f"
-                font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+                font.family: list.monoFont
                 font.bold: row.roleAlias.length > 0
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -141,7 +332,7 @@ ListView {
             Label {
                 text: row.roleAlias.length > 0 ? row.roleCode : ""
                 color: "#6f6b60"
-                font.family: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+                font.family: list.monoFont
                 font.pointSize: 8
             }
             // Direction arrow: ↑ outgoing, ↓ incoming, blank for
@@ -161,9 +352,8 @@ ListView {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: (mouse) => {
                 if (mouse.button === Qt.RightButton) {
-                    // For the context menu we still want the keyboard
-                    // selection to anchor here (so F2 / Delete target
-                    // the right row).
+                    // Anchor keyboard selection here too so F2 / Delete
+                    // target the right row.
                     list.currentIndex = index
                     rowMenu.popup()
                 }
@@ -175,30 +365,146 @@ ListView {
             }
         }
 
+        // ── ⋯ affordance ──────────────────────────────────────────────
+        // Declared after hoverArea so it sits on top and gets the click.
+        // Always faintly visible (discoverable without knowing about
+        // right-click), full opacity on row hover or while its menu is
+        // open.
+        Rectangle {
+            id: kebab
+            width: 24; height: 24; radius: 6
+            anchors.right: parent.right
+            anchors.rightMargin: 5
+            anchors.verticalCenter: parent.verticalCenter
+            color: kebabArea.containsMouse ? "#cfc8b6" : "transparent"
+            opacity: (hoverHandler.hovered || rowMenu.opened) ? 1.0 : 0.4
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+            Label {
+                anchors.centerIn: parent
+                text: "⋯"
+                color: "#5a5750"
+                font.pixelSize: 16
+                font.bold: true
+            }
+            MouseArea {
+                id: kebabArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    list.currentIndex = index
+                    // Right-align the menu under the button.
+                    rowMenu.popup(kebab, kebab.width - rowMenu.width, kebab.height + 2)
+                }
+            }
+        }
+
+        // ── Context menu (right-click or ⋯) ───────────────────────────
         Menu {
             id: rowMenu
-            MenuItem {
+            width: 232
+            padding: 6
+            background: Rectangle {
+                color: "#f6f3ec"
+                radius: 11
+                border.color: "#dcd6c5"
+                border.width: 1
+            }
+
+            // Header: status dot + name + code · seen.
+            Item {
+                width: rowMenu.availableWidth
+                implicitHeight: 44
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 9
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: "#3D6BFA"
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+                    ColumnLayout {
+                        spacing: 1
+                        Layout.fillWidth: true
+                        Label {
+                            text: row.displayLabel
+                            color: "#1a1a1f"
+                            font.bold: true
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            text: {
+                                var rt = list.relTime(row.roleLastSeen)
+                                return row.roleCode + (rt.length > 0 ? "  ·  seen " + rt : "")
+                            }
+                            color: "#6f6b60"
+                            font.family: list.monoFont
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
+
+            MenuSeparator {
+                padding: 6
+                contentItem: Rectangle { implicitHeight: 1; color: "#e2dccb" }
+            }
+
+            MItem {
                 text: "Connect"
+                glyph: "→"
+                glyphColor: "#3D6BFA"
+                strong: true
+                shortcut: "↵"
                 onTriggered: list.peerActivated(row.roleAlias, row.rolePubkey, row.roleCode)
             }
-            MenuSeparator {}
-            MenuItem {
+
+            MenuSeparator {
+                padding: 6
+                contentItem: Rectangle { implicitHeight: 1; color: "#e2dccb" }
+            }
+
+            MItem {
                 text: row.roleAlias.length > 0 ? "Rename…" : "Set alias…"
+                glyph: "⌨"
                 onTriggered: list.openRename(index, row.roleAlias, row.displayLabel)
             }
-            MenuItem {
+            MItem {
                 text: "Copy peer code"
+                glyph: "⧉"
                 enabled: row.roleCode.length > 0
                 onTriggered: clipText.text = row.roleCode
             }
-            MenuItem {
+            MItem {
                 text: "Copy pubkey hex"
+                glyph: "⧉"
                 enabled: row.rolePubkey.length > 0
                 onTriggered: clipText.text = row.rolePubkey
             }
-            MenuSeparator {}
-            MenuItem {
+            // Pin/unpin lands with the address-book pin feature; drawn
+            // disabled until the model gains a `pinned` field.
+            MItem {
+                text: "Unpin"
+                glyph: "⇡"
+                enabled: false
+            }
+
+            MenuSeparator {
+                padding: 6
+                contentItem: Rectangle { implicitHeight: 1; color: "#e2dccb" }
+            }
+
+            MItem {
                 text: "Forget"
+                glyph: "✕"
+                glyphColor: "#cf3b3b"
+                labelColor: "#cf3b3b"
                 onTriggered: list.openForget(index, row.displayLabel)
             }
         }
