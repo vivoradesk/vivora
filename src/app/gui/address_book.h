@@ -29,6 +29,8 @@ struct Peer {
     QString       lastPeerCode;    // memorable code at last contact (for display)
     QDateTime     lastSeen;
     PeerDirection lastDirection = PeerDirection::Unknown;
+    int           seen    = 0;     // number of recorded contacts (for "seen N times")
+    bool          trusted = false; // "don't ask again" — auto-accept incoming (VIV-61)
 };
 
 class AddressBook : public QAbstractListModel {
@@ -40,6 +42,8 @@ public:
         CodeRole,
         LastSeenRole,
         DirectionRole,
+        SeenRole,
+        TrustedRole,
     };
 
     explicit AddressBook(QObject* parent = nullptr);
@@ -63,6 +67,10 @@ public:
     void touchIncoming(const QString& pubkeyHex, const QString& lastPeerCode);
     Q_INVOKABLE void setAlias(int row, const QString& alias);
     Q_INVOKABLE void remove(int row);
+
+    // Set/clear the "trusted" (don't-ask-again) flag for the entry with this
+    // pubkey.  No-op if the pubkey isn't in the book.  Persists.
+    void setTrustedByPubkey(const QString& pubkeyHex, bool trusted);
 
     // For C++ callers (AppController, primarily).
     const Peer* findByPubkey(const QString& pubkeyHex) const;

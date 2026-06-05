@@ -39,18 +39,29 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             // Apply the approval policy here (GUI thread) so HostSession
             // stays dumb — it just reports Pending, we decide.
             //   0 = always_prompt        → show dialog
-            //   1 = prompt_unknown_only  → auto-accept known pubkeys,
-            //                              prompt for unknown.  Until the
-            //                              client pubkey is plumbed
-            //                              (VIV-55) "known" can't be
-            //                              evaluated, so this falls back
-            //                              to prompting.
-            //   2 = auto_accept          → accept without a dialog
-            const int mode = settings_ ? settings_->approvalMode() : 0;
-            const bool known = !pubkey.isEmpty() && peers_
-                               && peers_->findByPubkey(pubkey) != nullptr;
-            if (mode == 2 || (mode == 1 && known)) {
-                approveConnection(k);
+            //   1 = prompt_unknown_only  → auto-accept recognised pubkeys
+            //   2 = auto_accept          → accept without a dialog, EXCEPT
+            //                              a brand-new pubkey still prompts
+            //                              (TOFU: a leaked code alone must
+            //                              not grant silent access).
+            // A per-peer "trusted" flag (don't-ask-again) auto-accepts in
+            // any mode.  recognised/seen drive the dialog's trust card.
+            const auto* peer = (!pubkey.isEmpty() && peers_)
+                               ? peers_->findByPubkey(pubkey) : nullptr;
+            const bool recognized = peer != nullptr;
+            const int  seenCount  = peer ? peer->seen : 0;
+            const bool trusted    = peer && peer->trusted;
+            const int  mode       = settings_ ? settings_->approvalMode() : 0;
+
+            // Stash the identity so approve/reject can record + optionally
+            // pin the viewer once the user (or the auto path) decides.
+            pendingApprovals_.insert(k, qMakePair(pubkey, code));
+
+            const bool autoAccept = trusted
+                || (mode == 2 && recognized)
+                || (mode == 1 && recognized);
+            if (autoAccept) {
+                approveConnection(k);   // records the contact via the stash
                 return;
             }
             // System notification so the user notices the prompt when the
@@ -58,7 +69,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             // notification carries the default alert sound.
             if (tray_) tray_->notify("Vivora — incoming connection",
                 QString("A peer (%1) wants to view your desktop.").arg(ip));
-            emit connectionApprovalRequested(k, code, pubkey, ip);
+            emit connectionApprovalRequested(k, code, pubkey, ip,
+                                             recognized, seenCount);
         }, Qt::QueuedConnection);
     });
     connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
@@ -119,8 +131,11 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // only — no real client.  Off by default.
     if (!qEnvironmentVariableIsEmpty("VIVORA_FAKE_APPROVAL")) {
         QTimer::singleShot(1200, this, [this] {
-            emit connectionApprovalRequested("424242", "", "",
-                                             "192.168.3.243:62378");
+            // Fake a new (unrecognized) viewer with a sample fingerprint.
+            emit connectionApprovalRequested(
+                "424242", "civic-panda-4644",
+                "6d2e0c4a7f3b9e1182a4c5d6e7f8091a2b3c4d5e6f70812233445566778899aa",
+                "192.168.3.243:62378", /*recognized=*/false, /*seenCount=*/0);
         });
     }
 }
@@ -246,14 +261,28 @@ void AppController::showMainWindow() {
     emit showWindowRequested();
 }
 
-void AppController::approveConnection(const QString& key) {
+void AppController::approveConnection(const QString& key, bool remember) {
     if (!approvalGate_) return;
     bool ok = false;
     uint64_t k = key.toULongLong(&ok);
     if (!ok) return;
     approvalGate_->set_state(k, vivora::host::ApprovalState::Approved);
-    log::info("AppController", "Approved connection key=%llu",
-              static_cast<unsigned long long>(k));
+
+    // Record the viewer in the address book (seen++, surfaces under Recent
+    // as an incoming ↓ peer) and, if the user ticked "don't ask again", pin
+    // it as trusted so future connects auto-accept (VIV-61).
+    auto it = pendingApprovals_.find(key);
+    if (it != pendingApprovals_.end()) {
+        const QString pubkey = it.value().first;
+        const QString pcode  = it.value().second;
+        if (peers_ && !pubkey.isEmpty()) {
+            peers_->touchIncoming(pubkey, pcode);
+            if (remember) peers_->setTrustedByPubkey(pubkey, true);
+        }
+        pendingApprovals_.erase(it);
+    }
+    log::info("AppController", "Approved connection key=%llu (remember=%d)",
+              static_cast<unsigned long long>(k), remember ? 1 : 0);
 }
 
 void AppController::rejectConnection(const QString& key) {
@@ -262,6 +291,7 @@ void AppController::rejectConnection(const QString& key) {
     uint64_t k = key.toULongLong(&ok);
     if (!ok) return;
     approvalGate_->set_state(k, vivora::host::ApprovalState::Rejected);
+    pendingApprovals_.remove(key);
     log::info("AppController", "Rejected connection key=%llu",
               static_cast<unsigned long long>(k));
 }

@@ -4,7 +4,9 @@
 #include "app/gui/settings.h"
 #include "host/session/host_approval_gate.h"
 
+#include <QHash>
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QTimer>
 #include <memory>
@@ -66,7 +68,9 @@ public slots:
     // VIV-53 connection approval — QML calls these from the
     // ConnectionApprovalDialog buttons.  `key` is the per-client
     // identifier the controller surfaced via connectionApprovalRequested.
-    Q_INVOKABLE void approveConnection(const QString& key);
+    // `remember` (VIV-61) pins the viewer as trusted so future connects
+    // from the same key auto-accept ("don't ask again").
+    Q_INVOKABLE void approveConnection(const QString& key, bool remember = false);
     Q_INVOKABLE void rejectConnection(const QString& key);
 
     // Force an immediate rendezvous re-registration.  QML calls this
@@ -86,11 +90,14 @@ signals:
     // VIV-53: new client awaiting approval.  QML shows
     // ConnectionApprovalDialog with these details.  key is a
     // stringified address used to identify the client when the user
-    // clicks Accept / Reject.
+    // clicks Accept / Reject.  recognized/seenCount (VIV-61) drive the
+    // dialog's "recognized key · seen N times" vs "new key" trust card.
     void connectionApprovalRequested(QString key,
                                      QString peerCode,
                                      QString pubkeyHex,
-                                     QString ipPort);
+                                     QString ipPort,
+                                     bool    recognized,
+                                     int     seenCount);
 
 private:
     void loadIdentity();        // populates myPeerCode_ + myPubkeyHex_
@@ -102,6 +109,10 @@ private:
     // state and the callback we wire to bounce notifications back into
     // the GUI thread (where QML can show the approval dialog).
     std::shared_ptr<vivora::host::HostApprovalGate> approvalGate_;
+    // Pending approval prompts: key -> (pubkeyHex, peerCode).  Lets
+    // approveConnection() record/pin the viewer in the address book once
+    // the user decides (VIV-61).  Cleared on approve/reject.
+    QHash<QString, QPair<QString, QString>> pendingApprovals_;
     // One ViewSession per "Connect to peer" click.  Owned here so the
     // stream window survives even when QML drops its reference.
     std::vector<std::unique_ptr<ViewSession>> viewSessions_;

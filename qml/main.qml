@@ -32,12 +32,14 @@ ApplicationWindow {
         function onSettingsRequested() {
             settingsLoader.active = true
         }
-        function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort) {
+        function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort,
+                                               recognized, seenCount) {
             // Queue the request and surface the window.  Concurrent
             // pending peers are handled one at a time via the FIFO in
             // approvalLoader — the dialog shows a "N more waiting" badge.
             approvalLoader.enqueue({ key: key, peerCode: peerCode,
-                                     pubkeyHex: pubkeyHex, ipPort: ipPort })
+                                     pubkeyHex: pubkeyHex, ipPort: ipPort,
+                                     recognized: recognized, seenCount: seenCount })
             window.show()
             window.raise()
             window.requestActivate()
@@ -72,7 +74,8 @@ ApplicationWindow {
         // tearing the popup down, so a burst of incoming peers is handled
         // one at a time rather than the latest clobbering the rest.
         property var queue: []
-        property var current: ({ key: "", peerCode: "", pubkeyHex: "", ipPort: "" })
+        property var current: ({ key: "", peerCode: "", pubkeyHex: "", ipPort: "",
+                                 recognized: false, seenCount: 0 })
 
         function enqueue(item) {
             var q = queue.slice()
@@ -100,8 +103,10 @@ ApplicationWindow {
             peerCode:    approvalLoader.current.peerCode
             pubkeyHex:   approvalLoader.current.pubkeyHex
             ipPort:      approvalLoader.current.ipPort
+            recognized:  approvalLoader.current.recognized
+            seenCount:   approvalLoader.current.seenCount
             morePending: approvalLoader.queue.length
-            onApproved: (key) => { App.approveConnection(key); approvalLoader.advance() }
+            onApproved: (key, remember) => { App.approveConnection(key, remember); approvalLoader.advance() }
             onRejected: (key) => { App.rejectConnection(key); approvalLoader.advance() }
         }
     }

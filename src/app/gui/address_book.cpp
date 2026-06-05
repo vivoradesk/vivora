@@ -27,6 +27,8 @@ QVariant AddressBook::data(const QModelIndex& idx, int role) const {
     case CodeRole:     return p.lastPeerCode;
     case LastSeenRole: return p.lastSeen;
     case DirectionRole: return static_cast<int>(p.lastDirection);
+    case SeenRole:     return p.seen;
+    case TrustedRole:  return p.trusted;
     case Qt::DisplayRole: return p.alias.isEmpty() ? p.lastPeerCode : p.alias;
     default: return {};
     }
@@ -39,6 +41,8 @@ QHash<int, QByteArray> AddressBook::roleNames() const {
         {CodeRole,      "code"},
         {LastSeenRole,  "lastSeen"},
         {DirectionRole, "direction"},
+        {SeenRole,      "seen"},
+        {TrustedRole,   "trusted"},
     };
 }
 
@@ -50,9 +54,10 @@ void AddressBook::applyTouch(const QString& pubkeyHex,
         if (peers_[i].pubkeyHex == pubkeyHex) {
             peers_[i].lastPeerCode = lastPeerCode;
             peers_[i].lastSeen     = QDateTime::currentDateTimeUtc();
+            peers_[i].seen        += 1;
             if (dir != PeerDirection::Unknown) peers_[i].lastDirection = dir;
             emit dataChanged(index(i), index(i),
-                {CodeRole, LastSeenRole, DirectionRole, Qt::DisplayRole});
+                {CodeRole, LastSeenRole, DirectionRole, SeenRole, Qt::DisplayRole});
             save();
             return;
         }
@@ -62,6 +67,7 @@ void AddressBook::applyTouch(const QString& pubkeyHex,
     p.lastPeerCode  = lastPeerCode;
     p.lastSeen      = QDateTime::currentDateTimeUtc();
     p.lastDirection = dir;
+    p.seen          = 1;
     beginInsertRows({}, peers_.size(), peers_.size());
     peers_.push_back(p);
     endInsertRows();
@@ -86,6 +92,19 @@ void AddressBook::setAlias(int row, const QString& alias) {
     peers_[row].alias = alias;
     emit dataChanged(index(row), index(row), {AliasRole, Qt::DisplayRole});
     save();
+}
+
+void AddressBook::setTrustedByPubkey(const QString& pubkeyHex, bool trusted) {
+    if (pubkeyHex.isEmpty()) return;
+    for (int i = 0; i < peers_.size(); ++i) {
+        if (peers_[i].pubkeyHex == pubkeyHex) {
+            if (peers_[i].trusted == trusted) return;
+            peers_[i].trusted = trusted;
+            emit dataChanged(index(i), index(i), {TrustedRole});
+            save();
+            return;
+        }
+    }
 }
 
 void AddressBook::remove(int row) {
@@ -130,6 +149,8 @@ void AddressBook::load() {
         p.lastPeerCode  = o.value("code").toString();
         p.lastSeen      = QDateTime::fromString(o.value("lastSeen").toString(), Qt::ISODate);
         p.lastDirection = static_cast<PeerDirection>(o.value("direction").toInt(0));
+        p.seen          = o.value("seen").toInt(0);
+        p.trusted       = o.value("trusted").toBool(false);
         if (!p.pubkeyHex.isEmpty()) peers_.push_back(p);
     }
 }
@@ -143,6 +164,8 @@ void AddressBook::save() const {
         o["code"]      = p.lastPeerCode;
         o["lastSeen"]  = p.lastSeen.toString(Qt::ISODate);
         o["direction"] = static_cast<int>(p.lastDirection);
+        o["seen"]      = p.seen;
+        o["trusted"]   = p.trusted;
         arr.append(o);
     }
     QFile f(filePath());

@@ -2,17 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// VIV-55: connection approval popup, redesigned to match the cream Home
-// page theme (see the mockup attached to the issue).
+// VIV-55/VIV-61: connection approval popup, cream-themed (see the mockup
+// attached to the issue).
 //
-// Scope note — Noise_NK leaves the connecting viewer anonymous, so the
-// host never learns the client's static pubkey.  The "recognized key /
-// seen N times" trust card, the populated fingerprint and the
-// "Trust this device" checkbox therefore can't be driven by real peer
-// identity yet: they are drawn here as DISABLED placeholders and get
-// wired up in VIV-61 (NK→XK/IK) / VIV-60 (capability grants).  What is
-// live today: the visual redesign, the countdown ring, the multi-pending
-// queue badge, and Accept / Reject.
+// The IK handshake (VIV-61) authenticates the connecting viewer, so the
+// trust card, fingerprint and "Trust this device" pin are now live: green
+// "Recognized key · seen N times" when the viewer's key is in the address
+// book, amber "New key — verify out of band" otherwise.  The GRANT ON
+// ACCEPT toggles remain disabled placeholders pending VIV-60.
 Dialog {
     id: dialog
     modal: true
@@ -30,15 +27,27 @@ Dialog {
     // queue on approve/reject by rebinding the properties above.
     property int    morePending: 0
 
+    // VIV-61: viewer identity.  recognized = this pubkey is already in the
+    // address book; seenCount = how many prior contacts.  Drive the trust
+    // card (green recognised / amber new key).
+    property bool   recognized: false
+    property int    seenCount:  0
+    // Bound to the "Trust this device — don't ask again" checkbox; passed
+    // back on approve so the host pins the viewer as trusted.
+    property bool   trustChecked: false
+
     readonly property int totalSeconds: 30
     property int    secondsRemaining: 30
 
-    signal approved(string key)
+    signal approved(string key, bool remember)
     signal rejected(string key)
 
     // Each time the parent rebinds us to a new pending peer, restart the
-    // auto-reject countdown from the top.
-    onApprovalKeyChanged: dialog.secondsRemaining = dialog.totalSeconds
+    // auto-reject countdown and clear the per-peer trust checkbox.
+    onApprovalKeyChanged: {
+        dialog.secondsRemaining = dialog.totalSeconds
+        dialog.trustChecked = false
+    }
 
     // Transport hint derived from the source IP — LAN for RFC1918 /
     // link-local ranges, WAN otherwise.  Best-effort display label only.
@@ -177,16 +186,15 @@ Dialog {
             }
         }
 
-        // ── Trust card (placeholder — VIV-61) ────────────────────────
-        // Will become the green "Recognized key · seen N times" /
-        // amber "New key — verify out of band" card once the viewer
-        // presents a static key.  For now it states the honest truth:
-        // we can't yet confirm who is connecting.
+        // ── Trust card (VIV-61) ──────────────────────────────────────
+        // Green when the viewer's static key is already in the address
+        // book ("Recognized key · seen N times"); amber for a first-seen
+        // key ("New key — verify out of band").
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: trustRow.implicitHeight + 20
-            color: t.warnBg
-            border.color: t.warnBorder
+            color: dialog.recognized ? "#e9f6ee" : t.warnBg
+            border.color: dialog.recognized ? "#bfe3cd" : t.warnBorder
             border.width: 1
             radius: 9
             RowLayout {
@@ -195,8 +203,8 @@ Dialog {
                 anchors.margins: 10
                 spacing: 9
                 Label {
-                    text: "⚠"
-                    color: t.warn
+                    text: dialog.recognized ? "✓" : "⚠"
+                    color: dialog.recognized ? t.green : t.warn
                     font.pixelSize: 15
                     Layout.alignment: Qt.AlignTop
                 }
@@ -204,21 +212,24 @@ Dialog {
                     Layout.fillWidth: true
                     spacing: 2
                     Label {
-                        text: "Peer identity not verified"
+                        text: dialog.recognized
+                              ? ("Recognized key · seen " + dialog.seenCount
+                                 + (dialog.seenCount === 1 ? " time" : " times"))
+                              : "New key — verify out of band"
                         color: t.text
                         font.pixelSize: 12
                         font.bold: true
                     }
                     Label {
-                        text: "Anyone with your peer code can request access. "
-                              + "Verify out of band who this is before accepting."
+                        visible: !dialog.recognized
+                        text: "First time this device connects. Confirm out of "
+                              + "band who this is before accepting."
                         color: t.textMuted
                         font.pixelSize: 11
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
-                    // Fingerprint row appears once VIV-61 plumbs the
-                    // viewer's static key; hidden while empty.
+                    // Viewer fingerprint — populated by the IK handshake.
                     Label {
                         visible: dialog.pubkeyHex.length >= 12
                         text: "ED25519 · " + dialog.pubkeyHex.substring(0, 6)
@@ -249,25 +260,45 @@ Dialog {
             GrantRow { glyph: "🗀"; label: "File transfer";            on: false }
         }
 
-        // ── Trust this device (disabled placeholder — VIV-61) ────────
-        RowLayout {
+        // ── Trust this device — don't ask again (VIV-61) ─────────────
+        // Wrapped in a plain Item so the click MouseArea can anchor-fill
+        // it (anchoring inside the layout-managed row is undefined and
+        // collapses the dialog).
+        Item {
             Layout.fillWidth: true
-            spacing: 8
-            opacity: 0.45
-            Rectangle {
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
-                radius: 4
-                color: "transparent"
-                border.color: t.border
-                border.width: 1.5
+            implicitHeight: trustRowInner.implicitHeight
+            RowLayout {
+                id: trustRowInner
+                anchors.fill: parent
+                spacing: 8
+                Rectangle {
+                    Layout.preferredWidth: 16
+                    Layout.preferredHeight: 16
+                    radius: 4
+                    color: dialog.trustChecked ? t.accent : "transparent"
+                    border.color: dialog.trustChecked ? t.accent : t.border
+                    border.width: 1.5
+                    Label {
+                        anchors.centerIn: parent
+                        visible: dialog.trustChecked
+                        text: "✓"
+                        color: "#ffffff"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+                }
+                Label {
+                    text: "Trust this device — don't ask again"
+                    color: t.text
+                    font.pixelSize: 12
+                }
+                Item { Layout.fillWidth: true }
             }
-            Label {
-                text: "Trust this device — don't ask again"
-                color: t.text
-                font.pixelSize: 12
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: dialog.trustChecked = !dialog.trustChecked
             }
-            Item { Layout.fillWidth: true }
         }
 
         // ── "N more waiting" queue badge ─────────────────────────────
@@ -309,7 +340,7 @@ Dialog {
                 glyph: "✓"
                 primary: true
                 Layout.fillWidth: true
-                onClicked: dialog.approved(dialog.approvalKey)
+                onClicked: dialog.approved(dialog.approvalKey, dialog.trustChecked)
             }
         }
     }
