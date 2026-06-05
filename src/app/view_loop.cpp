@@ -183,9 +183,19 @@ bool ViewLoopState::iter() {
         audio_started_ = true;
     }
 
-    if (session.state() == client::SessionState::Disconnected &&
-        frames_decoded_ > 0) {
-        log::info("VIEW", "Disconnected from host");
+    // Tear the view down on any Disconnected transition.  Previously this
+    // only fired when frames_decoded_ > 0, which left a session that never
+    // received a single frame (host ignored / rejected the approval prompt,
+    // or host unreachable) stuck on a blank white window forever — the loop
+    // kept spinning because the "real disconnect" guard never matched.  The
+    // state only reaches Disconnected after the connect/silence timeouts in
+    // ClientSession, so the initial Connecting phase is unaffected.
+    if (session.state() == client::SessionState::Disconnected) {
+        if (frames_decoded_ > 0)
+            log::info("VIEW", "Disconnected from host");
+        else
+            log::warn("VIEW", "Connection closed before any video — "
+                              "host rejected the request or is unreachable");
         return false;
     }
 
