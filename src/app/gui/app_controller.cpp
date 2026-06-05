@@ -53,6 +53,11 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                 approveConnection(k);
                 return;
             }
+            // System notification so the user notices the prompt when the
+            // main window is hidden / in the background (VIV-55).  The OS
+            // notification carries the default alert sound.
+            if (tray_) tray_->notify("Vivora — incoming connection",
+                QString("A peer (%1) wants to view your desktop.").arg(ip));
             emit connectionApprovalRequested(k, code, pubkey, ip);
         }, Qt::QueuedConnection);
     });
@@ -106,6 +111,17 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // testing UI changes doesn't burn the encoder + show TCC prompts.
     if (qEnvironmentVariableIsEmpty("VIVORA_NO_AUTOSTART")) {
         QTimer::singleShot(500, this, [this] { startSharing(); });
+    }
+
+    // Dev hook: VIVORA_FAKE_APPROVAL=1 fires a synthetic incoming-connection
+    // prompt ~1.2s after launch so the ConnectionApprovalDialog (VIV-55) can
+    // be eyeballed / screenshotted without a second machine.  Sample data
+    // only — no real client.  Off by default.
+    if (!qEnvironmentVariableIsEmpty("VIVORA_FAKE_APPROVAL")) {
+        QTimer::singleShot(1200, this, [this] {
+            emit connectionApprovalRequested("424242", "", "",
+                                             "192.168.3.243:62378");
+        });
     }
 }
 

@@ -33,15 +33,11 @@ ApplicationWindow {
             settingsLoader.active = true
         }
         function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort) {
-            // Raise the dialog on top.  Multiple concurrent pending
-            // clients would race to share the single Loader — for now
-            // the latest request wins (rare in practice; multi-pending
-            // is Phase D territory along with the queue UI).
-            approvalLoader.approvalKey = key
-            approvalLoader.peerCode    = peerCode
-            approvalLoader.pubkeyHex   = pubkeyHex
-            approvalLoader.ipPort      = ipPort
-            approvalLoader.active      = true
+            // Queue the request and surface the window.  Concurrent
+            // pending peers are handled one at a time via the FIFO in
+            // approvalLoader — the dialog shows a "N more waiting" badge.
+            approvalLoader.enqueue({ key: key, peerCode: peerCode,
+                                     pubkeyHex: pubkeyHex, ipPort: ipPort })
             window.show()
             window.raise()
             window.requestActivate()
@@ -71,19 +67,42 @@ ApplicationWindow {
     Loader {
         id: approvalLoader
         active: false
-        property string approvalKey: ""
-        property string peerCode:    ""
-        property string pubkeyHex:   ""
-        property string ipPort:      ""
+        // FIFO queue of peers awaiting approval.  The dialog renders the
+        // head (`current`); approve/reject advances to the next without
+        // tearing the popup down, so a burst of incoming peers is handled
+        // one at a time rather than the latest clobbering the rest.
+        property var queue: []
+        property var current: ({ key: "", peerCode: "", pubkeyHex: "", ipPort: "" })
+
+        function enqueue(item) {
+            var q = queue.slice()
+            q.push(item)
+            queue = q
+            if (!active)
+                advance()
+        }
+        // Pop the head into `current`.  Deactivating the Loader (queue
+        // drained) closes the dialog.
+        function advance() {
+            if (queue.length === 0) {
+                active = false
+                return
+            }
+            var q = queue.slice()
+            current = q.shift()
+            queue = q
+            active = true
+        }
+
         sourceComponent: ConnectionApprovalDialog {
             visible: true
-            approvalKey: approvalLoader.approvalKey
-            peerCode:    approvalLoader.peerCode
-            pubkeyHex:   approvalLoader.pubkeyHex
-            ipPort:      approvalLoader.ipPort
-            onApproved: (key) => App.approveConnection(key)
-            onRejected: (key) => App.rejectConnection(key)
-            onClosed:   approvalLoader.active = false
+            approvalKey: approvalLoader.current.key
+            peerCode:    approvalLoader.current.peerCode
+            pubkeyHex:   approvalLoader.current.pubkeyHex
+            ipPort:      approvalLoader.current.ipPort
+            morePending: approvalLoader.queue.length
+            onApproved: (key) => { App.approveConnection(key); approvalLoader.advance() }
+            onRejected: (key) => { App.rejectConnection(key); approvalLoader.advance() }
         }
     }
 
