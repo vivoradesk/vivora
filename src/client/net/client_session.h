@@ -182,6 +182,12 @@ private:
     // transfers keys into send_cs_/recv_cs_ and handshake_complete_ latches.
     uint8_t host_static_pk_[32] = {};
     bool host_key_set_ = false;
+    // Our own long-term identity — the same device keypair the host side
+    // uses.  IK sends this (encrypted) in msg1 so the host can recognise the
+    // viewer in its approval prompt (VIV-61).  Loaded lazily on first use.
+    crypto::KeyPair client_identity_{};
+    bool client_identity_loaded_ = false;
+    bool ensure_client_identity();
     crypto::HandshakeStateNK handshake_;
     crypto::CipherState send_cs_;
     crypto::CipherState recv_cs_;

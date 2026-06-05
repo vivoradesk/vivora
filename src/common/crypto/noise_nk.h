@@ -6,27 +6,37 @@
 
 namespace vivora::crypto {
 
-// Noise_NK_25519_ChaChaPoly_BLAKE2b — a Noise handshake pattern where the
-// responder's static public key is known to the initiator in advance.
+// Noise_IK_25519_ChaChaPoly_BLAKE2b — a Noise handshake where the responder's
+// static public key is known to the initiator in advance AND the initiator
+// authenticates with its own static key (sent, encrypted, inside msg1).
+//
+// NOTE ON NAMING: the type/file are still called *NK for history (this was a
+// Noise_NK handshake originally; VIV-61 upgraded it to IK so the host learns
+// the connecting viewer's identity for the approval prompt).  The pattern is
+// IK — a rename is a cosmetic follow-up.
 //
 // Pattern:
 //     <- s                   (pre-message: responder's static is pre-shared)
 //     ...
-//     -> e, es               (msg1: initiator sends ephemeral, mixes DH(e,rs))
-//     <- e, ee               (msg2: responder sends ephemeral, mixes DH(ee))
+//     -> e, es, s, ss        (msg1: initiator sends ephemeral, its encrypted
+//                             static, and mixes DH(e,rs) + DH(s,rs))
+//     <- e, ee, se           (msg2: responder sends ephemeral, mixes DH(ee) +
+//                             DH(rs_responder_e, s_initiator))
 //
 // After these two messages both sides hold a pair of CipherStates — one for
-// each direction — and the handshake is complete.  All subsequent data is
-// authenticated + encrypted with ChaCha20-Poly1305.
+// each direction — the handshake is complete, and crucially the responder now
+// holds the initiator's static public key (peer_static_key()).  All subsequent
+// data is authenticated + encrypted with ChaCha20-Poly1305.
 //
-// We pick NK (not XX or IK) because:
+// We pick IK (not XX or XK) because:
 //   - The host's long-term public key is its peer identity; we ship it
 //     out-of-band (QR / copy-paste / --host-key CLI) before connecting.
-//   - NK gives forward secrecy (ephemeral DH) and responder authentication
-//     (static DH) in one round-trip — the minimum for a working UDP session.
-//   - The initiator does not authenticate with a static key; that's fine
-//     for a remote-desktop client where the UI handles auth at a higher
-//     layer (PIN, pairing flow).
+//   - IK keeps the original 2-message (one round-trip) flow — the initiator's
+//     static rides encrypted in msg1, so no extra message vs the old NK.
+//   - The responder learns the initiator's static key, which the connection-
+//     approval UI uses to recognise / pin the viewer (VIV-61).
+//   - Initiator identity is hidden from passive eavesdroppers (sent under es);
+//     only a party holding the responder's private key can read it.
 //
 // Cryptography is provided by Monocypher:
 //   - X25519 for DH
@@ -113,8 +123,11 @@ public:
     static constexpr size_t HANDSHAKE_OVERHEAD = 32 + 16;
 
     // Initiator configuration: must supply the responder's public key
-    // (obtained out-of-band — host identity).
-    bool init_initiator(const uint8_t remote_static_pk[32]);
+    // (obtained out-of-band — host identity) AND the initiator's own
+    // long-term keypair, which is sent encrypted in msg1 so the responder
+    // can authenticate / recognise the viewer.
+    bool init_initiator(const uint8_t remote_static_pk[32],
+                        const KeyPair& local_static);
     // Responder configuration: must supply its own long-term keypair.
     bool init_responder(const KeyPair& local_static);
 
@@ -155,6 +168,16 @@ public:
                   CipherState& aux_send,  CipherState& aux_recv);
 
     bool complete() const { return complete_; }
+
+    // The peer's static public key learned from the handshake.
+    //   - Responder: the initiator's (viewer's) static, recovered from msg1.
+    //     Valid after read_message(msg1) succeeds.
+    //   - Initiator: the responder's (host's) static, which it supplied at
+    //     init time.
+    // Returns false (and leaves `out` untouched) if no peer static is known
+    // yet.  Used by the host to identify the connecting viewer for the
+    // approval prompt (VIV-61).
+    bool peer_static_key(uint8_t out[32]) const;
 
     HandshakeStateNK();
     ~HandshakeStateNK();

@@ -570,6 +570,13 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     if (inner_len < static_cast<int>(sizeof(HELLO_MAGIC))) return;
     if (std::memcmp(inner, HELLO_MAGIC, sizeof(HELLO_MAGIC)) != 0) return;
 
+    // VIV-61: with the IK handshake the host now learns the connecting
+    // viewer's long-term static pubkey.  Capture it here — while the
+    // handshake object is still alive (it's reset right after finalize) —
+    // so the approval gate can surface the viewer's identity / fingerprint.
+    uint8_t client_pubkey[32] = {};
+    const bool have_client_pubkey = handshake->peer_static_key(client_pubkey);
+
     uint16_t client_audio_port = 0;
     if (inner_len >= static_cast<int>(sizeof(HELLO_MAGIC)) + 2) {
         client_audio_port = static_cast<uint16_t>(inner[sizeof(HELLO_MAGIC)])
@@ -661,16 +668,14 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
         if (approval_gate_) approval_gate_->preapprove(
             host::HostApprovalGate::make_key(sender.ip, sender.port));
     } else {
-        // Pending — fire the popup.  Build display strings (peer code
-        // is derived from the client pubkey we just authenticated;
-        // pubkey_hex for fingerprint display in the dialog).
+        // Pending — fire the popup.  The viewer's peer code + pubkey
+        // fingerprint come from the static key the IK handshake just
+        // authenticated (VIV-61); empty only if the key was unavailable.
         std::string peer_code, pubkey_hex;
-        // Pull pubkey from the just-completed handshake.  Noise_NK
-        // stores it via finalize → handshake is destroyed already, but
-        // we have the bytes in client.send_cs context (not exposed).
-        // Cheap workaround: rendezvous already serves the pubkey to
-        // peers as the code lookup key.  For now leave both empty and
-        // surface client IP only — Phase D will plumb the actual hex.
+        if (have_client_pubkey) {
+            pubkey_hex = crypto::hex_encode(client_pubkey, 32);
+            peer_code  = peer_code::encode(client_pubkey);
+        }
         char ip[32];
         std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u:%u",
             (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,

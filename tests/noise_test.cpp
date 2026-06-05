@@ -43,19 +43,23 @@ void test_handshake_roundtrip_and_transport() {
     // Responder (host) has a long-term keypair.
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
+    // Initiator (viewer) also has a long-term keypair — IK sends it in msg1.
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
 
     // Initiator knows host's public key out of band.
     HandshakeStateNK initiator;
     HandshakeStateNK responder;
-    CHECK(initiator.init_initiator(host_static.public_key));
+    CHECK(initiator.init_initiator(host_static.public_key, client_static));
     CHECK(responder.init_responder(host_static));
 
-    // Initiator writes msg1 with a small payload.
+    // Initiator writes msg1 with a small payload.  IK msg1 = e(32) +
+    // encrypted static(32+16) + encrypted payload(+16).
     const uint8_t hello[] = {'H', 'E', 'L', 'O'};
     uint8_t msg1[256] = {};
     size_t msg1_len = initiator.write_message(hello, sizeof(hello),
                                               msg1, sizeof(msg1));
-    CHECK(msg1_len == 32 + sizeof(hello) + 16);
+    CHECK(msg1_len == 32 + (32 + 16) + sizeof(hello) + 16);
 
     // Responder reads msg1, extracts the payload.
     uint8_t resp_payload[256] = {};
@@ -63,6 +67,11 @@ void test_handshake_roundtrip_and_transport() {
                                      resp_payload, sizeof(resp_payload));
     CHECK(got == static_cast<int>(sizeof(hello)));
     CHECK(std::memcmp(resp_payload, hello, sizeof(hello)) == 0);
+
+    // IK property: the responder now holds the initiator's static pubkey.
+    uint8_t learned[32] = {};
+    CHECK(responder.peer_static_key(learned));
+    CHECK(std::memcmp(learned, client_static.public_key, 32) == 0);
 
     // Responder writes msg2.
     const uint8_t ack[] = {'A', 'C', 'K'};
@@ -121,14 +130,17 @@ void test_wrong_host_key_fails_handshake() {
     KeyPair wrong_host;
     CHECK(generate_x25519_keypair(wrong_host));
 
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
+
     HandshakeStateNK initiator;
     HandshakeStateNK responder;
-    CHECK(initiator.init_initiator(wrong_host.public_key));  // wrong!
+    CHECK(initiator.init_initiator(wrong_host.public_key, client_static));  // wrong!
     CHECK(responder.init_responder(real_host));
 
     uint8_t msg1[128] = {};
     size_t msg1_len = initiator.write_message(nullptr, 0, msg1, sizeof(msg1));
-    CHECK(msg1_len == 32 + 16);
+    CHECK(msg1_len == 32 + (32 + 16) + 16);  // e + enc_static + enc_empty_payload
 
     // Responder should fail to authenticate — DH(s, e) produces a different
     // key on each side, so the Poly1305 tag won't validate.
@@ -142,8 +154,10 @@ void test_replay_rejected() {
     // Set up a full session, then try to replay a transport packet.
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
     HandshakeStateNK initiator, responder;
-    initiator.init_initiator(host_static.public_key);
+    initiator.init_initiator(host_static.public_key, client_static);
     responder.init_responder(host_static);
 
     uint8_t msg1[128], msg2[128], scratch[128];
@@ -173,8 +187,10 @@ void test_replay_rejected() {
 void test_tamper_rejected() {
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
     HandshakeStateNK initiator, responder;
-    initiator.init_initiator(host_static.public_key);
+    initiator.init_initiator(host_static.public_key, client_static);
     responder.init_responder(host_static);
 
     uint8_t msg1[128], msg2[128], scratch[128];
@@ -241,16 +257,18 @@ void test_host_identity_persist_and_reload() {
 
 void test_zero_length_payload() {
     // Edge case: handshake with no piggy-backed payload — the AEAD still
-    // produces a 16-byte tag so msg1/msg2 are each exactly 48 bytes.
+    // produces 16-byte tags.  IK msg1 = 32 + (32+16) + 16 = 96; msg2 = 48.
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
     HandshakeStateNK initiator, responder;
-    initiator.init_initiator(host_static.public_key);
+    initiator.init_initiator(host_static.public_key, client_static);
     responder.init_responder(host_static);
 
     uint8_t msg1[128] = {};
     size_t l1 = initiator.write_message(nullptr, 0, msg1, sizeof(msg1));
-    CHECK(l1 == 48);
+    CHECK(l1 == 96);
 
     uint8_t payload[16] = {};
     int got = responder.read_message(msg1, l1, payload, sizeof(payload));
@@ -274,8 +292,10 @@ void test_sliding_replay_window() {
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
 
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
     HandshakeStateNK initiator, responder;
-    initiator.init_initiator(host_static.public_key);
+    initiator.init_initiator(host_static.public_key, client_static);
     responder.init_responder(host_static);
 
     uint8_t msg1[128]{}, msg2[128]{}, tmp[128]{};
@@ -352,8 +372,10 @@ void test_finalize_4key_main_and_aux() {
     KeyPair host_static;
     CHECK(generate_x25519_keypair(host_static));
 
+    KeyPair client_static;
+    CHECK(generate_x25519_keypair(client_static));
     HandshakeStateNK initiator, responder;
-    CHECK(initiator.init_initiator(host_static.public_key));
+    CHECK(initiator.init_initiator(host_static.public_key, client_static));
     CHECK(responder.init_responder(host_static));
 
     uint8_t msg1[128] = {};

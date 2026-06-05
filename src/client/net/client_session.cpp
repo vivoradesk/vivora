@@ -1,4 +1,5 @@
 #include "client/net/client_session.h"
+#include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
 #include "common/crypto/peer_pin.h"
 #include "common/net/relay_protocol.h"
@@ -19,6 +20,18 @@ static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x
 void ClientSession::set_host_key(const uint8_t host_pk[32]) {
     std::memcpy(host_static_pk_, host_pk, 32);
     host_key_set_ = true;
+}
+
+bool ClientSession::ensure_client_identity() {
+    if (client_identity_loaded_) return true;
+    // Reuse this device's long-term identity (the same keypair we'd present
+    // as a host).  IK presents it to the host so the viewer is recognisable.
+    if (!crypto::load_or_create_host_identity(client_identity_, "")) {
+        log::error("ClientSession", "Failed to load client identity for handshake");
+        return false;
+    }
+    client_identity_loaded_ = true;
+    return true;
 }
 
 void ClientSession::set_peer_pubkey(const uint8_t pubkey[32]) {
@@ -216,7 +229,8 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     // Prime a fresh Noise_NK handshake.  send_hello() will write msg1 into
     // the wire; handle_control() processes msg2.  init_initiator() re-runs
     // InitializeSymmetric internally, so calling it is equivalent to a reset.
-    if (!handshake_.init_initiator(host_static_pk_)) {
+    if (!ensure_client_identity()) return false;
+    if (!handshake_.init_initiator(host_static_pk_, client_identity_)) {
         log::error("ClientSession", "Noise init_initiator failed");
         return false;
     }
@@ -396,7 +410,8 @@ void ClientSession::poll() {
             if (relay_bind_blocking()) {
                 // Reset Noise state and HELLO timers so the next send_hello
                 // starts a clean handshake on the relay path.
-                handshake_.init_initiator(host_static_pk_);
+                ensure_client_identity();
+                handshake_.init_initiator(host_static_pk_, client_identity_);
                 handshake_complete_ = false;
                 connect_start_   = Clock::now();
                 last_hello_time_ = {};
@@ -757,7 +772,8 @@ void ClientSession::send_hello() {
     // Every retry builds a fresh handshake: we don't know which of our prior
     // msg1s reached the host, and each carries its own ephemeral DH share.
     // The host mirrors this — a new msg1 always resets its side.
-    if (!handshake_.init_initiator(host_static_pk_)) {
+    if (!ensure_client_identity()) return;
+    if (!handshake_.init_initiator(host_static_pk_, client_identity_)) {
         log::error("ClientSession", "Noise init_initiator failed on retry");
         return;
     }

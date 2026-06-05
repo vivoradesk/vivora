@@ -12,7 +12,7 @@ namespace vivora::crypto {
 // Protocol name fixes the handshake pattern, DH, cipher, and hash so that
 // any mismatch between peers shows up as a handshake failure rather than
 // silent interop. See Noise spec §8.
-static const char kProtocolName[] = "Noise_NK_25519_ChaChaPoly_BLAKE2b";
+static const char kProtocolName[] = "Noise_IK_25519_ChaChaPoly_BLAKE2b";
 // BLAKE2b produces 64-byte digests — Noise HASHLEN for this variant.
 static constexpr size_t HASHLEN    = 64;
 // BLAKE2b internal block size — needed for HMAC construction.
@@ -247,9 +247,10 @@ struct SymmetricState {
 
 struct HandshakeStateNK::State {
     SymmetricState ss{};
-    KeyPair        local_static{};     // responder only
+    KeyPair        local_static{};     // both roles (IK authenticates initiator)
     KeyPair        local_ephemeral{};  // both roles
-    uint8_t        remote_static[32] = {};  // initiator only
+    uint8_t        remote_static[32] = {};  // initiator: set at init; responder: from msg1
+    bool           has_remote_static = false;
     uint8_t        remote_ephemeral[32] = {};
 };
 
@@ -278,15 +279,18 @@ HandshakeStateNK::~HandshakeStateNK() {
     }
 }
 
-bool HandshakeStateNK::init_initiator(const uint8_t remote_static_pk[32]) {
+bool HandshakeStateNK::init_initiator(const uint8_t remote_static_pk[32],
+                                      const KeyPair& local_static) {
     if (!remote_static_pk) return false;
     role_ = Role::Initiator;
     complete_ = false;
     step_ = 0;
     s_->ss.init_symmetric(kProtocolName);
-    // NK pre-message: hash the responder's static public key into h so both
+    s_->local_static = local_static;   // our identity — sent (encrypted) in msg1
+    // IK pre-message: hash the responder's static public key into h so both
     // sides start from the same state.  The responder side mirrors this.
     std::memcpy(s_->remote_static, remote_static_pk, 32);
+    s_->has_remote_static = true;       // initiator knows the host's static
     s_->ss.mix_hash(s_->remote_static, 32);
     return true;
 }
@@ -297,38 +301,59 @@ bool HandshakeStateNK::init_responder(const KeyPair& local_static) {
     step_ = 0;
     s_->ss.init_symmetric(kProtocolName);
     s_->local_static = local_static;
+    s_->has_remote_static = false;      // learned from msg1 (initiator's static)
     s_->ss.mix_hash(s_->local_static.public_key, 32);
+    return true;
+}
+
+bool HandshakeStateNK::peer_static_key(uint8_t out[32]) const {
+    if (!s_ || !s_->has_remote_static) return false;
+    std::memcpy(out, s_->remote_static, 32);
     return true;
 }
 
 size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_len,
                                        uint8_t* out, size_t out_capacity) {
     if (complete_) return 0;
-    const size_t needed = 32 + payload_len + TAGLEN;
-    if (out_capacity < needed) return 0;
 
     if (role_ == Role::Initiator && step_ == 0) {
-        // -> e, es
+        // -> e, es, s, ss
+        // Wire: e(32) | enc_static(32+TAG) | enc_payload(payload+TAG)
+        const size_t needed = 32 + (32 + TAGLEN) + payload_len + TAGLEN;
+        if (out_capacity < needed) return 0;
+
         if (!generate_x25519_keypair(s_->local_ephemeral)) return 0;
         std::memcpy(out, s_->local_ephemeral.public_key, 32);
         s_->ss.mix_hash(s_->local_ephemeral.public_key, 32);
 
-        // es: DH(initiator_e_priv, responder_s_pub)
+        // es: DH(initiator_e_priv, responder_s_pub) — keys the channel so the
+        // static below is encrypted.
         uint8_t dh[DHLEN];
         crypto_x25519(dh, s_->local_ephemeral.secret_key, s_->remote_static);
         s_->ss.mix_key(dh, DHLEN);
+
+        // s: send our static public key, encrypted (32 plaintext + 16 tag).
+        std::memcpy(out + 32, s_->local_static.public_key, 32);
+        s_->ss.encrypt_and_hash(out + 32, 32);
+
+        // ss: DH(initiator_s_priv, responder_s_pub) — authenticates us.
+        crypto_x25519(dh, s_->local_static.secret_key, s_->remote_static);
+        s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
-        // Write payload right after the ephemeral key, then EncryptAndHash
-        // encrypts in place and appends the tag.
-        if (payload_len) std::memcpy(out + 32, payload, payload_len);
-        s_->ss.encrypt_and_hash(out + 32, payload_len);
+        // payload, encrypted under the post-ss key.
+        uint8_t* payload_out = out + 32 + 32 + TAGLEN;
+        if (payload_len) std::memcpy(payload_out, payload, payload_len);
+        s_->ss.encrypt_and_hash(payload_out, payload_len);
         step_ = 1;
         return needed;
     }
 
     if (role_ == Role::Responder && step_ == 1) {
-        // <- e, ee
+        // <- e, ee, se
+        const size_t needed = 32 + payload_len + TAGLEN;
+        if (out_capacity < needed) return 0;
+
         if (!generate_x25519_keypair(s_->local_ephemeral)) return 0;
         std::memcpy(out, s_->local_ephemeral.public_key, 32);
         s_->ss.mix_hash(s_->local_ephemeral.public_key, 32);
@@ -336,6 +361,11 @@ size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_le
         // ee: DH(responder_e_priv, initiator_e_pub)
         uint8_t dh[DHLEN];
         crypto_x25519(dh, s_->local_ephemeral.secret_key, s_->remote_ephemeral);
+        s_->ss.mix_key(dh, DHLEN);
+
+        // se: DH(s_initiator, e_responder) — responder side computes
+        // DH(responder_e_priv, initiator_s_pub).
+        crypto_x25519(dh, s_->local_ephemeral.secret_key, s_->remote_static);
         s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
@@ -352,24 +382,44 @@ size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_le
 int HandshakeStateNK::read_message(const uint8_t* wire, size_t wire_len,
                                    uint8_t* payload_out, size_t payload_out_capacity) {
     if (complete_) return -1;
-    if (!wire || wire_len < 32 + TAGLEN) return -1;
-    const size_t payload_len = wire_len - 32 - TAGLEN;
-    if (payload_out_capacity < payload_len) return -1;
+    if (!wire) return -1;
 
     if (role_ == Role::Responder && step_ == 0) {
-        // -> e, es (inbound)
+        // -> e, es, s, ss (inbound msg1)
+        // Layout: e(32) | enc_static(32+TAG) | enc_payload(payload+TAG)
+        const size_t prefix = 32 + (32 + TAGLEN);   // up to and incl. enc_static
+        if (wire_len < prefix + TAGLEN) return -1;
+        const size_t payload_len = wire_len - prefix - TAGLEN;
+        if (payload_out_capacity < payload_len) return -1;
+
         std::memcpy(s_->remote_ephemeral, wire, 32);
         s_->ss.mix_hash(s_->remote_ephemeral, 32);
 
+        // es: DH(responder_s_priv, initiator_e_pub)
         uint8_t dh[DHLEN];
         crypto_x25519(dh, s_->local_static.secret_key, s_->remote_ephemeral);
         s_->ss.mix_key(dh, DHLEN);
+
+        // s: decrypt the initiator's static public key (32 + 16 tag).
+        uint8_t s_enc[32 + TAGLEN];
+        std::memcpy(s_enc, wire + 32, sizeof(s_enc));
+        if (!s_->ss.decrypt_and_hash(s_enc, sizeof(s_enc))) {
+            crypto_wipe(dh, sizeof(dh));
+            return -1;
+        }
+        std::memcpy(s_->remote_static, s_enc, 32);
+        s_->has_remote_static = true;
+        crypto_wipe(s_enc, sizeof(s_enc));
+
+        // ss: DH(responder_s_priv, initiator_s_pub)
+        crypto_x25519(dh, s_->local_static.secret_key, s_->remote_static);
+        s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
-        // Decrypt payload in place in a local buffer, then copy out.
+        // payload
         uint8_t tmp[1500];
         if (payload_len + TAGLEN > sizeof(tmp)) return -1;
-        std::memcpy(tmp, wire + 32, payload_len + TAGLEN);
+        std::memcpy(tmp, wire + prefix, payload_len + TAGLEN);
         if (!s_->ss.decrypt_and_hash(tmp, payload_len + TAGLEN)) return -1;
         if (payload_len) std::memcpy(payload_out, tmp, payload_len);
         crypto_wipe(tmp, sizeof(tmp));
@@ -378,12 +428,22 @@ int HandshakeStateNK::read_message(const uint8_t* wire, size_t wire_len,
     }
 
     if (role_ == Role::Initiator && step_ == 1) {
-        // <- e, ee (inbound)
+        // <- e, ee, se (inbound msg2)
+        if (wire_len < 32 + TAGLEN) return -1;
+        const size_t payload_len = wire_len - 32 - TAGLEN;
+        if (payload_out_capacity < payload_len) return -1;
+
         std::memcpy(s_->remote_ephemeral, wire, 32);
         s_->ss.mix_hash(s_->remote_ephemeral, 32);
 
+        // ee: DH(initiator_e_priv, responder_e_pub)
         uint8_t dh[DHLEN];
         crypto_x25519(dh, s_->local_ephemeral.secret_key, s_->remote_ephemeral);
+        s_->ss.mix_key(dh, DHLEN);
+
+        // se: DH(s_initiator, e_responder) — initiator side computes
+        // DH(initiator_s_priv, responder_e_pub).
+        crypto_x25519(dh, s_->local_static.secret_key, s_->remote_ephemeral);
         s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
