@@ -10,11 +10,42 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d3dcompiler.h>
+#include <dxgi1_6.h>
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
 namespace vivora {
+
+// True when the display the window lives on currently has HDR enabled.
+// IDXGIOutput6::GetDesc1().ColorSpace reports G2084/P2020 when Windows
+// "Use HDR" is on for that output, and G22/P709 when it's an SDR desktop.
+// We pick the output whose HMONITOR matches the window; if none matches
+// (e.g. the window's monitor hangs off a different adapter than the decode
+// device) we fall back to the first output, then to SDR — the safe default
+// since tone-mapping down never blows out the image.
+static bool display_supports_hdr(IDXGIAdapter* adapter, HWND hwnd) {
+    if (!adapter) return false;
+    HMONITOR wnd_mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    bool fallback_hdr = false;
+    bool have_fallback = false;
+    ComPtr<IDXGIOutput> output;
+    for (UINT i = 0;
+         adapter->EnumOutputs(i, output.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND;
+         ++i) {
+        DXGI_OUTPUT_DESC od = {};
+        if (FAILED(output->GetDesc(&od))) continue;
+        ComPtr<IDXGIOutput6> o6;
+        if (FAILED(output.As(&o6))) continue;
+        DXGI_OUTPUT_DESC1 od1 = {};
+        if (FAILED(o6->GetDesc1(&od1))) continue;
+        const bool is_hdr =
+            (od1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+        if (od.Monitor == wnd_mon) return is_hdr;   // exact match wins
+        if (!have_fallback) { fallback_hdr = is_hdr; have_fallback = true; }
+    }
+    return fallback_hdr;
+}
 
 bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
                        uint32_t frame_width, uint32_t frame_height,
@@ -41,12 +72,24 @@ bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
     ComPtr<IDXGIFactory2> factory;
     adapter->GetParent(IID_PPV_ARGS(factory.GetAddressOf()));
 
+    // Only keep a PQ passthrough pipeline when the content is HDR *and* the
+    // display is in HDR mode.  HDR content on an SDR display takes the
+    // tone-mapping path instead (SDR swapchain + VP maps BT.2020/PQ ->
+    // BT.709), which avoids the washed-out / over-bright picture you get when
+    // PQ-encoded values land on an SDR monitor with no tone-map.
+    output_hdr_ = is_hdr_ && display_supports_hdr(adapter.Get(), hwnd);
+    if (is_hdr_) {
+        log::info("RENDER", "HDR content; display HDR=%s -> %s",
+                  output_hdr_ ? "on" : "off",
+                  output_hdr_ ? "PQ passthrough" : "tone-map to SDR");
+    }
+
     DXGI_SWAP_CHAIN_DESC1 sc_desc = {};
     sc_desc.Width = window_width;
     sc_desc.Height = window_height;
-    // HDR: 10-bit RGB swap chain with PQ color space — let OS tone-map to display.
-    // SDR: standard 8-bit BGRA.
-    sc_desc.Format = is_hdr_ ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+    // HDR display: 10-bit RGB swap chain with PQ color space.
+    // SDR display (incl. HDR content tone-mapped down): standard 8-bit BGRA.
+    sc_desc.Format = output_hdr_ ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
     sc_desc.SampleDesc.Count = 1;
     sc_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sc_desc.BufferCount = 2;
@@ -62,7 +105,8 @@ bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
     }
 
     // Tag swap chain color space so OS knows how to composite / tone-map.
-    if (is_hdr_) {
+    // Only when we're presenting genuine PQ pixels to an HDR display.
+    if (output_hdr_) {
         ComPtr<IDXGISwapChain3> sc3;
         if (SUCCEEDED(swapchain_.As(&sc3))) {
             HRESULT cs_hr = sc3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
@@ -85,14 +129,17 @@ bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
 
 bool D3dRenderer::create_intermediate() {
     // Frame-size RGB texture: VP writes here, shader pass reads from here.
-    // R10G10B10A2 for HDR (preserves PQ-encoded values), BGRA8 for SDR.
+    // R10G10B10A2 when presenting HDR (preserves PQ-encoded values); BGRA8
+    // for SDR output, including HDR content the VP has tone-mapped down — the
+    // intermediate format must match the VP output color space, not the
+    // source, or the tone-mapped SDR pixels would be re-quantised as PQ.
     D3D11_TEXTURE2D_DESC desc = {};
     desc.Width = frame_width_;
     desc.Height = frame_height_;
     desc.MipLevels = 1;
     desc.ArraySize = 1;
-    desc.Format = is_hdr_ ? DXGI_FORMAT_R10G10B10A2_UNORM
-                          : DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.Format = output_hdr_ ? DXGI_FORMAT_R10G10B10A2_UNORM
+                              : DXGI_FORMAT_B8G8R8A8_UNORM;
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -156,13 +203,39 @@ bool D3dRenderer::create_video_processor() {
     hr = video_context_.As(&vc1);
     if (SUCCEEDED(hr)) {
         if (is_hdr_) {
-            // HDR passthrough: BT.2020/PQ YCbCr -> BT.2020/PQ RGB.
-            // OS composes into HDR desktop (or tone-maps for SDR monitor).
+            // Source is BT.2020/PQ YCbCr regardless of the display.
             vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0,
                 DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020);
-            vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(),
-                DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
-            log::info("RENDER", "Color space: HDR10 passthrough (BT.2020/PQ)");
+            if (output_hdr_) {
+                // HDR display: passthrough to BT.2020/PQ RGB; OS composes
+                // into the HDR desktop.
+                vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(),
+                    DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+                log::info("RENDER", "Color space: HDR10 passthrough (BT.2020/PQ)");
+            } else {
+                // SDR display: the VP tone-maps PQ -> BT.709 G2.2 so the
+                // image isn't over-bright.  Hint the source luminance so the
+                // tone-mapper rolls off highlights sensibly (best-effort).
+                vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(),
+                    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+                ComPtr<ID3D11VideoContext2> vc2;
+                if (SUCCEEDED(video_context_.As(&vc2))) {
+                    DXGI_HDR_METADATA_HDR10 md = {};
+                    // Rec.2020 primaries + D65 white, in 0.00002 units.
+                    md.RedPrimary[0]   = 35400; md.RedPrimary[1]   = 14600;
+                    md.GreenPrimary[0] = 8500;  md.GreenPrimary[1] = 39850;
+                    md.BluePrimary[0]  = 6550;  md.BluePrimary[1]  = 2300;
+                    md.WhitePoint[0]   = 15635; md.WhitePoint[1]   = 16450;
+                    md.MaxMasteringLuminance = 1000u * 10000u;  // 1000 nits
+                    md.MinMasteringLuminance = 50;              // 0.005 nits
+                    md.MaxContentLightLevel      = 1000;
+                    md.MaxFrameAverageLightLevel = 400;
+                    vc2->VideoProcessorSetStreamHDRMetaData(
+                        vp_.Get(), 0, DXGI_HDR_METADATA_TYPE_HDR10,
+                        sizeof(md), &md);
+                }
+                log::info("RENDER", "Color space: HDR->SDR tone-map (BT.2020/PQ -> BT.709)");
+            }
         } else {
             // SDR: full range BT.709 straight through
             vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0,

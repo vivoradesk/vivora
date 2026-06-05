@@ -77,7 +77,12 @@ private:
     uint32_t window_width_ = 0;
     uint32_t window_height_ = 0;
     DXGI_FORMAT frame_format_ = DXGI_FORMAT_NV12;
-    bool is_hdr_ = false;
+    bool is_hdr_ = false;      // decoded content is HDR (P010/P016 / BT.2020 PQ)
+    // The client display actually has HDR enabled.  Only when this is true do
+    // we keep a PQ passthrough pipeline; otherwise (HDR content on an SDR
+    // display) the VideoProcessor tone-maps BT.2020/PQ -> BT.709/SDR so the
+    // picture isn't blown out / washed out.
+    bool output_hdr_ = false;
     bool has_frame_ = false;
 };
 
