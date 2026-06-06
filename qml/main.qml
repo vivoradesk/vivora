@@ -476,6 +476,16 @@ ApplicationWindow {
             }
         }
 
+        // Divider — sets the Recent list (which mixes outgoing ↑ and
+        // incoming ↓ peers) apart from the "connect to a peer" input above.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            Layout.topMargin: 2
+            color: theme.border
+            visible: App.peers.rowCount() > 0
+        }
+
         // Recent label + count
         RowLayout {
             Layout.fillWidth: true
