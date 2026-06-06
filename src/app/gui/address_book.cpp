@@ -107,6 +107,14 @@ void AddressBook::setTrustedByPubkey(const QString& pubkeyHex, bool trusted) {
     }
 }
 
+void AddressBook::setTrusted(int row, bool trusted) {
+    if (row < 0 || row >= peers_.size()) return;
+    if (peers_[row].trusted == trusted) return;
+    peers_[row].trusted = trusted;
+    emit dataChanged(index(row), index(row), {TrustedRole});
+    save();
+}
+
 void AddressBook::remove(int row) {
     if (row < 0 || row >= peers_.size()) return;
     beginRemoveRows({}, row, row);

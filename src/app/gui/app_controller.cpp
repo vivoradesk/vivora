@@ -30,12 +30,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     approvalGate_->set_callback([this](uint64_t key,
                                        const std::string& peer_code,
                                        const std::string& pubkey_hex,
-                                       const std::string& ip_port) {
+                                       const std::string& ip_port,
+                                       const std::string& device_name) {
         QString k        = QString::number(key);
         QString code     = QString::fromStdString(peer_code);
         QString pubkey   = QString::fromStdString(pubkey_hex);
         QString ip       = QString::fromStdString(ip_port);
-        QMetaObject::invokeMethod(this, [this, k, code, pubkey, ip] {
+        QString name     = QString::fromStdString(device_name);
+        QMetaObject::invokeMethod(this, [this, k, code, pubkey, ip, name] {
             // Apply the approval policy here (GUI thread) so HostSession
             // stays dumb — it just reports Pending, we decide.
             //   0 = always_prompt        → show dialog
@@ -70,7 +72,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             if (tray_) tray_->notify("Vivora — incoming connection",
                 QString("A peer (%1) wants to view your desktop.").arg(ip));
             emit connectionApprovalRequested(k, code, pubkey, ip,
-                                             recognized, seenCount);
+                                             recognized, seenCount, name);
         }, Qt::QueuedConnection);
     });
     connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
@@ -135,7 +137,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             emit connectionApprovalRequested(
                 "424242", "civic-panda-4644",
                 "6d2e0c4a7f3b9e1182a4c5d6e7f8091a2b3c4d5e6f70812233445566778899aa",
-                "192.168.3.243:62378", /*recognized=*/false, /*seenCount=*/0);
+                "192.168.3.243:62378", /*recognized=*/false, /*seenCount=*/0,
+                "John's MacBook Pro");
         });
     }
 }

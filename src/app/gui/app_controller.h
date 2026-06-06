@@ -97,7 +97,8 @@ signals:
                                      QString pubkeyHex,
                                      QString ipPort,
                                      bool    recognized,
-                                     int     seenCount);
+                                     int     seenCount,
+                                     QString deviceName);
 
 private:
     void loadIdentity();        // populates myPeerCode_ + myPubkeyHex_

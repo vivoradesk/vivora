@@ -301,6 +301,7 @@ ListView {
         property string rolePubkey: model.pubkey  || ""
         property int    roleDirection: model.direction || 0  // 0=unknown 1=out 2=in
         property var    roleLastSeen:  model.lastSeen
+        property bool   roleTrusted:   model.trusted || false
         property string displayLabel: roleAlias.length > 0 ? roleAlias : roleCode
 
         RowLayout {
@@ -486,6 +487,14 @@ ListView {
                 glyph: "⧉"
                 enabled: row.rolePubkey.length > 0
                 onTriggered: clipText.text = row.rolePubkey
+            }
+            // Auto-accept (trust) toggle — lets the user grant or revoke the
+            // "don't ask again" permission set from the approval dialog.
+            MItem {
+                text: row.roleTrusted ? "Stop auto-accepting" : "Always auto-accept"
+                glyph: row.roleTrusted ? "⊘" : "✓"
+                enabled: row.rolePubkey.length > 0
+                onTriggered: App.peers.setTrusted(index, !row.roleTrusted)
             }
             // Pin/unpin lands with the address-book pin feature; drawn
             // disabled until the model gains a `pinned` field.

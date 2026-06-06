@@ -71,6 +71,9 @@ public:
     // Set/clear the "trusted" (don't-ask-again) flag for the entry with this
     // pubkey.  No-op if the pubkey isn't in the book.  Persists.
     void setTrustedByPubkey(const QString& pubkeyHex, bool trusted);
+    // Row-based variant for the Recent context menu (revoke / grant
+    // auto-accept).  Persists.
+    Q_INVOKABLE void setTrusted(int row, bool trusted);
 
     // For C++ callers (AppController, primarily).
     const Peer* findByPubkey(const QString& pubkeyHex) const;

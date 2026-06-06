@@ -33,13 +33,14 @@ ApplicationWindow {
             settingsLoader.active = true
         }
         function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort,
-                                               recognized, seenCount) {
+                                               recognized, seenCount, deviceName) {
             // Queue the request and surface the window.  Concurrent
             // pending peers are handled one at a time via the FIFO in
             // approvalLoader — the dialog shows a "N more waiting" badge.
             approvalLoader.enqueue({ key: key, peerCode: peerCode,
                                      pubkeyHex: pubkeyHex, ipPort: ipPort,
-                                     recognized: recognized, seenCount: seenCount })
+                                     recognized: recognized, seenCount: seenCount,
+                                     deviceName: deviceName })
             window.show()
             window.raise()
             window.requestActivate()
@@ -75,7 +76,7 @@ ApplicationWindow {
         // one at a time rather than the latest clobbering the rest.
         property var queue: []
         property var current: ({ key: "", peerCode: "", pubkeyHex: "", ipPort: "",
-                                 recognized: false, seenCount: 0 })
+                                 recognized: false, seenCount: 0, deviceName: "" })
 
         function enqueue(item) {
             var q = queue.slice()
@@ -105,6 +106,7 @@ ApplicationWindow {
             ipPort:      approvalLoader.current.ipPort
             recognized:  approvalLoader.current.recognized
             seenCount:   approvalLoader.current.seenCount
+            deviceName:  approvalLoader.current.deviceName
             morePending: approvalLoader.queue.length
             onApproved: (key, remember) => { App.approveConnection(key, remember); approvalLoader.advance() }
             onRejected: (key) => { App.rejectConnection(key); approvalLoader.advance() }

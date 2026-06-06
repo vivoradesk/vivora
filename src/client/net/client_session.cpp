@@ -12,10 +12,30 @@
 #include <chrono>
 #include <thread>
 
+#if defined(_WIN32)
+#  include <winsock2.h>   // gethostname (Winsock already initialised by sockets)
+#else
+#  include <unistd.h>     // gethostname
+#endif
+
 namespace vivora::client {
 
 static const uint8_t HELLO_MAGIC[] = { 'D','E','S','K','B','E','A','M', 0x01 };
 static const uint8_t HELLO_ACK[]   = { 'D','E','S','K','B','E','A','M', 0x01, 0x00 };
+
+// Best-effort local device name for the approval prompt (VIV-61).  Capped to
+// 63 bytes so it fits the 1-byte length prefix in the HELLO payload.  Empty
+// on failure — the host falls back to a generic label.
+static std::string local_device_name() {
+    char buf[256] = {};
+    if (gethostname(buf, sizeof(buf) - 1) == 0 && buf[0] != '\0') {
+        buf[sizeof(buf) - 1] = '\0';
+        std::string n(buf);
+        if (n.size() > 63) n.resize(63);
+        return n;
+    }
+    return std::string();
+}
 
 void ClientSession::set_host_key(const uint8_t host_pk[32]) {
     std::memcpy(host_static_pk_, host_pk, 32);
@@ -779,15 +799,19 @@ void ClientSession::send_hello() {
     }
     handshake_complete_ = false;
 
-    // Inner payload: HELLO_MAGIC + audio port (unchanged semantics — this is
-    // just the plaintext the host needs to bootstrap its client record).
-    uint8_t inner[32];
+    // Inner payload: HELLO_MAGIC | audio port (2) | name len (1) | device name.
+    // The name (VIV-61) lets the host label the approval prompt.
+    uint8_t inner[96];
     std::memcpy(inner, HELLO_MAGIC, sizeof(HELLO_MAGIC));
     inner[sizeof(HELLO_MAGIC)]     = static_cast<uint8_t>(audio_local_port_ & 0xFF);
     inner[sizeof(HELLO_MAGIC) + 1] = static_cast<uint8_t>((audio_local_port_ >> 8) & 0xFF);
-    const size_t inner_len = sizeof(HELLO_MAGIC) + 2;
+    size_t inner_len = sizeof(HELLO_MAGIC) + 2;
+    const std::string dn = local_device_name();
+    const uint8_t nlen = static_cast<uint8_t>(dn.size());   // already <= 63
+    inner[inner_len++] = nlen;
+    if (nlen) { std::memcpy(inner + inner_len, dn.data(), nlen); inner_len += nlen; }
 
-    uint8_t msg1[128];
+    uint8_t msg1[256];
     size_t msg1_len = handshake_.write_message(inner, inner_len,
                                                msg1, sizeof(msg1));
     if (msg1_len == 0) return;

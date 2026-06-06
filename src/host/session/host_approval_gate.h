@@ -29,7 +29,8 @@ public:
         uint64_t key,
         const std::string& peer_code,
         const std::string& pubkey_hex,
-        const std::string& ip_port)>;
+        const std::string& ip_port,
+        const std::string& device_name)>;
 
     // Address-key helper.  Stable per (ip, port) tuple.
     static uint64_t make_key(uint32_t ip_be, uint16_t port) {
@@ -48,14 +49,15 @@ public:
     void notify_pending(uint64_t key,
                         const std::string& peer_code,
                         const std::string& pubkey_hex,
-                        const std::string& ip_port) {
+                        const std::string& ip_port,
+                        const std::string& device_name) {
         OnPendingCallback cb_copy;
         {
             std::lock_guard<std::mutex> lock(mu_);
             states_[key] = ApprovalState::Pending;
             cb_copy = cb_;
         }
-        if (cb_copy) cb_copy(key, peer_code, pubkey_hex, ip_port);
+        if (cb_copy) cb_copy(key, peer_code, pubkey_hex, ip_port, device_name);
     }
 
     // GUI thread sets the resolution after the popup closes.  No-op if

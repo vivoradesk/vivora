@@ -583,6 +583,21 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
             | (static_cast<uint16_t>(inner[sizeof(HELLO_MAGIC) + 1]) << 8);
     }
 
+    // Optional viewer device name (VIV-61): MAGIC(9) | port(2) | len(1) | name.
+    // Self-asserted but integrity-protected by the Noise transcript — a
+    // display hint for the approval prompt, as trustworthy as the static key.
+    std::string client_name;
+    {
+        const int name_off = static_cast<int>(sizeof(HELLO_MAGIC)) + 2;
+        if (inner_len > name_off) {
+            const int nlen = inner[name_off];
+            if (nlen > 0 && name_off + 1 + nlen <= inner_len) {
+                client_name.assign(reinterpret_cast<const char*>(inner + name_off + 1),
+                                   static_cast<size_t>(nlen));
+            }
+        }
+    }
+
     // Build msg2: HELLO_ACK || codec byte, encrypted inside the Noise frame.
     uint8_t ack_inner[32];
     std::memcpy(ack_inner, HELLO_ACK, sizeof(HELLO_ACK));
@@ -682,7 +697,7 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
             (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
         approval_gate_->notify_pending(
             host::HostApprovalGate::make_key(sender.ip, sender.port),
-            peer_code, pubkey_hex, ip);
+            peer_code, pubkey_hex, ip, client_name);
         log::info("HostSession", "Client %s awaiting approval", ip);
     }
 

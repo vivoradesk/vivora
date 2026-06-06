@@ -32,6 +32,9 @@ Dialog {
     // card (green recognised / amber new key).
     property bool   recognized: false
     property int    seenCount:  0
+    // Self-reported viewer device name (VIV-61); falls back to a network
+    // scope label when the peer didn't send one.
+    property string deviceName: ""
     // Bound to the "Trust this device — don't ask again" checkbox; passed
     // back on approve so the host pins the viewer as trusted.
     property bool   trustChecked: false
@@ -172,11 +175,15 @@ Dialog {
             Layout.fillWidth: true
             spacing: 2
             Label {
-                text: dialog.isLan ? "Peer on your local network"
-                                   : "Peer on the internet"
+                text: dialog.deviceName.length > 0
+                      ? dialog.deviceName
+                      : (dialog.isLan ? "Peer on your local network"
+                                      : "Peer on the internet")
                 color: t.text
                 font.pixelSize: 16
                 font.bold: true
+                elide: Text.ElideRight
+                Layout.fillWidth: true
             }
             Label {
                 text: dialog.ipPort + " · " + dialog.transport
