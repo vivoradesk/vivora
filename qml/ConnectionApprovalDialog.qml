@@ -236,13 +236,24 @@ Dialog {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
-                    // Viewer fingerprint — populated by the IK handshake.
+                    // Viewer peer code — the human-readable identity derived
+                    // from the same key as the fingerprint below.  Primary.
+                    Label {
+                        visible: dialog.peerCode.length > 0
+                        text: dialog.peerCode
+                        color: t.text
+                        font.pixelSize: 13
+                        font.family: t.mono
+                        topPadding: 1
+                    }
+                    // Canonical hex fingerprint — small, for out-of-band
+                    // verification.  Populated by the IK handshake.
                     Label {
                         visible: dialog.pubkeyHex.length >= 12
                         text: "ED25519 · " + dialog.pubkeyHex.substring(0, 6)
                               + " … " + dialog.pubkeyHex.substring(dialog.pubkeyHex.length - 4)
                         color: t.textMuted
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         font.family: t.mono
                     }
                 }

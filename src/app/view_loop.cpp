@@ -124,6 +124,11 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                     return false;
                 }
                 session_.set_peer_pubkey(peer_pk);
+                // The peer's pubkey IS its Noise responder static — pin it as
+                // the host key too, otherwise start() refuses (host key unset)
+                // and a connect-by-pubkey (e.g. double-clicking an incoming
+                // peer in Recent) fails even though the code path works.
+                session_.set_host_key(peer_pk);
                 log::info("VIEW", "Rendezvous lookup (by pubkey): %s", cfg.rendezvous_server);
             } else if (peer_code::is_well_formed(cfg.peer_pubkey_hex)) {
                 session_.set_peer_code(cfg.peer_pubkey_hex);
