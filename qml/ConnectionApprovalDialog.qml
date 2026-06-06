@@ -43,7 +43,9 @@ Dialog {
     // off); clipboard/file_transfer are carried for the features to honour
     // once they ship (their toggles stay disabled until then).
     property bool   grantInput:     true
-    property bool   grantClipboard: true
+    // Clipboard/file default OFF and stay disabled until VIV-22 / VIV-39
+    // ship — showing them ON would imply a capability that doesn't exist.
+    property bool   grantClipboard: false
     property bool   grantFile:      false
 
     readonly property int totalSeconds: 30
@@ -59,7 +61,7 @@ Dialog {
         dialog.secondsRemaining = dialog.totalSeconds
         dialog.trustChecked = false
         dialog.grantInput = true
-        dialog.grantClipboard = true
+        dialog.grantClipboard = false
         dialog.grantFile = false
     }
 
