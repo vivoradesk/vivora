@@ -107,6 +107,20 @@ void AddressBook::setTrustedByPubkey(const QString& pubkeyHex, bool trusted) {
     }
 }
 
+void AddressBook::setGrantByPubkey(const QString& pubkeyHex,
+                                   bool input, bool clipboard, bool file) {
+    if (pubkeyHex.isEmpty()) return;
+    for (int i = 0; i < peers_.size(); ++i) {
+        if (peers_[i].pubkeyHex == pubkeyHex) {
+            peers_[i].grantInput     = input;
+            peers_[i].grantClipboard = clipboard;
+            peers_[i].grantFile      = file;
+            save();
+            return;
+        }
+    }
+}
+
 void AddressBook::setTrusted(int row, bool trusted) {
     if (row < 0 || row >= peers_.size()) return;
     if (peers_[row].trusted == trusted) return;
@@ -159,6 +173,9 @@ void AddressBook::load() {
         p.lastDirection = static_cast<PeerDirection>(o.value("direction").toInt(0));
         p.seen          = o.value("seen").toInt(0);
         p.trusted       = o.value("trusted").toBool(false);
+        p.grantInput     = o.value("grantInput").toBool(true);
+        p.grantClipboard = o.value("grantClipboard").toBool(true);
+        p.grantFile      = o.value("grantFile").toBool(false);
         if (!p.pubkeyHex.isEmpty()) peers_.push_back(p);
     }
 }
@@ -174,6 +191,9 @@ void AddressBook::save() const {
         o["direction"] = static_cast<int>(p.lastDirection);
         o["seen"]      = p.seen;
         o["trusted"]   = p.trusted;
+        o["grantInput"]     = p.grantInput;
+        o["grantClipboard"] = p.grantClipboard;
+        o["grantFile"]      = p.grantFile;
         arr.append(o);
     }
     QFile f(filePath());

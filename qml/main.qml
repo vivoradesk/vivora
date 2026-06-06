@@ -108,7 +108,10 @@ ApplicationWindow {
             seenCount:   approvalLoader.current.seenCount
             deviceName:  approvalLoader.current.deviceName
             morePending: approvalLoader.queue.length
-            onApproved: (key, remember) => { App.approveConnection(key, remember); approvalLoader.advance() }
+            onApproved: (key, remember, gInput, gClip, gFile) => {
+                App.approveConnection(key, remember, gInput, gClip, gFile)
+                approvalLoader.advance()
+            }
             onRejected: (key) => { App.rejectConnection(key); approvalLoader.advance() }
         }
     }

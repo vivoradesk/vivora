@@ -73,6 +73,10 @@ struct ClientInfo {
     // false → client is in Pending state (or gate is null = CLI mode,
     // in which case ::poll initialises to true on first frame).
     bool approved = false;
+    // Per-connection capabilities granted at approval (VIV-60).  `input`
+    // is enforced (view-only when false); clipboard/file_transfer flags
+    // are stored for those features to honour when they ship.
+    CapabilityGrant grant{};
     // Audio destination registered with AudioSender?  Cleared until
     // approval lands so a Rejected client never gets audio bytes.
     bool audio_registered = false;

@@ -63,7 +63,13 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                 || (mode == 2 && recognized)
                 || (mode == 1 && recognized);
             if (autoAccept) {
-                approveConnection(k);   // records the contact via the stash
+                // Reuse the grant last chosen for this peer (VIV-60) so a
+                // view-only trusted peer stays view-only; full access by
+                // default for a freshly auto-accepted known peer.
+                const bool gi = peer ? peer->grantInput     : true;
+                const bool gc = peer ? peer->grantClipboard : true;
+                const bool gf = peer ? peer->grantFile      : false;
+                approveConnection(k, false, gi, gc, gf);
                 return;
             }
             // System notification so the user notices the prompt when the
@@ -264,28 +270,38 @@ void AppController::showMainWindow() {
     emit showWindowRequested();
 }
 
-void AppController::approveConnection(const QString& key, bool remember) {
+void AppController::approveConnection(const QString& key, bool remember,
+                                      bool input, bool clipboard,
+                                      bool fileTransfer) {
     if (!approvalGate_) return;
     bool ok = false;
     uint64_t k = key.toULongLong(&ok);
     if (!ok) return;
+    // Record the capability grant before flipping to Approved so HostSession
+    // reads the right grant on the transition (VIV-60).
+    approvalGate_->set_grant(k, vivora::host::CapabilityGrant{
+        input, clipboard, fileTransfer});
     approvalGate_->set_state(k, vivora::host::ApprovalState::Approved);
 
     // Record the viewer in the address book (seen++, surfaces under Recent
     // as an incoming ↓ peer) and, if the user ticked "don't ask again", pin
-    // it as trusted so future connects auto-accept (VIV-61).
+    // it as trusted so future connects auto-accept (VIV-61).  Persist the
+    // grant either way so a later auto-accept reuses it (VIV-60).
     auto it = pendingApprovals_.find(key);
     if (it != pendingApprovals_.end()) {
         const QString pubkey = it.value().first;
         const QString pcode  = it.value().second;
         if (peers_ && !pubkey.isEmpty()) {
             peers_->touchIncoming(pubkey, pcode);
+            peers_->setGrantByPubkey(pubkey, input, clipboard, fileTransfer);
             if (remember) peers_->setTrustedByPubkey(pubkey, true);
         }
         pendingApprovals_.erase(it);
     }
-    log::info("AppController", "Approved connection key=%llu (remember=%d)",
-              static_cast<unsigned long long>(k), remember ? 1 : 0);
+    log::info("AppController",
+              "Approved key=%llu remember=%d input=%d clip=%d file=%d",
+              static_cast<unsigned long long>(k), remember ? 1 : 0,
+              input, clipboard, fileTransfer);
 }
 
 void AppController::rejectConnection(const QString& key) {

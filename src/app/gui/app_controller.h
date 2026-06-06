@@ -69,8 +69,12 @@ public slots:
     // ConnectionApprovalDialog buttons.  `key` is the per-client
     // identifier the controller surfaced via connectionApprovalRequested.
     // `remember` (VIV-61) pins the viewer as trusted so future connects
-    // from the same key auto-accept ("don't ask again").
-    Q_INVOKABLE void approveConnection(const QString& key, bool remember = false);
+    // from the same key auto-accept ("don't ask again").  input/clipboard/
+    // fileTransfer (VIV-60) are the per-connection capability grants from
+    // the dialog toggles.
+    Q_INVOKABLE void approveConnection(const QString& key, bool remember = false,
+                                       bool input = true, bool clipboard = true,
+                                       bool fileTransfer = false);
     Q_INVOKABLE void rejectConnection(const QString& key);
 
     // Force an immediate rendezvous re-registration.  QML calls this

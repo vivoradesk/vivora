@@ -31,6 +31,12 @@ struct Peer {
     PeerDirection lastDirection = PeerDirection::Unknown;
     int           seen    = 0;     // number of recorded contacts (for "seen N times")
     bool          trusted = false; // "don't ask again" — auto-accept incoming (VIV-61)
+    // Capabilities last granted to this peer (VIV-60).  Reused on auto-accept
+    // so a view-only + trusted peer keeps view-only instead of silently
+    // gaining full control.
+    bool          grantInput     = true;
+    bool          grantClipboard = true;
+    bool          grantFile      = false;
 };
 
 class AddressBook : public QAbstractListModel {
@@ -74,6 +80,11 @@ public:
     // Row-based variant for the Recent context menu (revoke / grant
     // auto-accept).  Persists.
     Q_INVOKABLE void setTrusted(int row, bool trusted);
+
+    // Store the capability grant last chosen for a peer (VIV-60), so a
+    // trusted peer's auto-accept reuses it.  No-op if pubkey not in book.
+    void setGrantByPubkey(const QString& pubkeyHex,
+                          bool input, bool clipboard, bool file);
 
     // For C++ callers (AppController, primarily).
     const Peer* findByPubkey(const QString& pubkeyHex) const;

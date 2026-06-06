@@ -173,6 +173,11 @@ void HostSession::poll() {
             const auto s = approval_gate_->get_state(key);
             if (s == host::ApprovalState::Approved) {
                 client.approved = true;
+                client.grant = approval_gate_->get_grant(key);   // VIV-60
+                log::info("HostSession",
+                    "Client approved (input=%d clipboard=%d file=%d)",
+                    client.grant.input, client.grant.clipboard,
+                    client.grant.file_transfer);
                 client.idr_needed = true;   // fresh stream → start with keyframe
                 new_client_flag_ = true;    // host_loop fires the IDR encode
                 // Register the audio destination that was stashed at
@@ -477,7 +482,10 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             // Without this gate the host's mouse/keyboard would jump
             // around immediately on connect, before the user even saw
             // the approval popup.
-            if (client && client->approved) {
+            // VIV-60: also drop when the connection was granted view-only
+            // (input capability off) — the viewer sees the screen but can't
+            // control it.
+            if (client && client->approved && client->grant.input) {
                 handle_input(payload, payload_len);
             }
             break;

@@ -14,6 +14,18 @@ enum class ApprovalState : int {
     Rejected = 2,
 };
 
+// Per-connection capabilities granted when the user accepts (VIV-60).
+//   input         — inject keyboard/mouse from this viewer (else view-only)
+//   clipboard     — sync clipboard with this viewer (honoured once VIV-22 lands)
+//   file_transfer — accept file-transfer offers (honoured once VIV-39 lands)
+// input is enforced today; clipboard/file_transfer flags are carried + stored
+// so the features can gate on them when implemented.
+struct CapabilityGrant {
+    bool input         = true;
+    bool clipboard     = true;
+    bool file_transfer = false;
+};
+
 // Shared object that gates incoming host connections behind a user
 // approval prompt.  Lives on the heap, owned by the GUI side, passed
 // into HostLoopConfig so the worker thread can read state + fire
@@ -75,6 +87,19 @@ public:
         return it == states_.end() ? ApprovalState::Pending : it->second;
     }
 
+    // GUI thread records the capability grant for a key alongside the
+    // Approved state (VIV-60).  HostSession reads it once on the
+    // Pending→Approved transition.
+    void set_grant(uint64_t key, const CapabilityGrant& g) {
+        std::lock_guard<std::mutex> lock(mu_);
+        grants_[key] = g;
+    }
+    CapabilityGrant get_grant(uint64_t key) const {
+        std::lock_guard<std::mutex> lock(mu_);
+        auto it = grants_.find(key);
+        return it == grants_.end() ? CapabilityGrant{} : it->second;
+    }
+
     // Pre-register an Approved entry, bypassing the prompt.  Used by:
     //   - VIVORA_AUTO_ACCEPT=1 dev override
     //   - future auto_accept / prompt_unknown_only settings paths
@@ -88,11 +113,13 @@ public:
     void forget(uint64_t key) {
         std::lock_guard<std::mutex> lock(mu_);
         states_.erase(key);
+        grants_.erase(key);
     }
 
 private:
     mutable std::mutex mu_;
     std::unordered_map<uint64_t, ApprovalState> states_;
+    std::unordered_map<uint64_t, CapabilityGrant> grants_;
     OnPendingCallback cb_;
 };
 

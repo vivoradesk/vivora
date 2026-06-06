@@ -39,17 +39,28 @@ Dialog {
     // back on approve so the host pins the viewer as trusted.
     property bool   trustChecked: false
 
+    // GRANT ON ACCEPT toggles (VIV-60).  input is enforced (view-only when
+    // off); clipboard/file_transfer are carried for the features to honour
+    // once they ship (their toggles stay disabled until then).
+    property bool   grantInput:     true
+    property bool   grantClipboard: true
+    property bool   grantFile:      false
+
     readonly property int totalSeconds: 30
     property int    secondsRemaining: 30
 
-    signal approved(string key, bool remember)
+    signal approved(string key, bool remember,
+                    bool input, bool clipboard, bool fileTransfer)
     signal rejected(string key)
 
     // Each time the parent rebinds us to a new pending peer, restart the
-    // auto-reject countdown and clear the per-peer trust checkbox.
+    // auto-reject countdown and reset the trust + grant controls to defaults.
     onApprovalKeyChanged: {
         dialog.secondsRemaining = dialog.totalSeconds
         dialog.trustChecked = false
+        dialog.grantInput = true
+        dialog.grantClipboard = true
+        dialog.grantFile = false
     }
 
     // Transport hint derived from the source IP — LAN for RFC1918 /
@@ -260,11 +271,13 @@ Dialog {
             }
         }
 
-        // ── GRANT ON ACCEPT (disabled placeholder — VIV-60) ──────────
+        // ── GRANT ON ACCEPT (VIV-60) ─────────────────────────────────
+        // Keyboard & mouse control is live (view-only when off).  Clipboard
+        // sync and File transfer are shown disabled until those features
+        // exist (VIV-22 / VIV-39); their grant flags still ride along.
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
-            opacity: 0.45      // greyed-out: drawn but inert until VIV-60
 
             Label {
                 text: "GRANT ON ACCEPT"
@@ -273,9 +286,21 @@ Dialog {
                 font.bold: true
                 font.letterSpacing: 1.2
             }
-            GrantRow { glyph: "⌨"; label: "Keyboard & mouse control"; on: true }
-            GrantRow { glyph: "⧉"; label: "Clipboard sync";           on: true }
-            GrantRow { glyph: "🗀"; label: "File transfer";            on: false }
+            GrantRow {
+                glyph: "⌨"; label: "Keyboard & mouse control"
+                on: dialog.grantInput
+                onToggled: dialog.grantInput = !dialog.grantInput
+            }
+            GrantRow {
+                glyph: "⧉"; label: "Clipboard sync"
+                on: dialog.grantClipboard
+                interactive: false
+            }
+            GrantRow {
+                glyph: "🗀"; label: "File transfer"
+                on: dialog.grantFile
+                interactive: false
+            }
         }
 
         // ── Trust this device — don't ask again (VIV-61) ─────────────
@@ -358,48 +383,64 @@ Dialog {
                 glyph: "✓"
                 primary: true
                 Layout.fillWidth: true
-                onClicked: dialog.approved(dialog.approvalKey, dialog.trustChecked)
+                onClicked: dialog.approved(dialog.approvalKey, dialog.trustChecked,
+                                           dialog.grantInput, dialog.grantClipboard,
+                                           dialog.grantFile)
             }
         }
     }
 
     // ── Reusable inline components ───────────────────────────────────
 
-    // A capability row: glyph + label on the left, pill switch on the
-    // right.  Inert (enabled:false) — the parent ColumnLayout greys the
-    // whole group; this just renders the on/off visual state.
-    component GrantRow: RowLayout {
+    // A capability row: glyph + label on the left, pill switch on the right.
+    // Wrapped in an Item so the click MouseArea anchor-fills it without
+    // fighting the layout (anchoring inside a RowLayout collapses the
+    // dialog).  `interactive:false` greys it and ignores clicks.
+    component GrantRow: Item {
         id: grantRow
         property string glyph: ""
         property string label: ""
         property bool   on: false
-        enabled: false
+        property bool   interactive: true
+        signal toggled()
         Layout.fillWidth: true
-        spacing: 9
-        Label {
-            text: grantRow.glyph
-            color: t.text
-            font.pixelSize: 14
-            Layout.preferredWidth: 18
-        }
-        Label {
-            text: grantRow.label
-            color: t.text
-            font.pixelSize: 12
-        }
-        Item { Layout.fillWidth: true }
-        Rectangle {            // pill switch, visual only
-            id: pill
-            Layout.preferredWidth: 36
-            Layout.preferredHeight: 21
-            radius: height / 2
-            color: grantRow.on ? t.text : t.border
-            Rectangle {
-                width: 17; height: 17; radius: height / 2
-                color: "#ffffff"
-                anchors.verticalCenter: parent.verticalCenter
-                x: grantRow.on ? pill.width - width - 2 : 2
+        implicitHeight: grRow.implicitHeight
+        opacity: interactive ? 1.0 : 0.45
+        RowLayout {
+            id: grRow
+            anchors.fill: parent
+            spacing: 9
+            Label {
+                text: grantRow.glyph
+                color: t.text
+                font.pixelSize: 14
+                Layout.preferredWidth: 18
             }
+            Label {
+                text: grantRow.label
+                color: t.text
+                font.pixelSize: 12
+            }
+            Item { Layout.fillWidth: true }
+            Rectangle {            // pill switch
+                id: pill
+                Layout.preferredWidth: 36
+                Layout.preferredHeight: 21
+                radius: height / 2
+                color: grantRow.on ? t.text : t.border
+                Rectangle {
+                    width: 17; height: 17; radius: height / 2
+                    color: "#ffffff"
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: grantRow.on ? pill.width - width - 2 : 2
+                }
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: grantRow.interactive
+            cursorShape: grantRow.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: grantRow.toggled()
         }
     }
 
