@@ -44,6 +44,10 @@ public:
     // Push diagnostics snapshot to the HUD overlay (drawn only when visible).
     void update_stats(const StatsView& stats);
 
+    // Centred status overlay shown before the first frame (e.g. "Connecting…",
+    // "Waiting for host to accept…").  Empty string hides it.
+    void set_status(const QString& text);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -121,6 +125,11 @@ private:
     StatsView last_stats_{};
     void rebuild_hud_text();
     void position_hud();
+
+    // Centred status overlay (connecting / waiting-for-approval / close
+    // reason).  Native child like the HUD so it sits over the D3D surface.
+    QLabel*   status_label_ = nullptr;
+    void position_status();
 };
 
 } // namespace vivora

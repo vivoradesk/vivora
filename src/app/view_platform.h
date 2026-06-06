@@ -80,6 +80,11 @@ struct ViewPlatform {
     // Called by the view loop ~once per second.
     virtual void update_stats(const StatsView& /*stats*/) {}
 
+    // Centred status overlay shown before the first frame arrives — e.g.
+    // "Connecting…", "Waiting for host to accept…", or a close reason.
+    // Empty string hides it.  No-op on platforms without an overlay yet.
+    virtual void set_status(const char* /*text*/) {}
+
     // Cleanup.
     virtual void shutdown() {}
 };

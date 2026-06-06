@@ -108,6 +108,10 @@ void WindowsViewPlatform::update_stats(const vivora::StatsView& stats) {
     if (window_) window_->update_stats(stats);
 }
 
+void WindowsViewPlatform::set_status(const char* text) {
+    if (window_) window_->set_status(text ? text : "");
+}
+
 void WindowsViewPlatform::shutdown() {
     window_.reset();
     app_.reset();

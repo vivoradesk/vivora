@@ -81,10 +81,57 @@ StreamWindow::StreamWindow(QWidget* parent)
         "}");
     hud_label_->setText("HUD ready (F9)");
     hud_label_->adjustSize();
+
+    // Status overlay (connecting / waiting-for-approval / close reason).
+    // Same top-level-overlay trick as the HUD, centred, larger font.
+    status_label_ = new HudLabel(nullptr);
+    status_label_->setWindowFlags(Qt::FramelessWindowHint
+                                | Qt::Tool
+                                | Qt::WindowStaysOnTopHint
+                                | Qt::WindowDoesNotAcceptFocus
+                                | Qt::WindowTransparentForInput);
+    status_label_->setAttribute(Qt::WA_TranslucentBackground);
+    status_label_->setAttribute(Qt::WA_ShowWithoutActivating);
+    status_label_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    status_label_->setAlignment(Qt::AlignCenter);
+    status_label_->setStyleSheet(
+        "QLabel {"
+        "  color: rgb(240, 240, 240);"
+        "  font-family: 'Segoe UI', 'DejaVu Sans', sans-serif;"
+        "  font-size: 15px;"
+        "  padding: 14px 22px;"
+        "}");
+    status_label_->hide();
 }
 
 StreamWindow::~StreamWindow() {
     if (hud_label_) { hud_label_->hide(); hud_label_->deleteLater(); hud_label_ = nullptr; }
+    if (status_label_) { status_label_->hide(); status_label_->deleteLater(); status_label_ = nullptr; }
+}
+
+void StreamWindow::set_status(const QString& text) {
+    if (!status_label_) return;
+    if (text.isEmpty()) {
+        status_label_->hide();
+        return;
+    }
+    if (status_label_->text() != text) {
+        status_label_->setText(text);
+        status_label_->adjustSize();
+    }
+    position_status();
+    // Don't float the overlay over other apps when we're not focused.
+    if (isActiveWindow() && !(windowState() & Qt::WindowMinimized)) {
+        status_label_->show();
+        status_label_->raise();
+    }
+}
+
+void StreamWindow::position_status() {
+    if (!status_label_) return;
+    const QPoint c = mapToGlobal(QPoint(width() / 2, height() / 2));
+    status_label_->move(c.x() - status_label_->width() / 2,
+                        c.y() - status_label_->height() / 2);
 }
 
 void StreamWindow::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {
@@ -308,6 +355,7 @@ void StreamWindow::resizeEvent(QResizeEvent* event) {
     }
     update_clip_rect();
     if (hud_visible_) position_hud();
+    if (status_label_ && !status_label_->text().isEmpty()) position_status();
 }
 
 bool StreamWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
@@ -509,11 +557,13 @@ void StreamWindow::position_hud() {
 void StreamWindow::moveEvent(QMoveEvent* event) {
     QWidget::moveEvent(event);
     if (hud_visible_) position_hud();
+    if (status_label_ && !status_label_->text().isEmpty()) position_status();
 }
 
 void StreamWindow::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
     if (hud_label_) hud_label_->hide();
+    if (status_label_) status_label_->hide();
 }
 
 void StreamWindow::showEvent(QShowEvent* event) {
@@ -525,6 +575,11 @@ void StreamWindow::showEvent(QShowEvent* event) {
         position_hud();
         hud_label_->show();
         hud_label_->raise();
+    }
+    if (status_label_ && !status_label_->text().isEmpty() && isActiveWindow()) {
+        position_status();
+        status_label_->show();
+        status_label_->raise();
     }
 }
 
@@ -551,6 +606,18 @@ void StreamWindow::changeEvent(QEvent* event) {
             position_hud();
             hud_label_->show();
             hud_label_->raise();
+        }
+    }
+    // Same activation/minimise discipline for the status overlay.
+    const bool status_on = status_label_ && !status_label_->text().isEmpty();
+    if (status_on && (event->type() == QEvent::ActivationChange
+                      || event->type() == QEvent::WindowStateChange)) {
+        if (isActiveWindow() && !(windowState() & Qt::WindowMinimized)) {
+            position_status();
+            status_label_->show();
+            status_label_->raise();
+        } else {
+            status_label_->hide();
         }
     }
 }

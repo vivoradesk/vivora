@@ -25,6 +25,7 @@ public:
     void update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) override;
     void set_stream_size(uint32_t width, uint32_t height) override;
     void update_stats(const vivora::StatsView& stats) override;
+    void set_status(const char* text) override;
     void shutdown() override;
 
 private:

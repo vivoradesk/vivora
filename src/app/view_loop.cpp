@@ -27,6 +27,14 @@ double ViewLoopState::rtt_ms() const { return session_.rtt_ms(); }
 
 client::SessionState ViewLoopState::state() const { return session_.state(); }
 
+void ViewLoopState::update_status(const char* text) {
+    // Dedup on the literal pointer — callers pass stable string literals, so
+    // the overlay isn't re-shown/raised every ~16ms tick.
+    if (text == status_shown_) return;
+    status_shown_ = text;
+    if (platform_) platform_->set_status(text);
+}
+
 void ViewLoopState::teardown() {
     if (torn_down_) return;
     torn_down_ = true;
@@ -188,20 +196,41 @@ bool ViewLoopState::iter() {
         audio_started_ = true;
     }
 
-    // Tear the view down on any Disconnected transition.  Previously this
-    // only fired when frames_decoded_ > 0, which left a session that never
-    // received a single frame (host ignored / rejected the approval prompt,
-    // or host unreachable) stuck on a blank white window forever — the loop
-    // kept spinning because the "real disconnect" guard never matched.  The
-    // state only reaches Disconnected after the connect/silence timeouts in
+    // Status overlay (VIV-62): before the first frame, tell the user what's
+    // happening instead of a blank window.  Cleared once frames flow.
+    if (frames_decoded_ == 0) {
+        const auto st = session.state();
+        if (st == client::SessionState::Connecting)
+            update_status("Connecting…");
+        else if (st == client::SessionState::Connected)
+            update_status("Waiting for host to accept…");
+    } else {
+        update_status("");
+    }
+
+    // Tear the view down on any Disconnected transition.  The state only
+    // reaches Disconnected after the connect/silence timeouts in
     // ClientSession, so the initial Connecting phase is unaffected.
     if (session.state() == client::SessionState::Disconnected) {
-        if (frames_decoded_ > 0)
+        if (frames_decoded_ > 0) {
             log::info("VIEW", "Disconnected from host");
-        else
+            return false;
+        }
+        // Never received a frame — host ignored/rejected the prompt, or is
+        // unreachable.  Linger briefly with a reason so the window doesn't
+        // just vanish, then close.
+        if (!disconnecting_) {
+            disconnecting_ = true;
+            disconnect_at_ = Clock::now();
+            update_status("Host didn't accept the connection, or is unreachable");
             log::warn("VIEW", "Connection closed before any video — "
                               "host rejected the request or is unreachable");
-        return false;
+        }
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - disconnect_at_).count();
+        if (waited > DISCONNECT_LINGER_MS) return false;
+        // Keep the window alive so the message is visible.
+        return true;
     }
 
     // Detect frame drops and request IDR for recovery.  Only act while a
