@@ -226,6 +226,45 @@ static bool test_jitter_buffer_drop_stale() {
     return true;
 }
 
+// Regression: a delivery stall while playing lets pop() advance the play
+// head past where the sender actually is.  When delivery resumes, every
+// packet lands behind the head and used to be dropped forever (100% PLC
+// that only a reconnect cleared — Win->Mac audio loss).  The buffer must
+// now detect the sustained behind-head run and hard-resync onto the live
+// stream so playback recovers on its own.
+static bool test_jitter_buffer_runaway_resync() {
+    JitterBuffer jb;
+    jb.init(10, 30, 800);            // target 3 frames, capacity 80
+    uint8_t d[2] = {7, 7};
+    std::vector<uint8_t> out; uint16_t seq;
+
+    // Prebuffer + start at 1000, drain the three.
+    jb.push(1000, d, 2);
+    jb.push(1001, d, 2);
+    jb.push(1002, d, 2);
+    if (jb.pop(out, seq) != JitterBuffer::Status::Data || seq != 1000) return false;
+    if (jb.pop(out, seq) != JitterBuffer::Status::Data) return false;
+    if (jb.pop(out, seq) != JitterBuffer::Status::Data) return false;
+
+    // Stall: nothing arrives for 50 ticks -> play head runs to ~1053.
+    for (int i = 0; i < 50; ++i) {
+        if (jb.pop(out, seq) != JitterBuffer::Status::Missing) return false;
+    }
+
+    // Sender resumes ~43 frames behind the head and stays behind (both
+    // advance one frame per tick).  Without the resync this is a permanent
+    // wedge: every push is behind, every pop is Missing.
+    uint16_t live = 1010;
+    bool recovered = false;
+    for (int i = 0; i < 200; ++i) {
+        jb.push(live++, d, 2);
+        if (jb.pop(out, seq) == JitterBuffer::Status::Data) { recovered = true; break; }
+    }
+    if (!recovered) return false;
+    std::printf("jitter_runaway_resync: ok (recovered at seq %u)\n", seq);
+    return true;
+}
+
 int main() {
     int ok = 0, fail = 0;
     auto run = [&](const char* name, bool (*fn)()) {
@@ -240,6 +279,7 @@ int main() {
     run("jitter_buffer_inorder",     test_jitter_buffer_inorder);
     run("jitter_buffer_reorder_gap", test_jitter_buffer_reorder_and_gap);
     run("jitter_buffer_drop_stale",  test_jitter_buffer_drop_stale);
+    run("jitter_buffer_runaway_resync", test_jitter_buffer_runaway_resync);
     std::printf("\n%d passed, %d failed\n", ok, fail);
     return fail == 0 ? 0 : 1;
 }

@@ -88,6 +88,13 @@ private:
     int consecutive_full_windows_ = 0;
     int growth_pause_remaining_   = 0;
 
+    // Consecutive packets that arrived behind the play head.  A healthy
+    // stream is never sustainedly behind; a long run means pop() advanced
+    // next_seq_ past the sender during a delivery stall (play head ran
+    // away), so push() hard-resyncs onto the live position once it crosses
+    // RESYNC_BEHIND_DROPS.  Cleared by any in-order packet.
+    int behind_drops_ = 0;
+
     // Rate-limit "far ahead" resyncs.  Under heavy loss + reorder
     // (Clumsy 50% + delay) packets can arrive out of band in a way
     // that constantly trips the reset path — each reset flips
@@ -101,6 +108,7 @@ private:
     static constexpr double SHRINK_PLC_RATE = 0.005;       // 0.5%
     static constexpr int    SHRINK_FULL_WINDOWS = 5;       // 5s of clean + full
     static constexpr int    SHRINK_FULL_SLACK   = 3;       // stored > target + 3
+    static constexpr int    RESYNC_BEHIND_DROPS = 25;      // ~250ms behind => desync
 };
 
 } // namespace vivora::audio

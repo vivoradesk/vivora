@@ -38,6 +38,7 @@ void JitterBuffer::reset() {
     plc_window_ = 0;
     consecutive_full_windows_   = 0;
     growth_pause_remaining_     = 0;
+    behind_drops_               = 0;
 }
 
 int JitterBuffer::target_ms() const {
@@ -55,38 +56,66 @@ void JitterBuffer::push(uint16_t seq, const uint8_t* data, size_t len) {
     } else {
         int16_t diff = seq_diff(seq, next_seq_);
         if (diff < 0) {
-            // Packet is behind play head — late or reordered delivery.
-            // Always drop; never reset.  Resetting on "far behind"
-            // (which an earlier version did when diff < -capacity)
-            // caused a wedge: clumsy / WiFi delays make some packets
-            // arrive 200-500ms late, each one triggered a backwards
-            // resync, the next normal packet then looked "far ahead"
-            // and re-reset forwards, and the ping-pong kept started_
-            // pinned to false so pop() returned Empty forever.
-            return;
-        }
-        // If seq jumped far ahead of play head (> capacity), it's
-        // either a legitimate stream restart or a single delayed
-        // packet that we mistakenly trusted as "the new head".  Rate-
-        // limit resyncs to once per RESET_MIN_INTERVAL — a real
-        // restart still recovers in one tick, but a delay storm can
-        // no longer keep retripping.
-        if (static_cast<size_t>(diff) >= capacity_) {
-            const auto now = std::chrono::steady_clock::now();
-            // Rate-limit resets only while audio is playing — if we
-            // already prebuffering (started_=false), we *need* the
-            // reset to re-anchor next_seq_ to the live sender
-            // position, otherwise the buffer stays stuck on a stale
-            // next_seq_ that no incoming packet will ever match.
-            if (started_ && now - last_reset_ < RESET_MIN_INTERVAL) {
-                // Drop this outlier; pop marches forward via Missing.
-                return;
+            // Packet is behind the play head — usually a late or reordered
+            // straggler, which we just drop.  We deliberately do NOT reset
+            // on a single "far behind" packet: an earlier version did, and
+            // under clumsy / WiFi reorder it ping-ponged with the far-ahead
+            // reset and pinned started_ to false forever.
+            //
+            // There is, however, a distinct sticky failure.  If delivery
+            // stalls briefly while audio is playing, pop() keeps advancing
+            // next_seq_ and the play head runs *ahead* of where the sender
+            // actually is.  When delivery resumes, every incoming packet
+            // then lands behind the head, gets dropped here, and pop()
+            // returns Missing forever — 100% PLC that only a reconnect
+            // cleared (observed Win->Mac when audio started ~30s into the
+            // session).  Distinguish it from ordinary reorder by requiring
+            // many *consecutive* behind-drops — a healthy stream is never
+            // sustainedly behind — then hard-resync forward onto the live
+            // position.  Rate-limited so a lone late straggler can't trip it.
+            if (started_ && ++behind_drops_ >= RESYNC_BEHIND_DROPS) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - last_reset_ < RESET_MIN_INTERVAL) {
+                    return;  // within cooldown — keep dropping for now
+                }
+                last_reset_   = now;
+                behind_drops_ = 0;
+                ring_.assign(capacity_, Slot{});
+                stored_   = 0;
+                started_  = false;   // re-prebuffer from the live position
+                next_seq_ = seq;     // anchor to the packet arriving now
+                log::info("JitterBuf",
+                          "resync: play head ran ahead of stream, "
+                          "re-anchoring to live (seq=%u)", seq);
+                // fall through: store this packet as the new head
+            } else {
+                return;  // ordinary late / reordered packet
             }
-            last_reset_ = now;
-            ring_.assign(capacity_, Slot{});
-            stored_    = 0;
-            started_   = false;
-            next_seq_  = seq;
+        } else {
+            behind_drops_ = 0;  // any in-order packet clears the streak
+            // If seq jumped far ahead of play head (> capacity), it's
+            // either a legitimate stream restart or a single delayed
+            // packet that we mistakenly trusted as "the new head".  Rate-
+            // limit resyncs to once per RESET_MIN_INTERVAL — a real
+            // restart still recovers in one tick, but a delay storm can
+            // no longer keep retripping.
+            if (static_cast<size_t>(diff) >= capacity_) {
+                const auto now = std::chrono::steady_clock::now();
+                // Rate-limit resets only while audio is playing — if we
+                // already prebuffering (started_=false), we *need* the
+                // reset to re-anchor next_seq_ to the live sender
+                // position, otherwise the buffer stays stuck on a stale
+                // next_seq_ that no incoming packet will ever match.
+                if (started_ && now - last_reset_ < RESET_MIN_INTERVAL) {
+                    // Drop this outlier; pop marches forward via Missing.
+                    return;
+                }
+                last_reset_ = now;
+                ring_.assign(capacity_, Slot{});
+                stored_    = 0;
+                started_   = false;
+                next_seq_  = seq;
+            }
         }
     }
 
