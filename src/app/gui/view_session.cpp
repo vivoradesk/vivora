@@ -6,6 +6,9 @@
 #ifdef VIVORA_MACOS
 #include "app/mac_view_platform.h"
 #endif
+#ifdef VIVORA_LINUX
+#include "app/linux_view_platform.h"
+#endif
 
 #include "common/utils/log.h"
 
@@ -46,8 +49,18 @@ bool ViewSession::init_platform() {
     }
     platform_ = std::move(p);
     return true;
+#elif defined(VIVORA_LINUX)
+    auto p = std::make_unique<LinuxViewPlatform>();
+    // argc/argv aren't used in the in-process path (QApplication exists).
+    static int dummy_argc = 0;
+    static char* dummy_argv[] = { nullptr };
+    if (!p->init(dummy_argc, dummy_argv,
+                 host_ip_storage_.c_str(), cfg_.port)) {
+        return false;
+    }
+    platform_ = std::move(p);
+    return true;
 #else
-    // Linux GUI not wired yet — see src/app/CMakeLists.txt comment.
     log::error("ViewSession", "GUI not built for this platform");
     return false;
 #endif

@@ -1,9 +1,9 @@
 if(UNIX AND NOT APPLE)
-    # Linux is CLI-only for now (P5 GUI is Windows-first).  Ubuntu 22.04
-    # jammy ships only Qt 6.2 base — no qt6-declarative-dev — so requiring
-    # Qml/Quick/QuickControls2 here would force every Linux contributor to
-    # build Qt from source.  Pull them in once we wire the Linux GUI.
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
+    # Linux GUI (VIV-5): the Qt Quick stack is now required here too.  Ubuntu's
+    # apt Qt (6.2 base) lacks qt6-declarative-dev, so point CMAKE_PREFIX_PATH at
+    # a Qt 6.5+ build with Quick (e.g. a from-source /opt|~/qt6).  OpenGL(Widgets)
+    # stay for the QtGlVideoView stream renderer.
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2 OpenGL OpenGLWidgets)
 else()
     find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2)
 endif()
@@ -102,10 +102,10 @@ if(VIVORA_MAC_APP_BUNDLE)
         COMMENT "Resetting TCC grants for ad-hoc signed dev.vivora.app")
 endif()
 
-# GUI sources land on Windows AND macOS — both use Qt 6 + QML + the same
-# AppController / HostWorker / ViewSession backend.  Linux stays CLI-only
-# until Ubuntu 24.04+ becomes the build floor (Qt 6.5+ in the apt repo).
-if(WIN32 OR APPLE)
+# GUI sources land on all three desktop platforms — same Qt 6 + QML +
+# AppController / HostWorker / ViewSession backend.  (Linux wired in VIV-5;
+# needs a Qt 6.5+ build with Quick on CMAKE_PREFIX_PATH.)
+if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
     target_sources(vivora PRIVATE
         gui/gui_main.cpp
         gui/app_controller.cpp
@@ -123,7 +123,7 @@ target_link_libraries(vivora PRIVATE
     vivora_common
     Qt6::Core Qt6::Widgets
 )
-if(WIN32 OR APPLE)
+if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
     target_link_libraries(vivora PRIVATE
         Qt6::Qml Qt6::Quick Qt6::QuickControls2
     )

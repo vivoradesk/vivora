@@ -33,4 +33,12 @@
         <file alias="tray/error-44.png">../icons/tray/tray-error-44.png</file>
         <file alias="tray/error-64.png">../icons/tray/tray-error-64.png</file>
     </qresource>
+    <qresource prefix="/fonts">
+        <file alias="Inter-Regular.ttf">fonts/Inter-Regular.ttf</file>
+        <file alias="Inter-Medium.ttf">fonts/Inter-Medium.ttf</file>
+        <file alias="Inter-SemiBold.ttf">fonts/Inter-SemiBold.ttf</file>
+        <file alias="Inter-Bold.ttf">fonts/Inter-Bold.ttf</file>
+        <file alias="JetBrainsMono-Regular.ttf">fonts/JetBrainsMono-Regular.ttf</file>
+        <file alias="JetBrainsMono-Bold.ttf">fonts/JetBrainsMono-Bold.ttf</file>
+    </qresource>
 </RCC>

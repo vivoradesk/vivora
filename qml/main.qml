@@ -131,7 +131,7 @@ ApplicationWindow {
         readonly property color accent:    "#3D6BFA"   // brand blue
         readonly property color sharing:   "#22a85c"   // green for active session
         readonly property color error:     "#dc3545"   // red
-        readonly property string monoFont: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
     }
 
     // Reusable component: a flat button with custom Rectangle background

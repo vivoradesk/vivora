@@ -10,6 +10,8 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFont>
+#include <QFontDatabase>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -83,6 +85,26 @@ constexpr const char* IPC_RAISE_CMD   = "raise\n";
 
 int run_gui(int argc, char** argv) {
     QApplication app(argc, argv);
+
+    // Bundled fonts (VIV-5): register Inter (UI) + JetBrains Mono (codes /
+    // fingerprints) so the GUI looks identical on every OS instead of falling
+    // back to Segoe UI / SF Pro / system mono.  QML refers to them by family
+    // name ("Inter", "JetBrains Mono"); the app default is set to Inter so
+    // every unstyled Label inherits it.
+    for (const char* f : {":/fonts/Inter-Regular.ttf",
+                          ":/fonts/Inter-Medium.ttf",
+                          ":/fonts/Inter-SemiBold.ttf",
+                          ":/fonts/Inter-Bold.ttf",
+                          ":/fonts/JetBrainsMono-Regular.ttf",
+                          ":/fonts/JetBrainsMono-Bold.ttf"}) {
+        if (QFontDatabase::addApplicationFont(QString::fromLatin1(f)) < 0)
+            log::warn("GUI", "Failed to load bundled font %s", f);
+    }
+    {
+        QFont ui("Inter");
+        ui.setPixelSize(13);
+        QApplication::setFont(ui);
+    }
 
     // Settings has to know the org/app name to derive QStandardPaths
     // entries (incl. lock file path); set them before any Settings touch.

@@ -24,7 +24,7 @@ ListView {
 
     signal peerActivated(string alias, string pubkey, string code)
 
-    readonly property string monoFont: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+    readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
 
     // Relative "seen 2h ago" formatting for the context-menu header.
     // model.lastSeen arrives as a JS Date (QDateTime, UTC instant).

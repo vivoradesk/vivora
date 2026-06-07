@@ -1,7 +1,7 @@
 #include "app/legacy_cli.h"
 #include "common/utils/log.h"
 
-#if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS)
+#if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
 #include "app/gui/gui_main.h"
 #define VIVORA_HAVE_GUI 1
 #endif
@@ -18,10 +18,10 @@
 // Entry point: branch between headless CLI and the QML GUI shell.
 //
 // CLI mode is selected by the presence of --host or --view in argv (the
-// existing scripted / server-style use case).  Anything else — including
-// no args at all — launches the GUI on Windows and macOS.  On Linux
-// where the GUI shell hasn't landed yet, no-arg falls back to printing
-// CLI help so the binary stays useful.
+// existing scripted / server-style / headless use case).  Anything else —
+// including no args at all — launches the QML GUI on Windows, macOS and
+// Linux (VIV-5).  Headless Linux hosts keep using --host and stay on the
+// CLI path (no X display needed).
 int main(int argc, char* argv[]) {
     bool cli_mode = false;
     for (int i = 1; i < argc; ++i) {

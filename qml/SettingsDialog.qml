@@ -30,7 +30,7 @@ Window {
         readonly property color textMuted: "#6f6b60"
         readonly property color border:    "#d4cdba"
         readonly property color accent:    "#3D6BFA"
-        readonly property string monoFont: "Geist Mono, JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
     }
 
     property int currentIndex: 3   // default to Network (most-used)
