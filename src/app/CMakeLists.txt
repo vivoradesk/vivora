@@ -73,33 +73,35 @@ if(VIVORA_MAC_APP_BUNDLE)
     target_sources(vivora PRIVATE ${_VIVORA_ICNS})
     set_source_files_properties(${_VIVORA_ICNS} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
-    # Ad-hoc codesign with a stable identifier so the OS sees the same
-    # "app" across rebuilds and the Screen Recording / Accessibility
-    # grants in TCC survive iteration.  Without this, every rebuild
-    # changes the signature and macOS treats the binary as a "new" app
-    # — the toggle still shows ON in System Settings but the grant
-    # actually belongs to the old signature and events get rejected.
-    # `--sign -` is the ad-hoc identity (no Apple Developer cert
-    # required); for distribution we'll swap this for a real Developer
-    # ID Application cert in a separate packaging step.
+    # Codesign identity for the bundle.  Two modes:
+    #   "-"        : ad-hoc (no cert).  Easy, but the designated requirement
+    #                is the cdhash, which changes every build — so TCC grants
+    #                (Screen Recording / Accessibility) DON'T survive rebuilds
+    #                and macOS re-prompts (worse on macOS 15+/26: it can even
+    #                loop on relaunch).  We reset TCC each build so the next
+    #                launch at least re-grants cleanly.
+    #   "<name>"   : a code-signing certificate (e.g. a one-time self-signed
+    #                "Vivora Dev" in the login keychain).  Its DR is
+    #                identifier+cert — STABLE across rebuilds and relaunches —
+    #                so grants persist and no reset is needed.  No Apple
+    #                Developer account required; a real Developer ID swaps in
+    #                here for distribution (VIV-14).
+    # Create the self-signed cert once (see docs/macos-codesign or VIV-14),
+    # then configure with -DVIVORA_MAC_CODESIGN_IDENTITY="Vivora Dev".
+    set(VIVORA_MAC_CODESIGN_IDENTITY "-" CACHE STRING
+        "codesign identity for Vivora.app (- = ad-hoc; a keychain cert name = stable TCC)")
     add_custom_command(TARGET vivora POST_BUILD
-        COMMAND codesign --force --sign - --identifier dev.vivora.app
+        COMMAND codesign --force --sign "${VIVORA_MAC_CODESIGN_IDENTITY}" --identifier dev.vivora.app
                 $<TARGET_BUNDLE_DIR:vivora>
-        COMMENT "Ad-hoc codesigning Vivora.app for stable TCC grants")
-    # Ad-hoc signatures don't preserve TCC grants across rebuilds —
-    # the cdhash changes every build and macOS treats the binary as
-    # "different".  The Settings toggle keeps showing ON but events
-    # are silently rejected and the system re-prompts on the next
-    # capture / inject attempt.  Reset cleanly so the next launch
-    # gets a fresh prompt that actually registers.  Real fix is a
-    # Developer ID Application cert (then the designated requirement
-    # is identifier+team, not cdhash) — pending Apple Developer
-    # enrolment; see [[project_post_rename_plan]].  || true so a
-    # not-yet-granted state doesn't fail the build.
-    add_custom_command(TARGET vivora POST_BUILD
-        COMMAND tccutil reset ScreenCapture dev.vivora.app || true
-        COMMAND tccutil reset Accessibility dev.vivora.app || true
-        COMMENT "Resetting TCC grants for ad-hoc signed dev.vivora.app")
+        COMMENT "Codesigning Vivora.app (identity: ${VIVORA_MAC_CODESIGN_IDENTITY})")
+    if(VIVORA_MAC_CODESIGN_IDENTITY STREQUAL "-")
+        # Ad-hoc only: cdhash changed → the old grant is dead.  Reset so the
+        # next launch re-prompts and registers.  A stable cert needs no reset.
+        add_custom_command(TARGET vivora POST_BUILD
+            COMMAND tccutil reset ScreenCapture dev.vivora.app || true
+            COMMAND tccutil reset Accessibility dev.vivora.app || true
+            COMMENT "Ad-hoc build: resetting TCC grants (set VIVORA_MAC_CODESIGN_IDENTITY for stable grants)")
+    endif()
 endif()
 
 # GUI sources land on all three desktop platforms — same Qt 6 + QML +
