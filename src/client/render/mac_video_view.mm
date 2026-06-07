@@ -64,11 +64,14 @@ namespace vivora { struct MacVideoViewImpl; }
 @property (nonatomic, strong) CALayer* cursorLayer;
 @property (nonatomic, strong) CATextLayer* hudLayer;
 @property (nonatomic, assign) BOOL hudVisible;
+@property (nonatomic, strong) CATextLayer* statusLayer;
 - (void)enterRelativeMode;
 - (void)exitRelativeMode;
 - (void)toggleHud;
 - (void)setHudText:(NSString*)text;
 - (void)layoutHud;
+- (void)setStatusText:(NSString*)text;
+- (void)layoutStatus;
 @end
 
 // Forward declaration so the view can call into C++.
@@ -117,6 +120,19 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         [self.layer addSublayer:_hudLayer];
         _hudVisible = NO;
 
+        // Centred status overlay (VIV-62) — "Connecting…" / "Waiting for host
+        // to accept…" before the first frame.  Hidden until set_status.
+        _statusLayer = [[CATextLayer alloc] init];
+        _statusLayer.hidden = YES;
+        _statusLayer.font = (__bridge CFTypeRef)[NSFont systemFontOfSize:15];
+        _statusLayer.fontSize = 15.0;
+        _statusLayer.foregroundColor = [[NSColor colorWithCalibratedRed:0.94 green:0.94 blue:0.94 alpha:1.0] CGColor];
+        _statusLayer.backgroundColor = [[NSColor colorWithCalibratedRed:0 green:0 blue:0 alpha:0.55] CGColor];
+        _statusLayer.cornerRadius = 8.0;
+        _statusLayer.alignmentMode = kCAAlignmentCenter;
+        _statusLayer.contentsScale = self.window.backingScaleFactor ?: 2.0;
+        [self.layer addSublayer:_statusLayer];
+
         lastModifierFlags = 0;
     }
     return self;
@@ -128,6 +144,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     [super layout];
     _videoLayer.frame = self.bounds;
     [self layoutHud];
+    [self layoutStatus];
 }
 
 - (void)toggleHud {
@@ -159,6 +176,33 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     CGFloat x = self.bounds.size.width  - w - margin;
     CGFloat y = self.bounds.size.height - h - margin;
     self.hudLayer.frame = CGRectMake(x, y, w, h);
+}
+
+- (void)setStatusText:(NSString*)text {
+    if (!text) text = @"";
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if (text.length == 0) {
+        self.statusLayer.hidden = YES;
+    } else {
+        self.statusLayer.string = text;
+        self.statusLayer.hidden = NO;
+        [self layoutStatus];
+    }
+    [CATransaction commit];
+}
+
+- (void)layoutStatus {
+    if (!self.statusLayer || self.statusLayer.hidden) return;
+    NSString* s = (NSString*)self.statusLayer.string ?: @"";
+    NSDictionary* attrs = @{ NSFontAttributeName: (__bridge id)self.statusLayer.font ?: [NSFont systemFontOfSize:15] };
+    NSSize ts = [s sizeWithAttributes:attrs];
+    const CGFloat padx = 22.0, pady = 14.0;
+    CGFloat w = ceil(ts.width)  + padx * 2;
+    CGFloat h = ceil(ts.height) + pady * 2;
+    CGFloat x = (self.bounds.size.width  - w) / 2.0;
+    CGFloat y = (self.bounds.size.height - h) / 2.0;
+    self.statusLayer.frame = CGRectMake(x, y, w, h);
 }
 
 - (void)updateTrackingAreas {
@@ -707,6 +751,15 @@ void MacVideoView::update_stats(const StatsView& stats) {
             (unsigned)stats.width, (unsigned)stats.height,
             hdr ? " HDR" : ""];
         [impl->view setHudText:txt];
+    }
+}
+
+void MacVideoView::set_status(const char* text) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || !impl->view) return;
+    @autoreleasepool {
+        NSString* s = text ? [NSString stringWithUTF8String:text] : @"";
+        [impl->view setStatusText:s];
     }
 }
 

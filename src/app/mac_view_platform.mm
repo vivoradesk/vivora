@@ -59,6 +59,10 @@ void MacViewPlatform::update_stats(const vivora::StatsView& stats) {
     view_.update_stats(stats);
 }
 
+void MacViewPlatform::set_status(const char* text) {
+    view_.set_status(text);
+}
+
 void MacViewPlatform::shutdown() {}
 
 #endif // VIVORA_MACOS

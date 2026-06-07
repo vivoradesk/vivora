@@ -50,6 +50,10 @@ public:
     // Push diagnostics snapshot to the F9 HUD overlay (no-op when hidden).
     void update_stats(const StatsView& stats);
 
+    // Centred status overlay shown before the first frame ("Connecting…",
+    // "Waiting for host to accept…", close reason).  Empty hides it (VIV-62).
+    void set_status(const char* text);
+
     // Pump NSApplication events non-blocking. Call regularly from the main loop.
     void pump_events();
 
