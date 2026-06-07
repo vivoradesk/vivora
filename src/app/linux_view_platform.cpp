@@ -121,6 +121,10 @@ void LinuxViewPlatform::update_stats(const vivora::StatsView& stats) {
     if (view_) view_->update_stats(local);
 }
 
+void LinuxViewPlatform::set_status(const char* text) {
+    if (view_) view_->set_status(QString::fromUtf8(text ? text : ""));
+}
+
 void LinuxViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     if (view_) view_->set_stream_size(width, height);
     else {

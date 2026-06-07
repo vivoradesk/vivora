@@ -61,6 +61,10 @@ public:
     // toggled by the F9 keypress handled inside this widget.
     void update_stats(const StatsView& stats);
 
+    // Centred status overlay shown before the first frame ("Connecting…",
+    // "Waiting for host to accept…", close reason).  Empty hides it (VIV-62).
+    void set_status(const QString& text);
+
     // Cursor sync: cache shape bitmap by id; switch widget cursor when
     // host signals an active shape change.  Position is intentionally
     // ignored — the local OS already places the cursor where the user
@@ -121,6 +125,10 @@ private:
     QLabel* hud_label_ = nullptr;
     bool    hud_visible_ = false;
     StatsView last_stats_{};
+
+    // Centred status overlay (connecting / waiting / close reason, VIV-62).
+    QLabel* status_label_ = nullptr;
+    void    position_status();
     void rebuild_hud_text();
     void position_hud();
 

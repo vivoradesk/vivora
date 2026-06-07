@@ -186,6 +186,40 @@ QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
     hud_label_->setText("HUD ready (F9)");
     hud_label_->adjustSize();
     hud_label_->hide();
+
+    // Centred status overlay (VIV-62) — plain child QLabel; QOpenGLWidget
+    // composites children normally (unlike the Windows D3D surface).
+    status_label_ = new QLabel(this);
+    status_label_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    status_label_->setAlignment(Qt::AlignCenter);
+    status_label_->setStyleSheet(
+        "QLabel {"
+        "  background: rgba(0, 0, 0, 150);"
+        "  color: rgb(240, 240, 240);"
+        "  font-family: 'Inter', 'DejaVu Sans', sans-serif;"
+        "  font-size: 15px;"
+        "  padding: 14px 22px;"
+        "  border-radius: 8px;"
+        "}");
+    status_label_->hide();
+}
+
+void QtGlVideoView::set_status(const QString& text) {
+    if (!status_label_) return;
+    if (text.isEmpty()) { status_label_->hide(); return; }
+    if (status_label_->text() != text) {
+        status_label_->setText(text);
+        status_label_->adjustSize();
+    }
+    position_status();
+    status_label_->show();
+    status_label_->raise();
+}
+
+void QtGlVideoView::position_status() {
+    if (!status_label_) return;
+    status_label_->move((width()  - status_label_->width())  / 2,
+                        (height() - status_label_->height()) / 2);
 }
 
 QtGlVideoView::~QtGlVideoView() {
@@ -376,6 +410,7 @@ void QtGlVideoView::initializeGL() {
 void QtGlVideoView::resizeGL(int /*w*/, int /*h*/) {
     recompute_viewport();
     position_hud();
+    if (status_label_ && !status_label_->text().isEmpty()) position_status();
 }
 
 void QtGlVideoView::paintGL() {
