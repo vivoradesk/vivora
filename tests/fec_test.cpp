@@ -13,6 +13,10 @@
 #include <random>
 #include <vector>
 
+#ifdef _MSC_VER
+#include <crtdbg.h>
+#endif
+
 using namespace vivora::net;
 using namespace vivora::protocol;
 
@@ -436,7 +440,11 @@ static void test_fuzz_within_budget() {
         std::uniform_int_distribution<int> m_dist(1, 5);
         const int k = k_dist(rng);
         const int m = m_dist(rng);
-        std::uniform_int_distribution<int> loss_dist(0, m);
+        // At most min(M, K) losses: recovery needs losses <= M, and you
+        // cannot drop more data packets than the K that exist.  (When M > K
+        // — valid, e.g. K=3 M=5 — clamping to K avoids drawing a `losses`
+        // bigger than the K data indices the drop loop below indexes.)
+        std::uniform_int_distribution<int> loss_dist(0, std::min(m, k));
         const int losses = loss_dist(rng);
 
         FecEncoder enc;
@@ -567,6 +575,16 @@ static void test_extreme_loss_garbage_fuzz() {
 }
 
 int main() {
+#ifdef _MSC_VER
+    // Route CRT/STL debug assertions (e.g. "vector subscript out of range")
+    // to stderr instead of a modal dialog so the test fails non-interactively
+    // under CI / automation.
+    for (int rep : {_CRT_ASSERT, _CRT_ERROR}) {
+        _CrtSetReportMode(rep, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(rep, _CRTDBG_FILE_STDERR);
+    }
+#endif
+    setvbuf(stdout, nullptr, _IONBF, 0);  // flush each line so a crash shows progress
     printf("=== Reed-Solomon FEC Tests ===\n");
     test_single_erasure();
     test_triple_erasure();
