@@ -414,9 +414,24 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             // Pull any already-received data packets from the ring.
             populate_group_from_ring(group);
         } else {
+            // A second FEC header for an existing group must agree on K/M
+            // with the first one we saw.  Under extreme loss a corrupted
+            // packet (or a stale group_id reused before its 300ms TTL) can
+            // present a *different* M; parity_idx was range-checked against
+            // this packet's M (line above) but indexes parity_shards, which
+            // was sized to the ORIGINAL M at header_received.  A larger M
+            // then writes past the vector -> heap overflow / segfault
+            // (VIV-11, reproducible on Linux under netem loss 50%).  Drop
+            // the mismatching packet; the group still recovers from shards
+            // that do agree.
+            if (k != group.k || m != group.m) return;
             // Skip the header we already have.
             p += static_cast<size_t>(k) * (4 + 2);
         }
+
+        // Belt-and-braces: never index parity_shards past its real size,
+        // even if a future change lets a mismatching M slip through above.
+        if (parity_idx >= group.parity_shards.size()) return;
 
         // Store parity shard (first copy wins).
         if (group.parity_shards[parity_idx].empty()) {

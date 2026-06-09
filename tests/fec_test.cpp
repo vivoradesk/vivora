@@ -37,6 +37,52 @@ static std::vector<uint8_t> make_data_wire(uint16_t seq_no, uint32_t timestamp,
     return wire;
 }
 
+// Craft an FEC parity wire packet with fully-controlled K/M/parity_idx/group_id
+// (the encoder never emits a mismatched group, so we build malformed ones by
+// hand to exercise the decoder's robustness).  Layout mirrors fec_codec.cpp:
+//   group_id(2 LE) | K(1) | M(1) | parity_idx(1) | keys(4*K) | lens(2*K) | shard
+static std::vector<uint8_t> make_fec_wire(uint16_t group_id, uint8_t k, uint8_t m,
+                                          uint8_t parity_idx, size_t shard_len,
+                                          uint16_t frame_seq = 0) {
+    constexpr size_t FEC_HEADER_FIXED = 5;  // group_id + K + M + idx
+    const size_t payload = FEC_HEADER_FIXED
+                         + static_cast<size_t>(k) * (4 + 2) + shard_len;
+    std::vector<uint8_t> wire(PacketHeader::WIRE_SIZE + payload);
+
+    PacketHeader hdr;
+    hdr.type = PacketType::Video;
+    hdr.seq_no = frame_seq;
+    hdr.timestamp = 0;
+    hdr.flags = FLAG_FEC;
+    hdr.payload_len = static_cast<uint16_t>(payload);
+    hdr.serialize(wire.data());
+
+    uint8_t* p = wire.data() + PacketHeader::WIRE_SIZE;
+    p[0] = static_cast<uint8_t>(group_id & 0xFF);
+    p[1] = static_cast<uint8_t>(group_id >> 8);
+    p += 2;
+    *p++ = k;
+    *p++ = m;
+    *p++ = parity_idx;
+    for (int j = 0; j < k; ++j) {
+        uint32_t key = (static_cast<uint32_t>(frame_seq) << 16) | j;
+        p[0] = static_cast<uint8_t>(key);
+        p[1] = static_cast<uint8_t>(key >> 8);
+        p[2] = static_cast<uint8_t>(key >> 16);
+        p[3] = static_cast<uint8_t>(key >> 24);
+        p += 4;
+    }
+    for (int j = 0; j < k; ++j) {
+        uint16_t l = static_cast<uint16_t>(shard_len);
+        p[0] = static_cast<uint8_t>(l & 0xFF);
+        p[1] = static_cast<uint8_t>(l >> 8);
+        p += 2;
+    }
+    for (size_t b = 0; b < shard_len; ++b)
+        *p++ = static_cast<uint8_t>(b * 5 + parity_idx);
+    return wire;
+}
+
 // Feed a set of wires through encoder, collecting all emitted FEC parity wires.
 static std::vector<std::vector<uint8_t>>
 encode_group(FecEncoder& enc,
@@ -438,6 +484,88 @@ static void test_fuzz_within_budget() {
     printf("    PASS (%d iterations)\n", iterations);
 }
 
+// Test 11 (VIV-11): a group_id reused with a different M used to index
+// parity_shards (sized to the FIRST M) out of bounds — a heap overflow that
+// segfaulted the Linux client under netem loss 50%.  The decoder must drop
+// the mismatching packet instead of writing past the vector.
+static void test_group_id_km_mismatch_no_oob() {
+    printf("  group-id reuse, mismatched K/M — no OOB (VIV-11)...\n");
+    FecDecoder dec;
+    std::vector<std::vector<uint8_t>> recovered;
+    const size_t shard = 200;
+
+    // Establish group 7 with K=4, M=2 → parity_shards sized to 2.
+    auto good = make_fec_wire(7, /*k=*/4, /*m=*/2, /*idx=*/0, shard);
+    dec.feed(good.data(), good.size(), recovered);
+
+    // Same group 7, but M=10 and parity_idx=9.  parity_idx passes the
+    // per-packet "< M" check yet indexes the size-2 parity_shards.  Pre-fix:
+    // heap-buffer-overflow.  Post-fix: dropped.
+    auto bad_m = make_fec_wire(7, /*k=*/4, /*m=*/10, /*idx=*/9, shard);
+    dec.feed(bad_m.data(), bad_m.size(), recovered);
+
+    // Same group 7, mismatched K — also dropped (stale pkt_keys/lens).
+    auto bad_k = make_fec_wire(7, /*k=*/20, /*m=*/2, /*idx=*/1, shard);
+    dec.feed(bad_k.data(), bad_k.size(), recovered);
+
+    dec.tick(recovered);
+    assert(recovered.empty());   // nothing spuriously recovered, no crash
+    printf("    PASS\n");
+}
+
+// Test 12 (VIV-11): blast the decoder with extreme loss + malformed packets
+// (random raw bytes, out-of-range/truncated FEC headers, reused group ids
+// with random K/M).  Pure no-crash / no-OOB soak — run under ASan/valgrind to
+// be meaningful.  Deterministic seed so failures reproduce.
+static void test_extreme_loss_garbage_fuzz() {
+    printf("  extreme loss + garbage fuzz (no crash)...\n");
+    std::mt19937 rng(0xC0FFEEu);
+    FecDecoder dec;
+    std::vector<std::vector<uint8_t>> recovered;
+
+    for (int iter = 0; iter < 4000; ++iter) {
+        switch (rng() % 5) {
+        case 0: {  // random raw garbage, possibly shorter than a header
+            std::uniform_int_distribution<int> len(0, 64);
+            std::vector<uint8_t> g(static_cast<size_t>(len(rng)));
+            for (auto& b : g) b = static_cast<uint8_t>(rng());
+            dec.feed(g.data(), g.size(), recovered);
+            break;
+        }
+        case 1: {  // crafted FEC with random (often invalid) K/M/idx/group
+            std::uniform_int_distribution<int> gd(0, 24), kd(0, 200),
+                md(0, 80), id(0, 80), sd(0, 300);
+            auto w = make_fec_wire(static_cast<uint16_t>(gd(rng)),
+                                   static_cast<uint8_t>(kd(rng)),
+                                   static_cast<uint8_t>(md(rng)),
+                                   static_cast<uint8_t>(id(rng)),
+                                   static_cast<size_t>(sd(rng)));
+            // Sometimes truncate to exercise short-buffer guards.
+            if ((rng() & 3) == 0 && w.size() > 12)
+                w.resize(10 + rng() % (w.size() - 10));
+            dec.feed(w.data(), w.size(), recovered);
+            break;
+        }
+        case 2: {  // valid-ish data wire over a small key space
+            std::uniform_int_distribution<int> sq(0, 40), ln(20, 400);
+            auto w = make_data_wire(static_cast<uint16_t>(sq(rng)), 0,
+                                    static_cast<size_t>(ln(rng)),
+                                    static_cast<uint8_t>(rng()));
+            dec.feed(w.data(), w.size(), recovered);
+            break;
+        }
+        case 3:
+            dec.tick(recovered);
+            break;
+        case 4:
+            if (rng() % 50 == 0) dec.reset();
+            break;
+        }
+        recovered.clear();
+    }
+    printf("    PASS\n");
+}
+
 int main() {
     printf("=== Reed-Solomon FEC Tests ===\n");
     test_single_erasure();
@@ -450,6 +578,8 @@ int main() {
     test_fec_first();
     test_two_groups_adaptive_m();
     test_fuzz_within_budget();
+    test_group_id_km_mismatch_no_oob();
+    test_extreme_loss_garbage_fuzz();
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }
