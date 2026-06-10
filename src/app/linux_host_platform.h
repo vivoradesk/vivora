@@ -3,17 +3,20 @@
 
 #include "app/host_platform.h"
 #include "host/capture/pipewire_capture.h"
-#include "host/encode/vaapi_encoder.h"
+#include "host/encode/linux_encoder.h"
+#include "host/encode/video_encoder.h"  // EncoderKind
 
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <queue>
 
 class LinuxHostPlatform : public vivora::HostPlatform {
 public:
-    bool init(uint32_t manual_bitrate_bps, vivora::VideoCodec codec);
+    bool init(uint32_t manual_bitrate_bps, vivora::VideoCodec codec,
+              vivora::EncoderKind encoder_kind);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -40,8 +43,9 @@ private:
     void on_pw_frame(const vivora::host::PipeWireCapture::Frame& f);
 
     vivora::host::PipeWireCapture cap_;
-    vivora::host::VaapiEncoder    enc_;
-    vivora::VideoCodec codec_ = vivora::VideoCodec::H264;
+    std::unique_ptr<vivora::host::ILinuxEncoder> enc_;
+    vivora::VideoCodec  codec_        = vivora::VideoCodec::H264;
+    vivora::EncoderKind encoder_kind_ = vivora::EncoderKind::Auto;
     // Set when first PipeWire frame arrives — init() blocks until then
     // so host_loop sees real capture dimensions for bitrate sizing.
     std::condition_variable first_frame_cv_;
@@ -58,7 +62,7 @@ private:
     // host_loop pops via get_encoded_packet().  The heartbeat tag rides
     // alongside the packet so the wire layer can switch off FEC for it.
     struct QueuedPacket {
-        vivora::host::VaapiEncoder::Packet pkt;
+        vivora::host::ILinuxEncoder::Packet pkt;
         bool heartbeat = false;
     };
     std::mutex enc_mu_;

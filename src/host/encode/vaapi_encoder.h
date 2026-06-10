@@ -3,6 +3,7 @@
 #ifdef VIVORA_LINUX
 
 #include "common/codec/video_codec.h"
+#include "host/encode/linux_encoder.h"
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -24,34 +25,22 @@ namespace vivora::host {
 // Pipeline (current):
 //   sw NV12 → AVHWFramesContext.av_hwframe_transfer_data → vaapi surface
 //          → avcodec_send_frame → encoded NAL units via avcodec_receive_packet.
-class VaapiEncoder {
+class VaapiEncoder : public ILinuxEncoder {
 public:
-    struct Config {
-        int  width  = 0;
-        int  height = 0;
-        int  fps    = 60;
-        int  bitrate_bps = 0;
-        VideoCodec codec = VideoCodec::HEVC;
-        // VAAPI render node — pick the one tied to the active GPU.
-        // Intel iGPU is normally renderD128, NVIDIA via VAAPI driver
-        // (rare) would be renderD129.  Falls back to first available.
-        const char* drm_node = "/dev/dri/renderD128";
-    };
-
-    struct Packet {
-        std::vector<uint8_t> data;
-        uint64_t pts_us = 0;
-        bool     keyframe = false;
-    };
+    // Config / Packet are shared across the Linux backends — see
+    // ILinuxEncoder.  Aliased here so the existing .cpp keeps referring to
+    // VaapiEncoder::Config / ::Packet unchanged.
+    using Config = ILinuxEncoder::Config;
+    using Packet = ILinuxEncoder::Packet;
 
     VaapiEncoder();
-    ~VaapiEncoder();
+    ~VaapiEncoder() override;
 
     VaapiEncoder(const VaapiEncoder&) = delete;
     VaapiEncoder& operator=(const VaapiEncoder&) = delete;
 
-    bool init(const Config& cfg);
-    void shutdown();
+    bool init(const Config& cfg) override;
+    void shutdown() override;
 
     // Push a CPU-side NV12 frame (Y plane + interleaved UV).  Strides may
     // be larger than width / (width) respectively; rows are read at the
@@ -63,7 +52,7 @@ public:
     // Push a CPU-side BGRx/BGRA frame; the encoder performs the
     // BGR→NV12 colour conversion internally via swscale before upload.
     // Convenience for the PipeWire SHM path which delivers BGRx.
-    bool encode_bgrx(const uint8_t* bgrx_data, int stride, uint64_t pts_us);
+    bool encode_bgrx(const uint8_t* bgrx_data, int stride, uint64_t pts_us) override;
 
     // Re-encode the last frame previously fed via encode_nv12/encode_bgrx.
     // The cached NV12 staging frame is re-uploaded to the VAAPI surface
@@ -71,19 +60,21 @@ public:
     // host_loop static-screen heartbeat to keep the wire cadence steady
     // when capture is silent.  Cheap: ~1.5 bpp upload, no sws_scale, no
     // BGRx snapshot.  Returns false until the first real frame arrives.
-    bool reencode_last(uint64_t pts_us);
+    bool reencode_last(uint64_t pts_us) override;
 
     // Pull next encoded packet (one NAL unit access-unit at a time).
     // Returns false when the encoder has no output ready right now.
-    bool get_packet(Packet& out);
+    bool get_packet(Packet& out) override;
 
     // Force an IDR on the next encoded frame.
-    void request_idr() { idr_requested_ = true; }
+    void request_idr() override { idr_requested_ = true; }
 
-    void set_bitrate(int bps);
+    void set_bitrate(int bps) override;
 
-    int width()  const { return cfg_.width; }
-    int height() const { return cfg_.height; }
+    int width()  const override { return cfg_.width; }
+    int height() const override { return cfg_.height; }
+
+    const char* backend_name() const override { return "VAAPI"; }
 
 private:
     Config         cfg_{};

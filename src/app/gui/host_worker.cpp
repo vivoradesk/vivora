@@ -83,7 +83,7 @@ void HostWorker::runOnWorkerThread() {
 #endif
 #ifdef VIVORA_LINUX
     auto* p = new LinuxHostPlatform();
-    if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec)) {
+    if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec, cfg_.encoder_kind)) {
         delete p;
         emit initFailed("Linux host platform init failed");
         return;

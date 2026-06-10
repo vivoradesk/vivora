@@ -5,9 +5,11 @@
 #include <chrono>
 
 bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
-                             vivora::VideoCodec codec) {
-    codec_       = codec;
-    bitrate_bps_ = manual_bitrate_bps;
+                             vivora::VideoCodec codec,
+                             vivora::EncoderKind encoder_kind) {
+    codec_        = codec;
+    bitrate_bps_  = manual_bitrate_bps;
+    encoder_kind_ = encoder_kind;
     if (!cap_.init([this](const vivora::host::PipeWireCapture::Frame& f) {
             on_pw_frame(f);
         })) {
@@ -43,7 +45,7 @@ void LinuxHostPlatform::shutdown() {
     shutting_down_.store(true, std::memory_order_release);
     cap_.stop();
     std::lock_guard<std::mutex> lk(enc_mu_);
-    enc_.shutdown();
+    if (enc_) enc_->shutdown();
 }
 
 uint32_t LinuxHostPlatform::capture_width()  const { return cap_w_; }
@@ -51,11 +53,11 @@ uint32_t LinuxHostPlatform::capture_height() const { return cap_h_; }
 
 void LinuxHostPlatform::set_bitrate(uint32_t bps) {
     bitrate_bps_ = bps;
-    if (enc_ready_) enc_.set_bitrate(static_cast<int>(bps));
+    if (enc_ready_ && enc_) enc_->set_bitrate(static_cast<int>(bps));
 }
 
 void LinuxHostPlatform::request_idr() {
-    if (enc_ready_) enc_.request_idr();
+    if (enc_ready_ && enc_) enc_->request_idr();
 }
 
 void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& f) {
@@ -63,7 +65,7 @@ void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& 
     if (!enc_ready_) {
         cap_w_ = f.width;
         cap_h_ = f.height;
-        vivora::host::VaapiEncoder::Config ec;
+        vivora::host::ILinuxEncoder::Config ec;
         ec.width  = static_cast<int>(f.width);
         ec.height = static_cast<int>(f.height);
         ec.fps    = 60;
@@ -71,13 +73,14 @@ void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& 
         ec.bitrate_bps = bitrate_bps_ > 0
             ? static_cast<int>(bitrate_bps_)
             : static_cast<int>(static_cast<int64_t>(f.width) * f.height * 60 / 10);
-        // HEVC via Intel iHD vaapi has a known assertion bug at some
-        // resolutions; H.264 is the safer default until that's resolved.
         ec.codec = codec_;
-        if (!enc_.init(ec)) {
-            vivora::log::error("HOST", "VAAPI encoder init failed");
+        // Factory probes NVENC (NVIDIA) first when allowed, else VAAPI (VIV-8).
+        enc_ = vivora::host::create_linux_encoder(encoder_kind_, ec);
+        if (!enc_) {
+            vivora::log::error("HOST", "no usable Linux encoder (NVENC/VAAPI both failed)");
             return;
         }
+        vivora::log::info("HOST", "Encoder backend: %s", enc_->backend_name());
         enc_ready_ = true;
         // Wake init() blocked on first frame.
         {
@@ -100,9 +103,9 @@ void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& 
     // through to encode_bgrx after shutdown() set the flag but before
     // it acquired enc_mu_ for the encoder teardown.
     if (shutting_down_.load(std::memory_order_acquire)) return;
-    if (!enc_.encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
-    vivora::host::VaapiEncoder::Packet pkt;
-    while (enc_.get_packet(pkt)) {
+    if (!enc_ || !enc_->encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
+    vivora::host::ILinuxEncoder::Packet pkt;
+    while (enc_->get_packet(pkt)) {
         queued_pkts_.push({std::move(pkt), /*heartbeat=*/false});
     }
 }
@@ -122,11 +125,11 @@ bool LinuxHostPlatform::capture_and_encode(uint64_t& pts_us,
 
 bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
     std::lock_guard<std::mutex> lk(enc_mu_);
-    if (!enc_ready_) return false;
-    if (!enc_.reencode_last(pts_us)) return false;
+    if (!enc_ready_ || !enc_) return false;
+    if (!enc_->reencode_last(pts_us)) return false;
     bool produced = false;
-    vivora::host::VaapiEncoder::Packet pkt;
-    while (enc_.get_packet(pkt)) {
+    vivora::host::ILinuxEncoder::Packet pkt;
+    while (enc_->get_packet(pkt)) {
         queued_pkts_.push({std::move(pkt), /*heartbeat=*/true});
         produced = true;
     }

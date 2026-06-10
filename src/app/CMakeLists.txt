@@ -308,7 +308,16 @@ if(UNIX AND NOT APPLE)
         # via PulseAudio monitor is pending (L3 sub-task).
         ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
+        # Native NVENC for NVIDIA hosts (VIV-8): CUDA-session encoder behind
+        # the ILinuxEncoder interface, selected over VAAPI by the factory.
+        # The driver libs (libcuda / libnvidia-encode) are dlopen'd at
+        # runtime, so this links and runs on non-NVIDIA machines too.
+        ${CMAKE_SOURCE_DIR}/src/host/encode/linux_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/nvenc_linux_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/input/input_injector_linux.cpp
+    )
+    target_include_directories(vivora PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party/nvenc
     )
     target_link_libraries(vivora PRIVATE
         Qt6::OpenGL
@@ -316,6 +325,7 @@ if(UNIX AND NOT APPLE)
         PkgConfig::LIBAV
         PkgConfig::PIPEWIRE
         PkgConfig::DBUS
+        ${CMAKE_DL_LIBS}
     )
 endif()
 

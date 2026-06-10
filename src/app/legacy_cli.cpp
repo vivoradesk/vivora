@@ -165,7 +165,7 @@ int run_legacy_cli(int argc, char** argv) {
                 "Defaulting to H.264 on Linux host — pass --codec hevc to force HEVC vaapi.");
         }
         LinuxHostPlatform platform;
-        if (!platform.init(manual_bitrate_bps, linux_codec)) return 1;
+        if (!platform.init(manual_bitrate_bps, linux_codec, encoder_kind)) return 1;
 #endif
         vivora::HostLoopConfig lcfg;
         lcfg.port = port;

@@ -6,7 +6,29 @@
 #pragma once
 
 #include <stdint.h>
+
+// GUID is provided by <guiddef.h> on the Windows toolchain.  On Linux/macOS
+// it doesn't exist, so define the identical layout ourselves (this mirrors
+// the fallback in the real NVIDIA nvEncodeAPI.h).  Likewise neutralise
+// __stdcall: it is a Windows-only calling-convention keyword — on the SysV
+// x86-64 ABI the NVENC entry points use the default convention, so the
+// attribute must compile to nothing.
+#if defined(_WIN32)
 #include <guiddef.h>
+#else
+#ifndef GUID_DEFINED
+#define GUID_DEFINED
+typedef struct _GUID {
+    uint32_t Data1;
+    uint16_t Data2;
+    uint16_t Data3;
+    uint8_t  Data4[8];
+} GUID;
+#endif
+#ifndef __stdcall
+#define __stdcall
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,6 +118,18 @@ static const GUID NV_ENC_HEVC_PROFILE_MAIN_GUID =
 // {FA4D2B6C-3A5B-411A-8018-0A3F5E3C9BE5}
 static const GUID NV_ENC_HEVC_PROFILE_MAIN10_GUID =
     { 0xFA4D2B6C, 0x3A5B, 0x411A, { 0x80, 0x18, 0x0A, 0x3F, 0x5E, 0x3C, 0x9B, 0xE5 } };
+// H.264 Baseline
+// {0727BCAA-78C4-4C83-8C2F-EF3DFF267C6A}
+static const GUID NV_ENC_H264_PROFILE_BASELINE_GUID =
+    { 0x0727BCAA, 0x78C4, 0x4C83, { 0x8C, 0x2F, 0xEF, 0x3D, 0xFF, 0x26, 0x7C, 0x6A } };
+// H.264 Main
+// {60B5C1D4-67FE-4790-94D5-C4726D7B6E6D}
+static const GUID NV_ENC_H264_PROFILE_MAIN_GUID =
+    { 0x60B5C1D4, 0x67FE, 0x4790, { 0x94, 0xD5, 0xC4, 0x72, 0x6D, 0x7B, 0x6E, 0x6D } };
+// H.264 High
+// {E7CBC309-4F7A-4B89-AF2A-D537C92BE310}
+static const GUID NV_ENC_H264_PROFILE_HIGH_GUID =
+    { 0xE7CBC309, 0x4F7A, 0x4B89, { 0xAF, 0x2A, 0xD5, 0x37, 0xC9, 0x2B, 0xE3, 0x10 } };
 
 // ---------------------------------------------------------------------------
 // Tuning info
@@ -272,7 +306,61 @@ typedef struct _NV_ENC_CONFIG_HEVC {
     void*    reserved2[64];
 } NV_ENC_CONFIG_HEVC;
 
+typedef struct _NV_ENC_CONFIG_H264 {
+    uint32_t enableTemporalSVC : 1;
+    uint32_t enableStereoMVC : 1;
+    uint32_t hierarchicalPFrames : 1;
+    uint32_t hierarchicalBFrames : 1;
+    uint32_t outputBufferingPeriodSEI : 1;
+    uint32_t outputPictureTimingSEI : 1;
+    uint32_t outputAUD : 1;
+    uint32_t disableSPSPPS : 1;
+    uint32_t outputFramePackingSEI : 1;
+    uint32_t outputRecoveryPointSEI : 1;
+    uint32_t enableIntraRefresh : 1;          // bit 10
+    uint32_t enableConstrainedEncoding : 1;
+    uint32_t repeatSPSPPS : 1;                 // bit 12
+    uint32_t enableVFR : 1;
+    uint32_t enableLTR : 1;
+    uint32_t qpPrimeYZeroTransformBypassFlag : 1;
+    uint32_t useConstrainedIntraPred : 1;
+    uint32_t enableFillerDataInsertion : 1;
+    uint32_t disableSVCPrefixNalu : 1;
+    uint32_t enableScalabilityInfoSEI : 1;
+    uint32_t singleSliceIntraRefresh : 1;
+    uint32_t enableAlphaLayerEncoding : 1;
+    uint32_t reservedBitFields : 10;
+    uint32_t level;
+    uint32_t idrPeriod;
+    uint32_t separateColourPlaneFlag;
+    uint32_t disableDeblockingFilterIDC;
+    uint32_t numTemporalLayers;
+    uint32_t spsId;
+    uint32_t ppsId;
+    uint32_t adaptiveTransformMode;            // NV_ENC_H264_ADAPTIVE_TRANSFORM_MODE
+    uint32_t fmoMode;                          // NV_ENC_H264_FMO_MODE
+    uint32_t bdirectMode;                      // NV_ENC_H264_BDIRECT_MODE
+    uint32_t entropyCodingMode;                // NV_ENC_H264_ENTROPY_CODING_MODE
+    uint32_t stereoMode;                       // NV_ENC_STEREO_PACKING_MODE
+    uint32_t intraRefreshPeriod;
+    uint32_t intraRefreshCnt;
+    uint32_t maxNumRefFrames;
+    uint32_t sliceMode;
+    uint32_t sliceModeData;
+    uint32_t h264VUIParameters[30];            // NV_ENC_CONFIG_H264_VUI_PARAMETERS
+    uint32_t ltrNumFrames;
+    uint32_t ltrTrustMode;
+    uint32_t chromaFormatIDC;
+    uint32_t maxTemporalLayers;
+    uint32_t useBFramesAsRef;                  // NV_ENC_BFRAME_REF_MODE
+    uint32_t numRefL0;                         // NV_ENC_NUM_REF_FRAMES
+    uint32_t numRefL1;                         // NV_ENC_NUM_REF_FRAMES
+    uint32_t reserved1[267];
+    void*    reserved2[64];
+} NV_ENC_CONFIG_H264;
+
 typedef union _NV_ENC_CODEC_CONFIG {
+    NV_ENC_CONFIG_H264 h264Config;
     NV_ENC_CONFIG_HEVC hevcConfig;
     uint32_t reserved[512];
 } NV_ENC_CODEC_CONFIG;
@@ -371,6 +459,36 @@ typedef struct _NV_ENC_CREATE_BITSTREAM_BUFFER {
     void*             reserved2[64];
 } NV_ENC_CREATE_BITSTREAM_BUFFER;
 #define NV_ENC_CREATE_BITSTREAM_BUFFER_VER NVENCAPI_STRUCT_VERSION(NV_ENC_CREATE_BITSTREAM_BUFFER, 1)
+
+// NVENC-allocated host-accessible input surface.  Used by the Linux/CUDA
+// path which feeds CPU BGRx frames (from PipeWire SHM) — Lock gives a
+// writable pointer, we memcpy the rows, Unlock, then encode.  The driver
+// handles the host→device upload internally, so no CUDA memcpy is needed.
+typedef struct _NV_ENC_CREATE_INPUT_BUFFER {
+    uint32_t             version;
+    uint32_t             width;
+    uint32_t             height;
+    uint32_t             memoryHeap;          // deprecated NV_ENC_MEMORY_HEAP
+    NV_ENC_BUFFER_FORMAT bufferFmt;
+    uint32_t             reserved;
+    NV_ENC_INPUT_PTR     inputBuffer;         // [out]
+    void*                pSysMemBuffer;
+    uint32_t             reserved1[57];
+    void*                reserved2[63];
+} NV_ENC_CREATE_INPUT_BUFFER;
+#define NV_ENC_CREATE_INPUT_BUFFER_VER NVENCAPI_STRUCT_VERSION(NV_ENC_CREATE_INPUT_BUFFER, 1)
+
+typedef struct _NV_ENC_LOCK_INPUT_BUFFER {
+    uint32_t          version;
+    uint32_t          doNotWait : 1;
+    uint32_t          reservedBitFields : 31;
+    NV_ENC_INPUT_PTR  inputBuffer;
+    void*             bufferDataPtr;          // [out] CPU-writable pixels
+    uint32_t          pitch;                  // [out] row stride in bytes
+    uint32_t          reserved1[251];
+    void*             reserved2[64];
+} NV_ENC_LOCK_INPUT_BUFFER;
+#define NV_ENC_LOCK_INPUT_BUFFER_VER NVENCAPI_STRUCT_VERSION(NV_ENC_LOCK_INPUT_BUFFER, 1)
 
 typedef struct _NV_ENC_PIC_PARAMS {
     uint32_t             version;
