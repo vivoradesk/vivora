@@ -53,7 +53,10 @@ Dialog {
 
     signal approved(string key, bool remember,
                     bool input, bool clipboard, bool fileTransfer)
-    signal rejected(string key)
+    // NB: named `declined`, not `rejected` — QtQuick.Controls Dialog already
+    // declares a built-in rejected() signal, and overriding it with a
+    // different signature is an error ("Duplicate signal name").
+    signal declined(string key)
 
     // Each time the parent rebinds us to a new pending peer, restart the
     // auto-reject countdown and reset the trust + grant controls to defaults.
@@ -91,7 +94,7 @@ Dialog {
         onTriggered: {
             dialog.secondsRemaining -= 1
             if (dialog.secondsRemaining <= 0)
-                dialog.rejected(dialog.approvalKey)
+                dialog.declined(dialog.approvalKey)
         }
     }
 
@@ -378,7 +381,7 @@ Dialog {
             DlgButton {
                 label: "Reject"
                 Layout.preferredWidth: 110
-                onClicked: dialog.rejected(dialog.approvalKey)
+                onClicked: dialog.declined(dialog.approvalKey)
             }
             DlgButton {
                 label: "Accept & connect"

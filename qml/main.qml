@@ -112,7 +112,7 @@ ApplicationWindow {
                 App.approveConnection(key, remember, gInput, gClip, gFile)
                 approvalLoader.advance()
             }
-            onRejected: (key) => { App.rejectConnection(key); approvalLoader.advance() }
+            onDeclined: (key) => { App.rejectConnection(key); approvalLoader.advance() }
         }
     }
 
@@ -131,6 +131,7 @@ ApplicationWindow {
         readonly property color accent:    "#3D6BFA"   // brand blue
         readonly property color sharing:   "#22a85c"   // green for active session
         readonly property color error:     "#dc3545"   // red
+        readonly property color selected:  "#ded8c8"   // subtle active/selected fill
         readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
     }
 
