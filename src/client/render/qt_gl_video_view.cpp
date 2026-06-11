@@ -206,7 +206,7 @@ QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
 
 void QtGlVideoView::set_status(const QString& text) {
     if (!status_label_) return;
-    if (text.isEmpty()) { status_label_->hide(); return; }
+    if (text.isEmpty()) { status_label_->clear(); status_label_->hide(); return; }
     if (status_label_->text() != text) {
         status_label_->setText(text);
         status_label_->adjustSize();

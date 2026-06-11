@@ -112,6 +112,12 @@ StreamWindow::~StreamWindow() {
 void StreamWindow::set_status(const QString& text) {
     if (!status_label_) return;
     if (text.isEmpty()) {
+        // Clear the text too, not just hide: the activation / show / move
+        // handlers use !text().isEmpty() as the "should the overlay be
+        // visible?" proxy, so leaving stale text here made the overlay
+        // pop back up on the next alt-tab / window activation even though
+        // frames were flowing (VIV-62 follow-up).
+        status_label_->clear();
         status_label_->hide();
         return;
     }

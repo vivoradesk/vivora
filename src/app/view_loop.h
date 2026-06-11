@@ -5,6 +5,7 @@
 #include "common/utils/types.h"
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 namespace vivora {
 
@@ -94,7 +95,7 @@ private:
     // Status-overlay driving (VIV-62): "Connecting…" / "Waiting for host to
     // accept…" before the first frame, and a brief close reason when a
     // session that never produced a frame disconnects.
-    const char* status_shown_   = nullptr;   // last literal pushed (dedup)
+    std::string status_shown_;               // last text pushed (content dedup)
     bool        disconnecting_  = false;
     TimePoint   disconnect_at_{};
     static constexpr int DISCONNECT_LINGER_MS = 1800;

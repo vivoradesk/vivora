@@ -28,10 +28,14 @@ double ViewLoopState::rtt_ms() const { return session_.rtt_ms(); }
 client::SessionState ViewLoopState::state() const { return session_.state(); }
 
 void ViewLoopState::update_status(const char* text) {
-    // Dedup on the literal pointer — callers pass stable string literals, so
-    // the overlay isn't re-shown/raised every ~16ms tick.
-    if (text == status_shown_) return;
+    // Dedup by CONTENT (not literal pointer) so the overlay isn't re-shown /
+    // raised every ~16ms tick.  Pointer comparison was fragile — distinct
+    // literals can theoretically share storage and, more importantly, it made
+    // the dedup state hard to reason about across reconnects.
+    if (!text) text = "";
+    if (status_shown_ == text) return;   // std::string vs const char* — content compare
     status_shown_ = text;
+    log::info("VIEW", "status overlay -> \"%s\"", text);
     if (platform_) platform_->set_status(text);
 }
 
