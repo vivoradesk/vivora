@@ -108,6 +108,10 @@ struct PipeWireCapture::Impl {
     // Stream geometry (filled when stream's param-changed fires).
     uint32_t neg_w = 0, neg_h = 0, neg_fmt = 0, neg_stride = 0;
 
+    // Portal cursor_mode for SelectSources: true → EMBEDDED (2, portal draws
+    // the cursor into the frame), false → HIDDEN (1, host paints it from X11).
+    bool cursor_embedded = true;
+
     // Cursor metadata (filled by on_pw_process from SPA_META_Cursor).
     // Locked by cursor_mu so the host_loop main thread can read snapshots
     // independently of the PipeWire callback thread.
@@ -140,6 +144,10 @@ PipeWireCapture::~PipeWireCapture() = default;
 
 uint32_t PipeWireCapture::width()  const { return impl_->neg_w; }
 uint32_t PipeWireCapture::height() const { return impl_->neg_h; }
+
+void PipeWireCapture::set_cursor_embedded(bool embedded) {
+    impl_->cursor_embedded = embedded;
+}
 
 bool PipeWireCapture::has_cursor() const {
     std::lock_guard<std::mutex> lk(impl_->cursor_mu);
@@ -548,7 +556,12 @@ bool PipeWireCapture::init(FrameCallback cb) {
         // single visible cursor on the client (since stream_window
         // defaults to BlankCursor over the stream area), at the cost of
         // one round-trip of perceived cursor-move latency.
-        dict_append_u32(&dict, "cursor_mode", 2);
+        //
+        // When the host can paint the cursor itself from X11 (X11Cursor,
+        // VIV-66) we instead request HIDDEN (1) so the portal leaves the
+        // cursor out of the frame — otherwise EMBEDDED-that-doesn't-composite
+        // plus the X11 overlay would fight / double up.
+        dict_append_u32(&dict, "cursor_mode", impl_->cursor_embedded ? 2u : 1u);
         // Ask the portal to remember this grant across restarts and hand
         // back a restore_token in the Start response.  Replaying that
         // token on the next SelectSources skips the permission dialog.

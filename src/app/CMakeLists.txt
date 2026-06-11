@@ -307,6 +307,7 @@ if(UNIX AND NOT APPLE)
         # wired into HostSession via LinuxHostPlatform.  Audio capture
         # via PulseAudio monitor is pending (L3 sub-task).
         ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/capture/x11_cursor.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
         # Native NVENC for NVIDIA hosts (VIV-8): CUDA-session encoder behind
         # the ILinuxEncoder interface, selected over VAAPI by the factory.

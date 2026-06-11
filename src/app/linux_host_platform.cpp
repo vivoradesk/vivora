@@ -10,6 +10,16 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
     codec_        = codec;
     bitrate_bps_  = manual_bitrate_bps;
     encoder_kind_ = encoder_kind;
+
+    // VIV-66: prefer painting the cursor from X11 (reliable position + shape)
+    // and ask the portal to keep the cursor out of the captured frame.  If X
+    // isn't available, fall back to the portal's embedded cursor.
+    x11_cursor_active_ = x11cursor_.init();
+    cap_.set_cursor_embedded(!x11_cursor_active_);
+    vivora::log::info("HOST", "Cursor source: %s",
+                      x11_cursor_active_ ? "X11 (portal cursor hidden)"
+                                         : "portal embedded");
+
     if (!cap_.init([this](const vivora::host::PipeWireCapture::Frame& f) {
             on_pw_frame(f);
         })) {
@@ -46,6 +56,7 @@ void LinuxHostPlatform::shutdown() {
     cap_.stop();
     std::lock_guard<std::mutex> lk(enc_mu_);
     if (enc_) enc_->shutdown();
+    x11cursor_.shutdown();
 }
 
 uint32_t LinuxHostPlatform::capture_width()  const { return cap_w_; }
@@ -137,6 +148,21 @@ bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
 }
 
 bool LinuxHostPlatform::get_cursor_state(CursorState& out) {
+    if (x11_cursor_active_) {
+        float xn = 0, yn = 0; bool vis = false, changed = false;
+        vivora::host::X11Cursor::Shape sh;
+        if (!x11cursor_.poll(xn, yn, vis, changed, sh)) return false;
+        if (changed) {
+            pending_x11_shape_      = std::move(sh);
+            have_pending_x11_shape_ = true;
+            x11_shape_id_           = pending_x11_shape_.id;
+        }
+        out.x_norm   = xn;
+        out.y_norm   = yn;
+        out.visible  = vis;
+        out.shape_id = x11_shape_id_;
+        return true;
+    }
     if (!cap_.has_cursor()) return false;
     auto s = cap_.cursor_state();
     out.x_norm   = s.x_norm;
@@ -147,6 +173,17 @@ bool LinuxHostPlatform::get_cursor_state(CursorState& out) {
 }
 
 bool LinuxHostPlatform::take_cursor_shape(CursorShapeView& out) {
+    if (x11_cursor_active_) {
+        if (!have_pending_x11_shape_) return false;
+        out.id        = pending_x11_shape_.id;
+        out.width     = pending_x11_shape_.width;
+        out.height    = pending_x11_shape_.height;
+        out.hotspot_x = pending_x11_shape_.hotspot_x;
+        out.hotspot_y = pending_x11_shape_.hotspot_y;
+        out.bgra      = std::move(pending_x11_shape_.bgra);
+        have_pending_x11_shape_ = false;
+        return true;
+    }
     vivora::host::PipeWireCapture::CursorShape s;
     if (!cap_.take_new_cursor_shape(s)) return false;
     out.id        = s.id;

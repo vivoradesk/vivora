@@ -3,6 +3,7 @@
 
 #include "app/host_platform.h"
 #include "host/capture/pipewire_capture.h"
+#include "host/capture/x11_cursor.h"
 #include "host/encode/linux_encoder.h"
 #include "host/encode/video_encoder.h"  // EncoderKind
 
@@ -43,6 +44,14 @@ private:
     void on_pw_frame(const vivora::host::PipeWireCapture::Frame& f);
 
     vivora::host::PipeWireCapture cap_;
+    // X11 cursor source (VIV-66): when available, supplies the host cursor
+    // position + shape directly, and we tell PipeWire to leave the cursor out
+    // of the frame.  Falls back to the portal's embedded cursor if X is absent.
+    vivora::host::X11Cursor x11cursor_;
+    bool                    x11_cursor_active_ = false;
+    vivora::host::X11Cursor::Shape pending_x11_shape_{};
+    bool                    have_pending_x11_shape_ = false;
+    uint32_t                x11_shape_id_ = 0;
     std::unique_ptr<vivora::host::ILinuxEncoder> enc_;
     vivora::VideoCodec  codec_        = vivora::VideoCodec::H264;
     vivora::EncoderKind encoder_kind_ = vivora::EncoderKind::Auto;

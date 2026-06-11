@@ -82,6 +82,14 @@ public:
     // the PipeWire thread once start() succeeds.
     bool init(FrameCallback cb);
 
+    // Choose the portal cursor mode for the next start().  embedded=true
+    // (default) asks the portal to draw the cursor into the captured pixels
+    // (cursor_mode EMBEDDED); embedded=false asks it to leave the cursor out
+    // (cursor_mode HIDDEN) — used when the host paints the cursor itself from
+    // X11 (X11Cursor) so it isn't drawn twice / frozen (VIV-66).  Must be
+    // called before start().
+    void set_cursor_embedded(bool embedded);
+
     // Begin streaming (start the PipeWire thread loop).  Must be called
     // after init() succeeds.
     bool start();
