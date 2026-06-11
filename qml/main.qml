@@ -205,6 +205,23 @@ ApplicationWindow {
                 color: theme.text
             }
             Item { Layout.fillWidth: true }
+            // Pro badge (VIV-29) — shown when a valid Pro license is loaded.
+            Rectangle {
+                visible: App.licensePro
+                radius: height / 2
+                color: theme.accent
+                Layout.preferredHeight: 22
+                Layout.preferredWidth: proBadge.implicitWidth + 18
+                Label {
+                    id: proBadge
+                    anchors.centerIn: parent
+                    text: "PRO"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.letterSpacing: 1
+                    color: "#ffffff"
+                }
+            }
             Rectangle {
                 visible: App.sharing
                 radius: height / 2

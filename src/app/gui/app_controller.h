@@ -35,6 +35,13 @@ class AppController : public QObject {
     Q_PROPERTY(int     activeViews   READ activeViews   NOTIFY activeViewsChanged)
     Q_PROPERTY(vivora::gui::Settings* settings    READ settings    CONSTANT)
     Q_PROPERTY(vivora::gui::AddressBook* peers    READ peers       CONSTANT)
+    // License status (VIV-29) — verified offline against the embedded
+    // Vivora public key.  licensePro gates the "Pro" badge + commercial use
+    // (managed relay); licenseTier / licenseExpiry drive Settings → About.
+    Q_PROPERTY(bool    licenseValid  READ licenseValid  NOTIFY licenseChanged)
+    Q_PROPERTY(bool    licensePro    READ licensePro    NOTIFY licenseChanged)
+    Q_PROPERTY(QString licenseTier   READ licenseTier   NOTIFY licenseChanged)
+    Q_PROPERTY(QString licenseExpiry READ licenseExpiry NOTIFY licenseChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -47,6 +54,12 @@ public:
     int     activeViews() const { return activeViews_; }
     Settings*    settings() const { return settings_.get(); }
     AddressBook* peers()    const { return peers_.get(); }
+
+    bool    licenseValid() const  { return licenseValid_; }
+    bool    licensePro()   const  { return licensePro_; }
+    QString licenseTier()  const  { return licensePro_ ? QStringLiteral("Pro")
+                                          : QStringLiteral("Free"); }
+    QString licenseExpiry() const { return licenseExpiry_; }
 
     // Wired from main.cpp at app init.  AppController borrows the tray
     // pointer; ownership stays with gui_main().
@@ -81,6 +94,14 @@ public slots:
     // from the Refresh button in the sharing card.
     Q_INVOKABLE void refreshRendezvous();
 
+    // VIV-29: import a license token file — copies it next to the config as
+    // license.bin, points the setting at it and re-verifies.  Accepts a
+    // plain path or a file:// URL (from the QML file dialog).
+    Q_INVOKABLE void importLicense(const QString& pathOrUrl);
+    // Re-read + verify the configured license file.  Called on startup and
+    // whenever the license path changes.
+    Q_INVOKABLE void refreshLicense();
+
 signals:
     void sharingChanged();
     void clientCountChanged();
@@ -91,6 +112,8 @@ signals:
     void settingsRequested();
     // Bring the window to the foreground.
     void showWindowRequested();
+    // License status changed (loaded / imported / expired).
+    void licenseChanged();
     // VIV-53: new client awaiting approval.  QML shows
     // ConnectionApprovalDialog with these details.  key is a
     // stringified address used to identify the client when the user
@@ -133,6 +156,11 @@ private:
     int     activeViews_ = 0;
     QString myPeerCode_;
     QString myPubkeyHex_;
+
+    // VIV-29 license status (verified offline).
+    bool    licenseValid_ = false;
+    bool    licensePro_   = false;
+    QString licenseExpiry_;
 };
 
 } // namespace vivora::gui

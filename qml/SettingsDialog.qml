@@ -713,6 +713,48 @@ Window {
                         help: "Client + rendezvous + relay are AGPL-3.0."
                         Label { text: "AGPL-3.0"; color: theme.text }
                     }
+                    // VIV-29: Pro license status, verified offline.
+                    Field {
+                        title: "Pro license"
+                        help: "Unlocks the managed relay + commercial use. Verified offline."
+                        RowLayout {
+                            spacing: 8
+                            Label {
+                                text: App.licensePro
+                                      ? ("Pro · expires " + App.licenseExpiry)
+                                      : (App.licenseValid
+                                         ? ("Active · expires " + App.licenseExpiry)
+                                         : "Free — no Pro license")
+                                color: App.licensePro ? theme.accent : theme.textMuted
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: importLbl.implicitWidth + 20
+                                Layout.preferredHeight: 28
+                                radius: 8
+                                color: importHover.hovered ? theme.hoverBg : theme.ctrlBg
+                                border.color: theme.border
+                                border.width: 1
+                                HoverHandler { id: importHover }
+                                Label {
+                                    id: importLbl
+                                    anchors.centerIn: parent
+                                    text: "Import…"
+                                    color: theme.text
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: proLicenseDlg.open()
+                                }
+                            }
+                        }
+                    }
+                    FileDialog {
+                        id: proLicenseDlg
+                        title: "Import Vivora Pro license"
+                        onAccepted: App.importLicense(selectedFile.toString())
+                    }
                     Field {
                         title: "Links"
                         ColumnLayout {

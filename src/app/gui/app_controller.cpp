@@ -9,11 +9,19 @@
 #endif
 
 #include "common/crypto/host_identity.h"
+#include "common/crypto/license_pubkey.h"
+#include "common/crypto/license_token.h"
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 
 #include <QApplication>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QMessageBox>
+#include <QStandardPaths>
+#include <QUrl>
 
 namespace vivora::gui {
 
@@ -114,6 +122,12 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         }
     });
     loadIdentity();
+
+    // VIV-29: verify the configured license offline on startup, and re-verify
+    // whenever any setting changes (covers the license path being edited).
+    refreshLicense();
+    if (settings_) connect(settings_.get(), &Settings::changed,
+                           this, &AppController::refreshLicense);
 
     // Always-available model (VIV-53): host starts immediately at app
     // launch.  Peer code is visible the moment the user sees the
@@ -319,6 +333,108 @@ void AppController::refreshRendezvous() {
     if (hostWorker_) {
         hostWorker_->requestRendezvousRefresh();
         log::info("AppController", "Manual rendezvous refresh requested");
+    }
+}
+
+// ── License (VIV-29) ───────────────────────────────────────────────────────
+
+void AppController::refreshLicense() {
+    const bool was_valid = licenseValid_;
+    const bool was_pro   = licensePro_;
+    const QString was_exp = licenseExpiry_;
+
+    licenseValid_ = false;
+    licensePro_   = false;
+    licenseExpiry_.clear();
+
+    QString path = settings_ ? settings_->licenseFile() : QString();
+    if (path.isEmpty()) {
+        // Default location next to the config — where importLicense() drops it.
+        const QString dir = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation);
+        const QString def = dir + "/license.bin";
+        if (QFile::exists(def)) path = def;
+    }
+
+    if (!path.isEmpty()) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray data = f.read(crypto::LICENSE_TOKEN_SIZE + 1);
+            if (data.size() == static_cast<int>(crypto::LICENSE_TOKEN_SIZE)) {
+                crypto::LicenseClaims claims;
+                const int64_t now = QDateTime::currentSecsSinceEpoch();
+                if (crypto::verify_license(
+                        reinterpret_cast<const uint8_t*>(data.constData()),
+                        crypto::LICENSE_PUBLIC_KEY, now, claims)) {
+                    licenseValid_   = true;
+                    licensePro_     = (claims.tier == crypto::LicenseTier::Pro);
+                    licenseExpiry_  = QDateTime::fromSecsSinceEpoch(claims.exp_unix)
+                                          .toUTC().date().toString(Qt::ISODate);
+                    log::info("AppController", "License OK: %s, expires %s",
+                              licensePro_ ? "Pro" : "Trial",
+                              licenseExpiry_.toUtf8().constData());
+                } else {
+                    log::warn("AppController",
+                              "License present but invalid/expired: %s",
+                              path.toUtf8().constData());
+                }
+            } else {
+                log::warn("AppController", "License file is not %zu bytes: %s",
+                          crypto::LICENSE_TOKEN_SIZE, path.toUtf8().constData());
+            }
+        }
+    }
+
+    if (licenseValid_ != was_valid || licensePro_ != was_pro ||
+        licenseExpiry_ != was_exp) {
+        emit licenseChanged();
+    }
+}
+
+void AppController::importLicense(const QString& pathOrUrl) {
+    QString src = pathOrUrl;
+    if (src.startsWith("file:")) src = QUrl(src).toLocalFile();
+    if (src.isEmpty()) return;
+
+    // Validate before adopting it, so a bad file doesn't silently replace a
+    // good license.
+    QFile in(src);
+    if (!in.open(QIODevice::ReadOnly)) {
+        log::warn("AppController", "importLicense: cannot open %s",
+                  src.toUtf8().constData());
+        return;
+    }
+    const QByteArray data = in.read(crypto::LICENSE_TOKEN_SIZE + 1);
+    crypto::LicenseClaims claims;
+    if (data.size() != static_cast<int>(crypto::LICENSE_TOKEN_SIZE) ||
+        !crypto::verify_license(
+            reinterpret_cast<const uint8_t*>(data.constData()),
+            crypto::LICENSE_PUBLIC_KEY,
+            QDateTime::currentSecsSinceEpoch(), claims)) {
+        log::warn("AppController", "importLicense: invalid/expired token %s",
+                  src.toUtf8().constData());
+        if (tray_) tray_->notify("Vivora",
+            "That license file is invalid or expired.");
+        return;
+    }
+
+    // Copy into the app data dir as license.bin and point the setting at it.
+    const QString dir = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation);
+    QDir().mkpath(dir);
+    const QString dst = dir + "/license.bin";
+    QFile::remove(dst);
+    QFile out(dst);
+    if (out.open(QIODevice::WriteOnly)) {
+        out.write(data);
+        out.close();
+        if (settings_) settings_->setLicenseFile(dst);   // triggers refreshLicense via changed()
+        refreshLicense();
+        log::info("AppController", "License imported -> %s",
+                  dst.toUtf8().constData());
+    } else {
+        log::warn("AppController", "importLicense: cannot write %s",
+                  dst.toUtf8().constData());
     }
 }
 
