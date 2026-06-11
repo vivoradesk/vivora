@@ -114,9 +114,14 @@ public:
             return false;
         }
 
-        // Declare which event types this device produces.
+        // Primary device = absolute pointer + keyboard.  It deliberately
+        // does NOT carry EV_REL: libinput classifies any device exposing
+        // REL_X/REL_Y as a *relative* mouse and then silently ignores the
+        // EV_ABS motion we send for normal cursor positioning (verified on
+        // X11 — a REL+ABS device leaves the cursor frozen, an ABS-only one
+        // jumps to the right spot).  Relative motion + wheel live on a
+        // separate device (fd_rel_) created below.
         ::ioctl(fd_, UI_SET_EVBIT, EV_KEY);
-        ::ioctl(fd_, UI_SET_EVBIT, EV_REL);
         ::ioctl(fd_, UI_SET_EVBIT, EV_ABS);
         ::ioctl(fd_, UI_SET_EVBIT, EV_SYN);
 
@@ -127,15 +132,18 @@ public:
         ::ioctl(fd_, UI_SET_KEYBIT, BTN_SIDE);
         ::ioctl(fd_, UI_SET_KEYBIT, BTN_EXTRA);
 
-        // Relative axes for the locked-cursor / game-mode path.
-        ::ioctl(fd_, UI_SET_RELBIT, REL_X);
-        ::ioctl(fd_, UI_SET_RELBIT, REL_Y);
-        ::ioctl(fd_, UI_SET_RELBIT, REL_WHEEL);
-        ::ioctl(fd_, UI_SET_RELBIT, REL_HWHEEL);
-
         // Absolute axes for the standard pointer path.
         ::ioctl(fd_, UI_SET_ABSBIT, ABS_X);
         ::ioctl(fd_, UI_SET_ABSBIT, ABS_Y);
+
+        // Mark the device as an (indirect) pointer.  Without this, libinput
+        // on X11/Wayland sees a device carrying BOTH REL_X/Y and ABS_X/Y and
+        // classifies it as a plain relative mouse — silently ignoring the
+        // EV_ABS motion we send for normal (non-locked) cursor control, so
+        // the host cursor never moves even though keyboard injection works.
+        // INPUT_PROP_POINTER tells the stack the absolute axes map to the
+        // screen like a tablet/pointer (not a touchscreen → not DIRECT).
+        ::ioctl(fd_, UI_SET_PROPBIT, INPUT_PROP_POINTER);
 
         // Register every keyboard key we know how to translate to.
         // Letters + digits + F1-F12.
@@ -182,8 +190,49 @@ public:
             close_dev();
             return false;
         }
-        log::info(TAG, "uinput device created");
+
+        // Secondary device: relative pointer (game-mode locked cursor) +
+        // wheel.  Kept separate from the absolute device above so each gets
+        // an unambiguous libinput classification.  A button is declared so
+        // libinput treats it as a mouse rather than a bare axis device.
+        open_rel_dev();
+
+        log::info(TAG, "uinput device created (abs pointer + keyboard%s)",
+                  fd_rel_ >= 0 ? ", rel pointer" : "");
         return true;
+    }
+
+    // Best-effort — relative motion / scroll just won't work if this fails,
+    // but absolute positioning (the common path) still does.
+    void open_rel_dev() {
+        fd_rel_ = ::open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+        if (fd_rel_ < 0) {
+            log::warn(TAG, "open(/dev/uinput) for relative device failed: %s",
+                      std::strerror(errno));
+            return;
+        }
+        ::ioctl(fd_rel_, UI_SET_EVBIT, EV_KEY);
+        ::ioctl(fd_rel_, UI_SET_EVBIT, EV_REL);
+        ::ioctl(fd_rel_, UI_SET_EVBIT, EV_SYN);
+        ::ioctl(fd_rel_, UI_SET_KEYBIT, BTN_LEFT);
+        ::ioctl(fd_rel_, UI_SET_RELBIT, REL_X);
+        ::ioctl(fd_rel_, UI_SET_RELBIT, REL_Y);
+        ::ioctl(fd_rel_, UI_SET_RELBIT, REL_WHEEL);
+        ::ioctl(fd_rel_, UI_SET_RELBIT, REL_HWHEEL);
+        ::ioctl(fd_rel_, UI_SET_PROPBIT, INPUT_PROP_POINTER);
+
+        uinput_setup us{};
+        us.id.bustype = BUS_USB;
+        us.id.vendor  = 0xDE5B;
+        us.id.product = 0x0002;
+        std::strncpy(us.name, "Vivora Virtual Pointer (rel)", sizeof(us.name) - 1);
+        if (::ioctl(fd_rel_, UI_DEV_SETUP, &us) < 0 ||
+            ::ioctl(fd_rel_, UI_DEV_CREATE) < 0) {
+            log::warn(TAG, "relative uinput device setup failed: %s",
+                      std::strerror(errno));
+            ::close(fd_rel_);
+            fd_rel_ = -1;
+        }
     }
 
     void set_screen_resolution(uint32_t width, uint32_t height) override {
@@ -206,9 +255,9 @@ public:
             break;
         }
         case protocol::InputEventType::MouseMoveRelative:
-            if (event.dx != 0) emit(EV_REL, REL_X, event.dx);
-            if (event.dy != 0) emit(EV_REL, REL_Y, event.dy);
-            sync();
+            if (event.dx != 0) emit_rel(REL_X, event.dx);
+            if (event.dy != 0) emit_rel(REL_Y, event.dy);
+            sync_rel();
             break;
         case protocol::InputEventType::MouseButton: {
             uint16_t btn = 0;
@@ -232,9 +281,9 @@ public:
             int dx_notches = event.scroll_dx / 120;
             if (dy_notches == 0 && event.scroll_dy != 0) dy_notches = event.scroll_dy > 0 ? 1 : -1;
             if (dx_notches == 0 && event.scroll_dx != 0) dx_notches = event.scroll_dx > 0 ? 1 : -1;
-            if (dy_notches) emit(EV_REL, REL_WHEEL,  dy_notches);
-            if (dx_notches) emit(EV_REL, REL_HWHEEL, dx_notches);
-            if (dy_notches || dx_notches) sync();
+            if (dy_notches) emit_rel(REL_WHEEL,  dy_notches);
+            if (dx_notches) emit_rel(REL_HWHEEL, dx_notches);
+            if (dy_notches || dx_notches) sync_rel();
             break;
         }
         case protocol::InputEventType::KeyDown:
@@ -259,15 +308,39 @@ private:
     }
     void sync() { emit(EV_SYN, SYN_REPORT, 0); }
 
+    // Relative / wheel events go to the secondary device (fd_rel_).
+    void emit_rel(uint16_t code, int32_t value) {
+        if (fd_rel_ < 0) return;
+        input_event ev{};
+        ev.type  = EV_REL;
+        ev.code  = code;
+        ev.value = value;
+        ssize_t n = ::write(fd_rel_, &ev, sizeof(ev));
+        (void)n;
+    }
+    void sync_rel() {
+        if (fd_rel_ < 0) return;
+        input_event ev{};
+        ev.type = EV_SYN; ev.code = SYN_REPORT; ev.value = 0;
+        ssize_t n = ::write(fd_rel_, &ev, sizeof(ev));
+        (void)n;
+    }
+
     void close_dev() {
         if (fd_ >= 0) {
             ::ioctl(fd_, UI_DEV_DESTROY);
             ::close(fd_);
             fd_ = -1;
         }
+        if (fd_rel_ >= 0) {
+            ::ioctl(fd_rel_, UI_DEV_DESTROY);
+            ::close(fd_rel_);
+            fd_rel_ = -1;
+        }
     }
 
     int fd_ = -1;
+    int fd_rel_ = -1;
     uint32_t screen_w_ = 1920;
     uint32_t screen_h_ = 1080;
 };
