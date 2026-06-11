@@ -22,6 +22,9 @@ public:
     // safe to call on every state change.
     void setSharing(bool sharing, int clientCount);
 
+    // VIV-29: reflect Pro-license status in the tooltip (" · Pro").
+    void setPro(bool isPro);
+
     // Toast-style notification (Windows balloon / macOS Notification
     // Center / Linux libnotify, all driven by the same Qt API).
     void notify(const QString& title, const QString& body);
@@ -40,6 +43,12 @@ private:
     QAction*         pauseResumeAct_  = nullptr;
     QAction*         settingsAct_     = nullptr;
     QAction*         quitAct_         = nullptr;
+
+    // Cached state so setPro() / setSharing() can rebuild the tooltip
+    // without the caller re-supplying everything.
+    bool             pro_         = false;
+    bool             lastSharing_ = false;
+    int              lastClients_ = 0;
 };
 
 } // namespace vivora::gui

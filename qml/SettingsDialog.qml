@@ -30,6 +30,7 @@ Window {
         readonly property color textMuted: "#6f6b60"
         readonly property color border:    "#d4cdba"
         readonly property color accent:    "#3D6BFA"
+        readonly property color warn:      "#b6801b"   // amber notice
         readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
     }
 
@@ -690,6 +691,21 @@ Window {
                         title: "Select license token"
                         onAccepted: App.settings.licenseFile =
                             selectedFile.toString().replace("file:///", "")
+                    }
+                    // VIV-29: the managed relay is Pro-gated.  Warn when it's
+                    // configured (the default) but no Pro license is loaded —
+                    // connections then fall back to direct + rendezvous only.
+                    Label {
+                        visible: !App.licensePro
+                                 && App.settings.relay.toLowerCase().indexOf("vivora.dev") >= 0
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 12
+                        color: theme.warn
+                        text: "⚠  The managed relay (relay.vivora.dev) needs a Pro license. " +
+                              "Without one, connections use direct + rendezvous hole-punching only — " +
+                              "import a license in About, or point this at your own relay."
                     }
                 }
 

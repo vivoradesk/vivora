@@ -52,7 +52,15 @@ Tray::~Tray() {
     if (menu_) { menu_->deleteLater(); menu_ = nullptr; }
 }
 
+void Tray::setPro(bool isPro) {
+    if (pro_ == isPro) return;
+    pro_ = isPro;
+    setSharing(lastSharing_, lastClients_);   // rebuild tooltip with/without Pro
+}
+
 void Tray::setSharing(bool sharing, int clientCount) {
+    lastSharing_ = sharing;
+    lastClients_ = clientCount;
     pauseResumeAct_->setText(sharing ? "Pause sharing" : "Resume sharing");
     QString tip = "Vivora";
     if (sharing) {
@@ -63,6 +71,7 @@ void Tray::setSharing(bool sharing, int clientCount) {
     } else {
         tip = "Vivora — paused";
     }
+    if (pro_) tip += " · Pro";
     tray_->setToolTip(tip);
     // Visible state change — green sharing variant when at least one
     // viewer is active, grey-blue idle otherwise.  setIcon is cheap

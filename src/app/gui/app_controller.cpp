@@ -174,6 +174,7 @@ void AppController::setTray(Tray* tray) {
     connect(tray_, &Tray::settingsRequested, this, &AppController::openSettings);
     connect(tray_, &Tray::quitRequested,     this, &AppController::quit);
     tray_->setSharing(sharing_, clientCount_);
+    tray_->setPro(licensePro_);
 }
 
 void AppController::loadIdentity() {
@@ -197,7 +198,18 @@ void AppController::startSharing() {
     wc.encoder_kind       = vivora::EncoderKind::Auto;
     wc.stun_server        = settings_->stunServer().toStdString();
     wc.rendezvous_server  = settings_->rendezvous().toStdString();
-    wc.relay_server       = settings_->relay().toStdString();
+    {
+        // VIV-29: the Vivora-managed relay (relay.vivora.dev) is a Pro
+        // feature.  Without a Pro license, don't even attempt it — fall back
+        // to direct + rendezvous hole-punch.  Self-hosted relays (any other
+        // host) are AGPL and stay available to everyone.
+        const QString relay = settings_->relay();
+        const bool gated = relay.contains("vivora.dev", Qt::CaseInsensitive)
+                           && !licensePro_;
+        wc.relay_server = gated ? std::string() : relay.toStdString();
+        if (gated) log::info("AppController",
+            "Managed relay needs Pro — sharing via direct/rendezvous only");
+    }
     wc.license_file       = settings_->licenseFile().toStdString();
     wc.display_index      = settings_->displayIndex();
     wc.idle_timeout_min   = settings_->idleTimeoutMin();
@@ -236,7 +248,15 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     vc.stun_server        = settings_->stunServer().toStdString();
     vc.rendezvous_server  = settings_->rendezvous().toStdString();
     vc.peer_pubkey_hex    = peerCodeOrHex.toStdString();
-    vc.relay_server       = settings_->relay().toStdString();
+    {
+        // VIV-29: managed relay is Pro-gated (see startSharing).
+        const QString relay = settings_->relay();
+        const bool gated = relay.contains("vivora.dev", Qt::CaseInsensitive)
+                           && !licensePro_;
+        vc.relay_server = gated ? std::string() : relay.toStdString();
+        if (gated) log::info("AppController",
+            "Managed relay needs Pro — connecting via direct/rendezvous only");
+    }
     vc.license_file       = settings_->licenseFile().toStdString();
 
     auto vs = std::make_unique<ViewSession>(this);
@@ -385,6 +405,7 @@ void AppController::refreshLicense() {
         }
     }
 
+    if (tray_) tray_->setPro(licensePro_);
     if (licenseValid_ != was_valid || licensePro_ != was_pro ||
         licenseExpiry_ != was_exp) {
         emit licenseChanged();
