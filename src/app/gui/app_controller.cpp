@@ -16,6 +16,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -128,6 +129,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     refreshLicense();
     if (settings_) connect(settings_.get(), &Settings::changed,
                            this, &AppController::refreshLicense);
+
+    // VIV-31: wire the cloud client + resume any saved account session.
+    wireCloud();
 
     // Always-available model (VIV-53): host starts immediately at app
     // launch.  Peer code is visible the moment the user sees the
@@ -457,6 +461,104 @@ void AppController::importLicense(const QString& pathOrUrl) {
         log::warn("AppController", "importLicense: cannot write %s",
                   dst.toUtf8().constData());
     }
+}
+
+// ── Account / cloud (VIV-31) ───────────────────────────────────────────────
+
+void AppController::wireCloud() {
+    if (!settings_) return;
+    cloud_.setBaseUrl(settings_->cloudUrl());
+    accountEmail_  = settings_->accountEmail();
+    accountUserId_ = settings_->accountUserId();
+
+    connect(&cloud_, &CloudClient::authSucceeded, this,
+            [this](const QString& token, const QString& uid, const QString& email) {
+        settings_->setAccountToken(token);
+        settings_->setAccountEmail(email);
+        settings_->setAccountUserId(uid);
+        accountEmail_  = email;
+        accountUserId_ = uid;
+        cloud_.setToken(token);
+        emit accountChanged();
+        log::info("AppController", "Signed in as %s", email.toUtf8().constData());
+        cloud_.fetchLicense();   // pull the license right after sign-in
+    });
+    connect(&cloud_, &CloudClient::authFailed, this,
+            [this](const QString& msg) { emit accountError(msg); });
+    connect(&cloud_, &CloudClient::licenseFetched, this,
+            [this](const QByteArray& token) {
+        const QString dir = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation);
+        QDir().mkpath(dir);
+        const QString dst = dir + "/license.bin";
+        QFile out(dst);
+        if (out.open(QIODevice::WriteOnly)) {
+            out.write(token);
+            out.close();
+            settings_->setLicenseFile(dst);   // changed() → refreshLicense
+            refreshLicense();
+            log::info("AppController", "License fetched from cloud (%lld bytes)",
+                      static_cast<long long>(token.size()));
+        }
+    });
+    connect(&cloud_, &CloudClient::licenseUnavailable, this, [this]() {
+        log::info("AppController", "Account has no active Pro license");
+    });
+    connect(&cloud_, &CloudClient::licenseError, this, [](const QString& msg) {
+        log::warn("AppController", "License fetch: %s", msg.toUtf8().constData());
+    });
+
+    // Resume a saved session and refresh the license on launch.
+    const QString token = settings_->accountToken();
+    if (!token.isEmpty()) {
+        cloud_.setToken(token);
+        emit accountChanged();
+        cloud_.fetchLicense();
+    }
+}
+
+void AppController::signUp(const QString& email, const QString& password) {
+    cloud_.setBaseUrl(settings_->cloudUrl());
+    cloud_.signup(email, password);
+}
+
+void AppController::logIn(const QString& email, const QString& password) {
+    cloud_.setBaseUrl(settings_->cloudUrl());
+    cloud_.login(email, password);
+}
+
+void AppController::logOut() {
+    settings_->setAccountToken("");
+    settings_->setAccountEmail("");
+    settings_->setAccountUserId("");
+    cloud_.setToken("");
+    accountEmail_.clear();
+    accountUserId_.clear();
+
+    // Drop the cached license so Pro status clears immediately.
+    const QString dir = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation);
+    QFile::remove(dir + "/license.bin");
+    settings_->setLicenseFile("");
+    refreshLicense();
+    emit accountChanged();
+}
+
+void AppController::refreshLicenseFromCloud() {
+    cloud_.setBaseUrl(settings_->cloudUrl());
+    const QString token = settings_->accountToken();
+    if (token.isEmpty()) {
+        emit accountError("Sign in first");
+        return;
+    }
+    cloud_.setToken(token);
+    cloud_.fetchLicense();
+}
+
+void AppController::openUpgradePage() {
+    QString url = "https://vivora.dev/pro";
+    if (!accountUserId_.isEmpty()) url += "?uid=" + accountUserId_;
+    QDesktopServices::openUrl(QUrl(url));
 }
 
 void AppController::quit() {

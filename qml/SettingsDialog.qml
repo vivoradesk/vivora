@@ -406,38 +406,119 @@ Window {
                 y: 28
                 currentIndex: dlg.currentIndex
 
-                // ── 0: Account ───────────────────────────────────────
+                // ── 0: Account (VIV-31) ──────────────────────────────
                 ColumnLayout {
+                    id: accountSection
                     spacing: 0
+                    property string accountErr: ""
+                    Connections {
+                        target: App
+                        function onAccountError(message) { accountErr = message }
+                        function onAccountChanged()       { accountErr = "" }
+                    }
                     SectionTitle {
                         title: "Account"
                         subtitle: "Sign in to sync your devices and unlock Pro features."
                     }
-                    Rectangle {
+
+                    // Signed OUT — login / create account.
+                    ColumnLayout {
+                        visible: !App.accountLoggedIn
                         Layout.fillWidth: true
-                        Layout.topMargin: 12
-                        Layout.preferredHeight: 110
-                        color: "#e6dec8"
-                        radius: 10
-                        ColumnLayout {
-                            anchors.centerIn: parent
+                        Layout.topMargin: 10
+                        spacing: 8
+                        TextField {
+                            id: emailField
+                            Layout.preferredWidth: 280
+                            placeholderText: "Email"
+                            inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase
+                        }
+                        TextField {
+                            id: pwField
+                            Layout.preferredWidth: 280
+                            placeholderText: "Password"
+                            echoMode: TextInput.Password
+                        }
+                        Label {
+                            visible: accountSection.accountErr !== ""
+                            text: accountSection.accountErr
+                            color: theme.warn
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                            Layout.preferredWidth: 280
+                        }
+                        RowLayout {
                             spacing: 8
-                            Label {
-                                text: "Not signed in"
-                                color: theme.text
-                                font.bold: true
-                                Layout.alignment: Qt.AlignHCenter
+                            Rectangle {
+                                Layout.preferredHeight: 34
+                                Layout.preferredWidth: loginLbl.implicitWidth + 28
+                                radius: 8; color: theme.accent
+                                Label { id: loginLbl; anchors.centerIn: parent; text: "Log in"
+                                        color: "#ffffff"; font.pixelSize: 13; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.logIn(emailField.text.trim(), pwField.text) }
                             }
-                            Label {
-                                text: "Pro accounts arrive with cloud sync and managed relay."
-                                color: theme.textMuted
-                                font.pixelSize: 11
-                                Layout.alignment: Qt.AlignHCenter
+                            Rectangle {
+                                Layout.preferredHeight: 34
+                                Layout.preferredWidth: signupLbl.implicitWidth + 28
+                                radius: 8; color: theme.ctrlBg
+                                border.color: theme.border; border.width: 1
+                                Label { id: signupLbl; anchors.centerIn: parent; text: "Create account"
+                                        color: theme.text; font.pixelSize: 13 }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.signUp(emailField.text.trim(), pwField.text) }
                             }
-                            Button {
-                                text: "Sign in (coming soon)"
-                                enabled: false
-                                Layout.alignment: Qt.AlignHCenter
+                        }
+                    }
+
+                    // Signed IN — account + license + actions.
+                    ColumnLayout {
+                        visible: App.accountLoggedIn
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        spacing: 10
+                        Field {
+                            title: "Signed in"
+                            Label { text: App.accountEmail; color: theme.text; font.family: theme.monoFont }
+                        }
+                        Field {
+                            title: "Plan"
+                            Label {
+                                text: App.licensePro ? ("Pro · expires " + App.licenseExpiry) : "Free"
+                                color: App.licensePro ? theme.accent : theme.textMuted
+                            }
+                        }
+                        RowLayout {
+                            spacing: 8
+                            Rectangle {
+                                visible: !App.licensePro
+                                Layout.preferredHeight: 34
+                                Layout.preferredWidth: upLbl.implicitWidth + 28
+                                radius: 8; color: theme.accent
+                                Label { id: upLbl; anchors.centerIn: parent; text: "Upgrade to Pro"
+                                        color: "#ffffff"; font.pixelSize: 13; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.openUpgradePage() }
+                            }
+                            Rectangle {
+                                Layout.preferredHeight: 34
+                                Layout.preferredWidth: refLbl.implicitWidth + 28
+                                radius: 8; color: theme.ctrlBg
+                                border.color: theme.border; border.width: 1
+                                Label { id: refLbl; anchors.centerIn: parent; text: "Refresh license"
+                                        color: theme.text; font.pixelSize: 13 }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.refreshLicenseFromCloud() }
+                            }
+                            Rectangle {
+                                Layout.preferredHeight: 34
+                                Layout.preferredWidth: outLbl.implicitWidth + 28
+                                radius: 8; color: theme.ctrlBg
+                                border.color: theme.border; border.width: 1
+                                Label { id: outLbl; anchors.centerIn: parent; text: "Log out"
+                                        color: theme.text; font.pixelSize: 13 }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.logOut() }
                             }
                         }
                     }

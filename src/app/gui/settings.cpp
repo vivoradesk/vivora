@@ -23,6 +23,10 @@ constexpr const char* K_APPROVAL_MODE      = "security/approvalMode";
 constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
 constexpr const char* K_THEME              = "appearance/theme";
 constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
+constexpr const char* K_CLOUD_URL          = "account/cloudUrl";
+constexpr const char* K_ACCOUNT_TOKEN      = "account/token";
+constexpr const char* K_ACCOUNT_EMAIL      = "account/email";
+constexpr const char* K_ACCOUNT_USERID     = "account/userId";
 
 // Defaults.  Pre-fill rendezvous + relay with the Vivora-managed public
 // endpoints so a fresh install talks to the same infra the CLI uses by
@@ -51,6 +55,7 @@ constexpr int   DEF_APPROVAL_MODE    = 0;   // always_prompt — safest default
 constexpr bool  DEF_SINGLE_SESSION   = false;
 constexpr int   DEF_THEME            = 0;   // light
 constexpr bool  DEF_HDR_PASSTHROUGH  = true;
+constexpr const char* DEF_CLOUD_URL  = "https://cloud.vivora.dev";
 } // namespace
 
 Settings::Settings(QObject* parent)
@@ -71,6 +76,16 @@ void Settings::setRelay(const QString& v)     { if (v != relay()) { q_.setValue(
 
 QString Settings::licenseFile() const         { return q_.value(K_LICENSE, DEF_LICENSE).toString(); }
 void Settings::setLicenseFile(const QString& v){ if (v != licenseFile()) { q_.setValue(K_LICENSE, v); emit changed(); } }
+
+// Account/cloud state — write-through, no changed() (internal, not a UI knob).
+QString Settings::cloudUrl() const             { return q_.value(K_CLOUD_URL, DEF_CLOUD_URL).toString(); }
+void Settings::setCloudUrl(const QString& v)   { q_.setValue(K_CLOUD_URL, v); }
+QString Settings::accountToken() const         { return q_.value(K_ACCOUNT_TOKEN).toString(); }
+void Settings::setAccountToken(const QString& v){ q_.setValue(K_ACCOUNT_TOKEN, v); }
+QString Settings::accountEmail() const         { return q_.value(K_ACCOUNT_EMAIL).toString(); }
+void Settings::setAccountEmail(const QString& v){ q_.setValue(K_ACCOUNT_EMAIL, v); }
+QString Settings::accountUserId() const        { return q_.value(K_ACCOUNT_USERID).toString(); }
+void Settings::setAccountUserId(const QString& v){ q_.setValue(K_ACCOUNT_USERID, v); }
 
 QString Settings::stunServer() const          { return q_.value(K_STUN, DEF_STUN).toString(); }
 void Settings::setStunServer(const QString& v){ if (v != stunServer()) { q_.setValue(K_STUN, v); emit changed(); } }

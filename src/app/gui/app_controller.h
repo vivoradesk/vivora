@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/gui/address_book.h"
+#include "app/gui/cloud_client.h"
 #include "app/gui/settings.h"
 #include "host/session/host_approval_gate.h"
 
@@ -42,6 +43,10 @@ class AppController : public QObject {
     Q_PROPERTY(bool    licensePro    READ licensePro    NOTIFY licenseChanged)
     Q_PROPERTY(QString licenseTier   READ licenseTier   NOTIFY licenseChanged)
     Q_PROPERTY(QString licenseExpiry READ licenseExpiry NOTIFY licenseChanged)
+    // VIV-31 account: signed-in email + whether we have a session.  License
+    // is fetched from the cloud automatically once signed in.
+    Q_PROPERTY(QString accountEmail    READ accountEmail    NOTIFY accountChanged)
+    Q_PROPERTY(bool    accountLoggedIn READ accountLoggedIn NOTIFY accountChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -60,6 +65,9 @@ public:
     QString licenseTier()  const  { return licensePro_ ? QStringLiteral("Pro")
                                           : QStringLiteral("Free"); }
     QString licenseExpiry() const { return licenseExpiry_; }
+
+    QString accountEmail()    const { return accountEmail_; }
+    bool    accountLoggedIn() const { return !accountEmail_.isEmpty(); }
 
     // Wired from main.cpp at app init.  AppController borrows the tray
     // pointer; ownership stays with gui_main().
@@ -102,6 +110,16 @@ public slots:
     // whenever the license path changes.
     Q_INVOKABLE void refreshLicense();
 
+    // VIV-31 account actions (call the vivora-cloud API).
+    Q_INVOKABLE void signUp(const QString& email, const QString& password);
+    Q_INVOKABLE void logIn(const QString& email, const QString& password);
+    Q_INVOKABLE void logOut();
+    // Re-pull the license from the cloud for the signed-in account.
+    Q_INVOKABLE void refreshLicenseFromCloud();
+    // Open the Pro checkout page (website) in the browser, passing the
+    // account id so Paddle binds the subscription to it.
+    Q_INVOKABLE void openUpgradePage();
+
 signals:
     void sharingChanged();
     void clientCountChanged();
@@ -114,6 +132,10 @@ signals:
     void showWindowRequested();
     // License status changed (loaded / imported / expired).
     void licenseChanged();
+    // Account state changed (signed in / out).
+    void accountChanged();
+    // Account action failed — QML shows the message inline in the form.
+    void accountError(const QString& message);
     // VIV-53: new client awaiting approval.  QML shows
     // ConnectionApprovalDialog with these details.  key is a
     // stringified address used to identify the client when the user
@@ -161,6 +183,12 @@ private:
     bool    licenseValid_ = false;
     bool    licensePro_   = false;
     QString licenseExpiry_;
+
+    // VIV-31 account/cloud.
+    CloudClient cloud_;
+    QString     accountEmail_;
+    QString     accountUserId_;
+    void        wireCloud();
 };
 
 } // namespace vivora::gui

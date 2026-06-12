@@ -3,9 +3,9 @@ if(UNIX AND NOT APPLE)
     # apt Qt (6.2 base) lacks qt6-declarative-dev, so point CMAKE_PREFIX_PATH at
     # a Qt 6.5+ build with Quick (e.g. a from-source /opt|~/qt6).  OpenGL(Widgets)
     # stay for the QtGlVideoView stream renderer.
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2 OpenGL OpenGLWidgets)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2 Network OpenGL OpenGLWidgets)
 else()
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Qml Quick QuickControls2 Network)
 endif()
 # qt_standard_project_setup() landed in Qt 6.3.  Ubuntu 22.04 ships Qt 6.2,
 # so fall back to the equivalent CMake settings if the helper isn't there.
@@ -115,6 +115,7 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/view_session.cpp
         gui/settings.cpp
         gui/address_book.cpp
+        gui/cloud_client.cpp
         gui/tray.cpp
         gui/app_icon.cpp
         ${CMAKE_SOURCE_DIR}/qml/qml.qrc
@@ -127,7 +128,7 @@ target_link_libraries(vivora PRIVATE
 )
 if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
     target_link_libraries(vivora PRIVATE
-        Qt6::Qml Qt6::Quick Qt6::QuickControls2
+        Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network
     )
 endif()
 

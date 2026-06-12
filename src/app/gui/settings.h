@@ -65,6 +65,14 @@ public:
     int     theme() const;               void setTheme(int);
     bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
 
+    // VIV-31 account/license cloud.  Persisted but not exposed as Q_PROPERTY
+    // (QML talks to AppController's account state); the account setters do not
+    // fire changed() so they don't trigger a license re-verify loop.
+    QString cloudUrl() const;            void setCloudUrl(const QString&);
+    QString accountToken() const;        void setAccountToken(const QString&);
+    QString accountEmail() const;        void setAccountEmail(const QString&);
+    QString accountUserId() const;       void setAccountUserId(const QString&);
+
 signals:
     void changed();
 
