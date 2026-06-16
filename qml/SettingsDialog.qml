@@ -411,10 +411,11 @@ Window {
                     id: accountSection
                     spacing: 0
                     property string accountErr: ""
+                    property bool   busy: false
                     Connections {
                         target: App
-                        function onAccountError(message) { accountErr = message }
-                        function onAccountChanged()       { accountErr = "" }
+                        function onAccountError(message) { accountSection.accountErr = message; accountSection.busy = false }
+                        function onAccountChanged()       { accountSection.accountErr = ""; accountSection.busy = false }
                     }
                     SectionTitle {
                         title: "Account"
@@ -426,18 +427,22 @@ Window {
                         visible: !App.accountLoggedIn
                         Layout.fillWidth: true
                         Layout.topMargin: 10
-                        spacing: 8
-                        TextField {
+                        spacing: 10
+                        CreamField {
                             id: emailField
-                            Layout.preferredWidth: 280
+                            Layout.preferredWidth: 300
                             placeholderText: "Email"
                             inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase
                         }
-                        TextField {
+                        CreamField {
                             id: pwField
-                            Layout.preferredWidth: 280
+                            Layout.preferredWidth: 300
                             placeholderText: "Password"
                             echoMode: TextInput.Password
+                            onAccepted: if (!accountSection.busy && text.length > 0) {
+                                accountSection.busy = true
+                                App.logIn(emailField.text.trim(), pwField.text)
+                            }
                         }
                         Label {
                             visible: accountSection.accountErr !== ""
@@ -445,28 +450,40 @@ Window {
                             color: theme.warn
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
-                            Layout.preferredWidth: 280
+                            Layout.preferredWidth: 300
                         }
                         RowLayout {
                             spacing: 8
                             Rectangle {
-                                Layout.preferredHeight: 34
-                                Layout.preferredWidth: loginLbl.implicitWidth + 28
+                                Layout.preferredHeight: 38
+                                Layout.preferredWidth: loginLbl.implicitWidth + 32
                                 radius: 8; color: theme.accent
+                                opacity: accountSection.busy ? 0.5 : 1
                                 Label { id: loginLbl; anchors.centerIn: parent; text: "Log in"
                                         color: "#ffffff"; font.pixelSize: 13; font.bold: true }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: App.logIn(emailField.text.trim(), pwField.text) }
+                                MouseArea { anchors.fill: parent; enabled: !accountSection.busy
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: { accountSection.busy = true
+                                                 App.logIn(emailField.text.trim(), pwField.text) } }
                             }
                             Rectangle {
-                                Layout.preferredHeight: 34
-                                Layout.preferredWidth: signupLbl.implicitWidth + 28
+                                Layout.preferredHeight: 38
+                                Layout.preferredWidth: signupLbl.implicitWidth + 32
                                 radius: 8; color: theme.ctrlBg
                                 border.color: theme.border; border.width: 1
+                                opacity: accountSection.busy ? 0.5 : 1
                                 Label { id: signupLbl; anchors.centerIn: parent; text: "Create account"
                                         color: theme.text; font.pixelSize: 13 }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: App.signUp(emailField.text.trim(), pwField.text) }
+                                MouseArea { anchors.fill: parent; enabled: !accountSection.busy
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: { accountSection.busy = true
+                                                 App.signUp(emailField.text.trim(), pwField.text) } }
+                            }
+                            BusyIndicator {
+                                running: accountSection.busy
+                                visible: accountSection.busy
+                                Layout.preferredHeight: 26
+                                Layout.preferredWidth: 26
                             }
                         }
                     }
@@ -483,9 +500,20 @@ Window {
                         }
                         Field {
                             title: "Plan"
-                            Label {
-                                text: App.licensePro ? ("Pro · expires " + App.licenseExpiry) : "Free"
-                                color: App.licensePro ? theme.accent : theme.textMuted
+                            Rectangle {
+                                Layout.preferredHeight: 24
+                                Layout.preferredWidth: planLbl.implicitWidth + 22
+                                radius: 999
+                                color: App.licensePro ? Qt.rgba(0.122, 0.643, 0.388, 0.14)
+                                                      : theme.hoverBg
+                                Label {
+                                    id: planLbl
+                                    anchors.centerIn: parent
+                                    text: App.licensePro ? ("PRO · expires " + App.licenseExpiry) : "FREE"
+                                    color: App.licensePro ? "#1FA463" : theme.textMuted
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
                             }
                         }
                         RowLayout {
