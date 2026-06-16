@@ -229,6 +229,16 @@ if(WIN32)
         message(WARNING "OpenSSL static libs not found at ${_VIVORA_OPENSSL_DIR}")
     endif()
 
+    # Native Windows TLS backend (Schannel) for QNetworkAccessManager.  Static
+    # Qt registers no TLS backend unless its plugin lib is linked AND imported
+    # (Q_IMPORT_PLUGIN(QSchannelBackendPlugin) in gui_main.cpp); without one the
+    # first HTTPS request (CloudClient -> https://cloud.vivora.dev) crashes.
+    # Schannel needs no OpenSSL — just the Windows security libs below.
+    target_link_libraries(vivora PRIVATE
+        "${_VIVORA_QT_LIB_DIR}/../plugins/tls/qschannelbackend.lib"
+        secur32 crypt32 bcrypt ncrypt ws2_32
+    )
+
     # Qt6's openssl TLS plugin tries to dlopen OpenSSL 1.1 at runtime
     # (legacy hardcoded import).  Copy the matching DLLs next to the
     # exe so QApplication startup doesn't blow up.  Long-term we want to

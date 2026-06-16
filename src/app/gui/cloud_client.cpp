@@ -6,10 +6,18 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSslSocket>
 
 namespace vivora::gui {
 
-CloudClient::CloudClient(QObject* parent) : QObject(parent) {}
+CloudClient::CloudClient(QObject* parent) : QObject(parent) {
+    // Diagnostic: confirm a TLS backend is actually available before any HTTPS.
+    log::info("Cloud", "TLS: supportsSsl=%d active='%s' available=[%s] lib='%s'",
+              QSslSocket::supportsSsl() ? 1 : 0,
+              QSslSocket::activeBackend().toUtf8().constData(),
+              QSslSocket::availableBackends().join(',').toUtf8().constData(),
+              QSslSocket::sslLibraryVersionString().toUtf8().constData());
+}
 
 void CloudClient::setBaseUrl(const QString& url) {
     baseUrl_ = url;
@@ -39,11 +47,14 @@ void CloudClient::postAuth(const QString& path, const QString& email,
     QNetworkRequest req{QUrl(baseUrl_ + path)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
+    log::info("Cloud", "POST %s", (baseUrl_ + path).toUtf8().constData());
     QNetworkReply* reply = nam_.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        log::info("Cloud", "auth reply: status=%d netErr='%s'", status,
+                  reply->errorString().toUtf8().constData());
         const QByteArray data = reply->readAll();
         const QJsonObject obj = QJsonDocument::fromJson(data).object();
         if (status == 200 || status == 201) {

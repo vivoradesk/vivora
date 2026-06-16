@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFont>
 #include <QFontDatabase>
+#include <QSslSocket>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -51,6 +52,11 @@ Q_IMPORT_PLUGIN(QtQuickControls2BasicStylePlugin)
 Q_IMPORT_PLUGIN(QtQuickControls2BasicStyleImplPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogsPlugin)
 Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
+// TLS backend for QNetworkAccessManager (CloudClient talks to
+// https://cloud.vivora.dev).  Static Qt registers no TLS backend unless its
+// plugin is imported; without one the first HTTPS request crashes.  Schannel
+// is the native Windows backend — no OpenSSL runtime dependency.
+Q_IMPORT_PLUGIN(QSchannelBackend)
 #endif
 
 namespace vivora::gui {
@@ -85,6 +91,15 @@ constexpr const char* IPC_RAISE_CMD   = "raise\n";
 
 int run_gui(int argc, char** argv) {
     QApplication app(argc, argv);
+
+#ifdef VIVORA_WINDOWS
+    // Force the native Schannel TLS backend.  The static Qt also exposes an
+    // OpenSSL backend, but it's wired against a mismatched OpenSSL 1.1/3 set
+    // (linked with /FORCE:MULTIPLE) and crashes mid-handshake.  Schannel uses
+    // Windows' own TLS — no OpenSSL.  Must run before any QSslSocket is used.
+    if (!QSslSocket::setActiveBackend(QStringLiteral("schannel")))
+        log::warn("GUI", "could not select Schannel TLS backend");
+#endif
 
     // Bundled fonts (VIV-5): register Inter (UI) + JetBrains Mono (codes /
     // fingerprints) so the GUI looks identical on every OS instead of falling
