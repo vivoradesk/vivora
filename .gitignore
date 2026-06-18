@@ -17,3 +17,6 @@ third_party/ff/*.exe
 # Claude Code local state — personal permissions + scheduler lock.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Cloudflare wrangler cache (stray from Pages deploys)
+.wrangler/
