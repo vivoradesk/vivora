@@ -18,6 +18,7 @@
 #include "common/net/socket.h"
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
+#include "relay/metrics_emitter.h"
 
 #include <array>
 #include <chrono>
@@ -165,6 +166,7 @@ int main(int argc, char** argv) {
 
     sock->set_nonblocking(true);
     auto next_stats = Clock::now() + std::chrono::seconds(60);
+    vivora::ops::MetricsEmitter metrics("rendezvous");   // VIV-72
 
     while (true) {
 #ifndef _WIN32
@@ -207,6 +209,8 @@ int main(int argc, char** argv) {
                       (unsigned long long)total_lookup,
                       (unsigned long long)total_punch_hint,
                       (unsigned long long)total_drop);
+            // VIV-72: rendezvous only brokers hole-punching, no media egress.
+            if (metrics.enabled()) metrics.emit(static_cast<int>(registry.size()), 0);
             next_stats = now + std::chrono::seconds(60);
         }
 

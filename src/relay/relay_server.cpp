@@ -17,6 +17,7 @@
 #include "common/crypto/license_token.h"
 #include "common/net/socket.h"
 #include "common/utils/log.h"
+#include "relay/metrics_emitter.h"
 
 #include <array>
 #include <chrono>
@@ -238,6 +239,8 @@ int main(int argc, char** argv) {
     auto last_sweep = Clock::now();
     auto next_stats = Clock::now() + std::chrono::seconds(60);
     uint64_t total_bind = 0, total_data = 0, total_drop = 0, total_unpaired_drop = 0;
+    uint64_t total_bytes = 0, last_emit_bytes = 0;   // forwarded bytes (VIV-72)
+    vivora::ops::MetricsEmitter metrics("relay");
 
     while (true) {
 #ifndef _WIN32
@@ -269,6 +272,15 @@ int main(int argc, char** argv) {
                       (unsigned long long)total_data,
                       (unsigned long long)total_drop,
                       (unsigned long long)total_unpaired_drop);
+            // VIV-72: push aggregate load to the backend.  concurrent =
+            // number of fully-paired relay sessions (2 bindings each).
+            if (metrics.enabled()) {
+                int paired = 0;
+                for (const auto& kv : bindings)
+                    if (kv.second.paired) ++paired;
+                metrics.emit(paired / 2, total_bytes - last_emit_bytes);
+                last_emit_bytes = total_bytes;
+            }
             next_stats = now + std::chrono::seconds(60);
         }
 
@@ -424,6 +436,7 @@ int main(int argc, char** argv) {
             auto pit = bindings.find(it->second.paired_alloc);
             if (pit == bindings.end()) { ++total_unpaired_drop; break; }
             ++total_data;
+            total_bytes += payload_len;
             // Forward the opaque payload as-is — the receiving peer's
             // socket will see it as if it came directly from the relay's
             // IP.  Session-level Noise crypto handles the rest.

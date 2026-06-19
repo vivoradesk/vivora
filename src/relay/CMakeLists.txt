@@ -1,5 +1,6 @@
 add_executable(vivora-rendezvous
     rendezvous_server.cpp
+    metrics_emitter.cpp
 )
 
 target_link_libraries(vivora-rendezvous PRIVATE vivora_common)
@@ -11,6 +12,7 @@ target_compile_features(vivora-rendezvous PRIVATE cxx_std_17)
 
 add_executable(vivora-relay
     relay_server.cpp
+    metrics_emitter.cpp
 )
 
 target_link_libraries(vivora-relay PRIVATE vivora_common)
