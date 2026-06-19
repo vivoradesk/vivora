@@ -596,7 +596,10 @@ void AppController::wireAnnouncements() {
 #else
         const QString platform = QStringLiteral("linux");
 #endif
-        for (const QVariant& v : list) {           // server returns priority desc
+        // Build the queue of every eligible item (server returns priority desc);
+        // we show them one at a time, advancing on dismiss.
+        annQueue_.clear();
+        for (const QVariant& v : list) {
             const QVariantMap a = v.toMap();
             const QString id      = a.value("id").toString();
             const QString display = a.value("display", "once").toString();
@@ -612,21 +615,32 @@ void AppController::wireAnnouncements() {
                 if (tier == QStringLiteral("pro")  && !licensePro_) continue;
                 if (tier == QStringLiteral("free") &&  licensePro_) continue;
             }
-
-            annId_      = id;
-            annType_    = a.value("type", QStringLiteral("info")).toString();
-            annTitle_   = a.value("title").toString();
-            annBody_    = a.value("body").toString();
-            annImage_   = a.value("image_url").toString();
-            annButtons_ = a.value("buttons").toList();
-            annVisible_ = true;
-            settings_->addSeenAnnouncement(id);    // mark seen the moment it shows
-            emit announcementChanged();
-            log::info("Announce", "showing %s", id.toUtf8().constData());
-            return;
+            annQueue_.append(a);
         }
+        showNextAnnouncement();
     });
     announcements_.fetch(QStringLiteral("https://cloud.vivora.dev/announcements"));
+}
+
+void AppController::showNextAnnouncement() {
+    if (annQueue_.isEmpty()) {
+        annVisible_ = false;
+        annId_.clear();
+        emit announcementChanged();
+        return;
+    }
+    const QVariantMap a = annQueue_.first().toMap();
+    annId_      = a.value("id").toString();
+    annType_    = a.value("type", QStringLiteral("info")).toString();
+    annTitle_   = a.value("title").toString();
+    annBody_    = a.value("body").toString();
+    annImage_   = a.value("image_url").toString();
+    annButtons_ = a.value("buttons").toList();
+    annVisible_ = true;
+    settings_->addSeenAnnouncement(annId_);        // mark seen the moment it shows
+    emit announcementChanged();
+    log::info("Announce", "showing %s (%lld queued)", annId_.toUtf8().constData(),
+              static_cast<long long>(annQueue_.size() - 1));
 }
 
 void AppController::openAnnouncementUrl(const QString& url) {
@@ -635,8 +649,8 @@ void AppController::openAnnouncementUrl(const QString& url) {
 
 void AppController::dismissAnnouncement() {
     if (!annId_.isEmpty()) settings_->addDismissedAnnouncement(annId_);
-    annVisible_ = false;
-    emit announcementChanged();
+    if (!annQueue_.isEmpty()) annQueue_.removeFirst();
+    showNextAnnouncement();                         // show the next eligible, if any
 }
 
 void AppController::quit() {

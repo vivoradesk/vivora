@@ -231,12 +231,15 @@ private:
     QString       updateNotes_;
     void          wireUpdate();
 
-    // VIV-70 announcements.
+    // VIV-70 announcements.  annQueue_ holds the remaining eligible items; we
+    // show them one at a time, advancing on dismiss.
     AnnouncementsClient announcements_;
     bool         annVisible_ = false;
     QString      annId_, annType_, annTitle_, annBody_, annImage_;
     QVariantList annButtons_;
+    QVariantList annQueue_;
     void         wireAnnouncements();
+    void         showNextAnnouncement();
 };
 
 } // namespace vivora::gui
