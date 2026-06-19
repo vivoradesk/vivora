@@ -3,6 +3,7 @@
 #include "app/gui/address_book.h"
 #include "app/gui/cloud_client.h"
 #include "app/gui/settings.h"
+#include "app/gui/update_checker.h"
 #include "host/session/host_approval_gate.h"
 
 #include <QHash>
@@ -47,6 +48,10 @@ class AppController : public QObject {
     // is fetched from the cloud automatically once signed in.
     Q_PROPERTY(QString accountEmail    READ accountEmail    NOTIFY accountChanged)
     Q_PROPERTY(bool    accountLoggedIn READ accountLoggedIn NOTIFY accountChanged)
+    // VIV-69 update check: a build newer than VIVORA_VERSION is published.
+    Q_PROPERTY(bool    updateAvailable READ updateAvailable NOTIFY updateChanged)
+    Q_PROPERTY(QString updateVersion   READ updateVersion   NOTIFY updateChanged)
+    Q_PROPERTY(QString updateNotes     READ updateNotes     NOTIFY updateChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -68,6 +73,10 @@ public:
 
     QString accountEmail()    const { return accountEmail_; }
     bool    accountLoggedIn() const { return !accountEmail_.isEmpty(); }
+
+    bool    updateAvailable() const { return updateAvailable_; }
+    QString updateVersion()   const { return updateVersion_; }
+    QString updateNotes()     const { return updateNotes_; }
 
     // Wired from main.cpp at app init.  AppController borrows the tray
     // pointer; ownership stays with gui_main().
@@ -119,6 +128,8 @@ public slots:
     // Open the Pro checkout page (website) in the browser, passing the
     // account id so Paddle binds the subscription to it.
     Q_INVOKABLE void openUpgradePage();
+    // Open the releases/download page for the available update (VIV-69).
+    Q_INVOKABLE void openDownloadPage();
 
 signals:
     void sharingChanged();
@@ -134,6 +145,8 @@ signals:
     void licenseChanged();
     // Account state changed (signed in / out).
     void accountChanged();
+    // A newer build is available (VIV-69) — QML shows the update banner.
+    void updateChanged();
     // Account action failed — QML shows the message inline in the form.
     void accountError(const QString& message);
     // VIV-53: new client awaiting approval.  QML shows
@@ -189,6 +202,14 @@ private:
     QString     accountEmail_;
     QString     accountUserId_;
     void        wireCloud();
+
+    // VIV-69 update check (notify-only).
+    UpdateChecker update_;
+    bool          updateAvailable_ = false;
+    QString       updateVersion_;
+    QString       updateUrl_;
+    QString       updateNotes_;
+    void          wireUpdate();
 };
 
 } // namespace vivora::gui

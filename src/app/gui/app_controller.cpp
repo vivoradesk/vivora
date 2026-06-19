@@ -133,6 +133,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // VIV-31: wire the cloud client + resume any saved account session.
     wireCloud();
 
+    // VIV-69: check for a newer build (notify-only; silent on any error).
+    wireUpdate();
+
     // Always-available model (VIV-53): host starts immediately at app
     // launch.  Peer code is visible the moment the user sees the
     // window — no Start button to click.  Stop/Pause is reachable via
@@ -556,9 +559,26 @@ void AppController::refreshLicenseFromCloud() {
 }
 
 void AppController::openUpgradePage() {
-    QString url = "https://vivora.dev/pro";
-    if (!accountUserId_.isEmpty()) url += "?uid=" + accountUserId_;
-    QDesktopServices::openUrl(QUrl(url));
+    // Web checkout / account page: login → Paddle checkout (VIV-31).  The page
+    // signs the user in itself, so no uid is passed.
+    QDesktopServices::openUrl(QUrl("https://vivora.dev/upgrade"));
+}
+
+void AppController::openDownloadPage() {
+    if (!updateUrl_.isEmpty()) QDesktopServices::openUrl(QUrl(updateUrl_));
+}
+
+void AppController::wireUpdate() {
+    connect(&update_, &UpdateChecker::updateAvailable, this,
+            [this](const QString& latest, const QString& url, const QString& notes) {
+        updateAvailable_ = true;
+        updateVersion_   = latest;
+        updateUrl_       = url;
+        updateNotes_     = notes;
+        emit updateChanged();
+        log::info("Update", "banner: %s available", latest.toUtf8().constData());
+    });
+    update_.check(QStringLiteral("https://vivora.dev/version.json"));
 }
 
 void AppController::quit() {

@@ -188,6 +188,49 @@ ApplicationWindow {
         anchors.margins: 14
         spacing: 14
 
+        // ── Update banner (VIV-69) — shown when a newer build is published ──
+        Rectangle {
+            id: updateBanner
+            property bool dismissed: false
+            visible: App.updateAvailable && !dismissed
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
+            radius: 8
+            color: Qt.rgba(0.24, 0.42, 0.98, 0.10)   // soft accent tint
+            border.color: theme.accent
+            border.width: 1
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 10
+                spacing: 10
+                Label {
+                    text: "Update available — Vivora " + App.updateVersion
+                    color: theme.text
+                    font.pixelSize: 13
+                    font.bold: true
+                }
+                Item { Layout.fillWidth: true }
+                Rectangle {
+                    Layout.preferredHeight: 26
+                    Layout.preferredWidth: dlLbl.implicitWidth + 24
+                    radius: 6
+                    color: theme.accent
+                    Label { id: dlLbl; anchors.centerIn: parent; text: "Download"
+                            color: "#ffffff"; font.pixelSize: 12; font.bold: true }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: App.openDownloadPage() }
+                }
+                Label {
+                    text: "✕"
+                    color: theme.textMuted
+                    font.pixelSize: 14
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: updateBanner.dismissed = true }
+                }
+            }
+        }
+
         // ── Header: logo + name + status badge ───────────────────────
         RowLayout {
             Layout.fillWidth: true

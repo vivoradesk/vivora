@@ -53,6 +53,9 @@ elseif(APPLE)
     add_compile_definitions(VIVORA_MACOS)
 endif()
 
+# App version string exposed to C++ (e.g. the update check, VIV-69).
+add_compile_definitions(VIVORA_VERSION="${PROJECT_VERSION}")
+
 # Third-party dependencies (audio: libopus + speex resampler)
 add_subdirectory(third_party)
 
