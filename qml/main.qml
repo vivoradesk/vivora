@@ -660,8 +660,9 @@ ApplicationWindow {
             Label {                    // close X
                 anchors.top: parent.top; anchors.right: parent.right
                 anchors.topMargin: 10; anchors.rightMargin: 12
-                text: "✕"; color: theme.textMuted; font.pixelSize: 15
-                MouseArea { anchors.fill: parent; anchors.margins: -6
+                text: "✕"; font.pixelSize: 15
+                color: xMa.containsMouse ? theme.text : theme.textMuted
+                MouseArea { id: xMa; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor; onClicked: App.dismissAnnouncement() }
             }
 
@@ -703,7 +704,9 @@ ApplicationWindow {
                             Layout.preferredHeight: 34
                             Layout.preferredWidth: bLbl.implicitWidth + 28
                             radius: 8
-                            color: index === 0 ? theme.accent : theme.hoverBg
+                            color: index === 0
+                                   ? (bMa.containsMouse ? Qt.darker(theme.accent, 1.15) : theme.accent)
+                                   : (bMa.containsMouse ? Qt.darker(theme.hoverBg, 1.08) : theme.hoverBg)
                             border.color: index === 0 ? "transparent" : theme.border
                             border.width: 1
                             Label {
@@ -713,7 +716,9 @@ ApplicationWindow {
                                 font.pixelSize: 13; font.bold: index === 0
                             }
                             MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                id: bMa
+                                anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     if (modelData.url !== undefined && modelData.url !== "")
                                         App.openAnnouncementUrl(modelData.url)
@@ -726,10 +731,12 @@ ApplicationWindow {
                         visible: App.announcementButtons.length === 0
                         Layout.preferredHeight: 34
                         Layout.preferredWidth: gotLbl.implicitWidth + 28
-                        radius: 8; color: theme.accent
+                        radius: 8
+                        color: gotMa.containsMouse ? Qt.darker(theme.accent, 1.15) : theme.accent
                         Label { id: gotLbl; anchors.centerIn: parent; text: "Got it"
                                 color: "#ffffff"; font.pixelSize: 13; font.bold: true }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        MouseArea { id: gotMa; anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: App.dismissAnnouncement() }
                     }
                 }
