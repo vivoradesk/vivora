@@ -649,6 +649,7 @@ ApplicationWindow {
         MouseArea { anchors.fill: parent }   // swallow clicks behind the card
 
         Rectangle {
+            id: annCard
             anchors.centerIn: parent
             width: Math.min(440, parent.width - 40)
             implicitHeight: annCol.implicitHeight + 36
@@ -656,14 +657,21 @@ ApplicationWindow {
             color: theme.bg
             border.color: theme.border
             border.width: 1
+            opacity: 0
+            scale: 0.95
+            transformOrigin: Item.Center
 
-            Label {                    // close X
-                anchors.top: parent.top; anchors.right: parent.right
-                anchors.topMargin: 10; anchors.rightMargin: 12
-                text: "✕"; font.pixelSize: 15
-                color: xMa.containsMouse ? theme.text : theme.textMuted
-                MouseArea { id: xMa; anchors.fill: parent; anchors.margins: -6; hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor; onClicked: App.dismissAnnouncement() }
+            // Pop-in on every content change (first show + each next in the queue).
+            ParallelAnimation {
+                id: annPop
+                NumberAnimation { target: annCard; property: "opacity"; to: 1; duration: 150; easing.type: Easing.OutQuad }
+                NumberAnimation { target: annCard; property: "scale"; to: 1; duration: 200; easing.type: Easing.OutBack; easing.overshoot: 1.5 }
+            }
+            Connections {
+                target: App
+                function onAnnouncementChanged() {
+                    if (App.announcementVisible) { annCard.opacity = 0; annCard.scale = 0.95; annPop.restart() }
+                }
             }
 
             ColumnLayout {
@@ -740,6 +748,24 @@ ApplicationWindow {
                             onClicked: App.dismissAnnouncement() }
                     }
                 }
+            }
+
+            // Close ✕ — declared last (top z) so it floats above the image;
+            // a dark chip over images, a plain glyph over the card background.
+            Rectangle {
+                readonly property bool overImage: App.announcementImageUrl !== ""
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 10; anchors.rightMargin: 10
+                width: 26; height: 26; radius: 13
+                color: overImage ? (xMa.containsMouse ? "#cc000000" : "#59000000")
+                                 : (xMa.containsMouse ? theme.hoverBg : "transparent")
+                Label {
+                    anchors.centerIn: parent; text: "✕"; font.pixelSize: 13
+                    color: parent.overImage ? "#ffffff"
+                                            : (xMa.containsMouse ? theme.text : theme.textMuted)
+                }
+                MouseArea { id: xMa; anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor; onClicked: App.dismissAnnouncement() }
             }
         }
     }
