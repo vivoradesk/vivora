@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/gui/address_book.h"
+#include "app/gui/announcements_client.h"
 #include "app/gui/cloud_client.h"
 #include "app/gui/settings.h"
 #include "app/gui/update_checker.h"
@@ -52,6 +53,13 @@ class AppController : public QObject {
     Q_PROPERTY(bool    updateAvailable READ updateAvailable NOTIFY updateChanged)
     Q_PROPERTY(QString updateVersion   READ updateVersion   NOTIFY updateChanged)
     Q_PROPERTY(QString updateNotes     READ updateNotes     NOTIFY updateChanged)
+    // VIV-70 announcement modal (one eligible item shown at launch).
+    Q_PROPERTY(bool         announcementVisible  READ announcementVisible  NOTIFY announcementChanged)
+    Q_PROPERTY(QString      announcementType     READ announcementType     NOTIFY announcementChanged)
+    Q_PROPERTY(QString      announcementTitle    READ announcementTitle    NOTIFY announcementChanged)
+    Q_PROPERTY(QString      announcementBody     READ announcementBody     NOTIFY announcementChanged)
+    Q_PROPERTY(QString      announcementImageUrl READ announcementImageUrl NOTIFY announcementChanged)
+    Q_PROPERTY(QVariantList announcementButtons  READ announcementButtons  NOTIFY announcementChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -77,6 +85,13 @@ public:
     bool    updateAvailable() const { return updateAvailable_; }
     QString updateVersion()   const { return updateVersion_; }
     QString updateNotes()     const { return updateNotes_; }
+
+    bool         announcementVisible()  const { return annVisible_; }
+    QString      announcementType()     const { return annType_; }
+    QString      announcementTitle()    const { return annTitle_; }
+    QString      announcementBody()     const { return annBody_; }
+    QString      announcementImageUrl() const { return annImage_; }
+    QVariantList announcementButtons()  const { return annButtons_; }
 
     // Wired from main.cpp at app init.  AppController borrows the tray
     // pointer; ownership stays with gui_main().
@@ -130,6 +145,9 @@ public slots:
     Q_INVOKABLE void openUpgradePage();
     // Open the releases/download page for the available update (VIV-69).
     Q_INVOKABLE void openDownloadPage();
+    // VIV-70: open an announcement button's URL / dismiss the current modal.
+    Q_INVOKABLE void openAnnouncementUrl(const QString& url);
+    Q_INVOKABLE void dismissAnnouncement();
 
 signals:
     void sharingChanged();
@@ -147,6 +165,8 @@ signals:
     void accountChanged();
     // A newer build is available (VIV-69) — QML shows the update banner.
     void updateChanged();
+    // An announcement is ready to show / was dismissed (VIV-70).
+    void announcementChanged();
     // Account action failed — QML shows the message inline in the form.
     void accountError(const QString& message);
     // VIV-53: new client awaiting approval.  QML shows
@@ -210,6 +230,13 @@ private:
     QString       updateUrl_;
     QString       updateNotes_;
     void          wireUpdate();
+
+    // VIV-70 announcements.
+    AnnouncementsClient announcements_;
+    bool         annVisible_ = false;
+    QString      annId_, annType_, annTitle_, annBody_, annImage_;
+    QVariantList annButtons_;
+    void         wireAnnouncements();
 };
 
 } // namespace vivora::gui

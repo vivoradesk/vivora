@@ -132,4 +132,16 @@ void Settings::setTheme(int v)                { if (v != theme()) { q_.setValue(
 bool Settings::hdrPassthrough() const         { return q_.value(K_HDR_PASSTHROUGH, DEF_HDR_PASSTHROUGH).toBool(); }
 void Settings::setHdrPassthrough(bool v)      { if (v != hdrPassthrough()) { q_.setValue(K_HDR_PASSTHROUGH, v); emit changed(); } }
 
+// VIV-70 announcement dedup sets (stored as QStringList).
+QStringList Settings::seenAnnouncements() const { return q_.value("announce/seen").toStringList(); }
+void Settings::addSeenAnnouncement(const QString& id) {
+    QStringList s = seenAnnouncements();
+    if (!s.contains(id)) { s.append(id); q_.setValue("announce/seen", s); }
+}
+QStringList Settings::dismissedAnnouncements() const { return q_.value("announce/dismissed").toStringList(); }
+void Settings::addDismissedAnnouncement(const QString& id) {
+    QStringList d = dismissedAnnouncements();
+    if (!d.contains(id)) { d.append(id); q_.setValue("announce/dismissed", d); }
+}
+
 } // namespace vivora::gui

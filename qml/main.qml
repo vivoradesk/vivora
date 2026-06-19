@@ -639,4 +639,101 @@ ApplicationWindow {
         }
         TextEdit { id: clipText; visible: false }
     }
+
+    // ── Announcement modal (VIV-70) ──────────────────────────────────────
+    Rectangle {
+        anchors.fill: parent
+        visible: App.announcementVisible
+        color: "#88000000"            // scrim
+        z: 2000
+        MouseArea { anchors.fill: parent }   // swallow clicks behind the card
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(440, parent.width - 40)
+            implicitHeight: annCol.implicitHeight + 36
+            radius: 14
+            color: theme.bg
+            border.color: theme.border
+            border.width: 1
+
+            Label {                    // close X
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 10; anchors.rightMargin: 12
+                text: "✕"; color: theme.textMuted; font.pixelSize: 15
+                MouseArea { anchors.fill: parent; anchors.margins: -6
+                    cursorShape: Qt.PointingHandCursor; onClicked: App.dismissAnnouncement() }
+            }
+
+            ColumnLayout {
+                id: annCol
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 18
+                spacing: 12
+
+                Image {
+                    visible: App.announcementImageUrl !== ""
+                    source: App.announcementImageUrl
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible ? 150 : 0
+                    fillMode: Image.PreserveAspectCrop
+                }
+                Label {
+                    text: App.announcementTitle
+                    font.pixelSize: 18; font.bold: true; color: theme.text
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.rightMargin: 16
+                }
+                Label {
+                    text: App.announcementBody
+                    visible: text !== ""
+                    font.pixelSize: 13; color: theme.textMuted
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    Repeater {
+                        model: App.announcementButtons
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            Layout.preferredHeight: 34
+                            Layout.preferredWidth: bLbl.implicitWidth + 28
+                            radius: 8
+                            color: index === 0 ? theme.accent : theme.hoverBg
+                            border.color: index === 0 ? "transparent" : theme.border
+                            border.width: 1
+                            Label {
+                                id: bLbl; anchors.centerIn: parent
+                                text: modelData.label !== undefined ? modelData.label : "OK"
+                                color: index === 0 ? "#ffffff" : theme.text
+                                font.pixelSize: 13; font.bold: index === 0
+                            }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (modelData.url !== undefined && modelData.url !== "")
+                                        App.openAnnouncementUrl(modelData.url)
+                                    App.dismissAnnouncement()
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {                       // fallback when no buttons
+                        visible: App.announcementButtons.length === 0
+                        Layout.preferredHeight: 34
+                        Layout.preferredWidth: gotLbl.implicitWidth + 28
+                        radius: 8; color: theme.accent
+                        Label { id: gotLbl; anchors.centerIn: parent; text: "Got it"
+                                color: "#ffffff"; font.pixelSize: 13; font.bold: true }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: App.dismissAnnouncement() }
+                    }
+                }
+            }
+        }
+    }
 }

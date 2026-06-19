@@ -136,6 +136,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // VIV-69: check for a newer build (notify-only; silent on any error).
     wireUpdate();
 
+    // VIV-70: fetch in-app announcements and show one if eligible.
+    wireAnnouncements();
+
     // Always-available model (VIV-53): host starts immediately at app
     // launch.  Peer code is visible the moment the user sees the
     // window — no Start button to click.  Stop/Pause is reachable via
@@ -579,6 +582,61 @@ void AppController::wireUpdate() {
         log::info("Update", "banner: %s available", latest.toUtf8().constData());
     });
     update_.check(QStringLiteral("https://vivora.dev/version.json"));
+}
+
+void AppController::wireAnnouncements() {
+    connect(&announcements_, &AnnouncementsClient::fetched, this,
+            [this](const QVariantList& list) {
+        const QStringList seen      = settings_->seenAnnouncements();
+        const QStringList dismissed = settings_->dismissedAnnouncements();
+#if defined(VIVORA_WINDOWS)
+        const QString platform = QStringLiteral("windows");
+#elif defined(VIVORA_MACOS)
+        const QString platform = QStringLiteral("macos");
+#else
+        const QString platform = QStringLiteral("linux");
+#endif
+        for (const QVariant& v : list) {           // server returns priority desc
+            const QVariantMap a = v.toMap();
+            const QString id      = a.value("id").toString();
+            const QString display = a.value("display", "once").toString();
+            if (id.isEmpty()) continue;
+            if (display == "once"            && seen.contains(id))      continue;
+            if (display == "until_dismissed" && dismissed.contains(id)) continue;
+
+            const QVariantMap target = a.value("target").toMap();
+            if (!target.isEmpty()) {
+                const QVariantList plats = target.value("platforms").toList();
+                if (!plats.isEmpty() && !plats.contains(platform)) continue;
+                const QString tier = target.value("tier").toString();
+                if (tier == QStringLiteral("pro")  && !licensePro_) continue;
+                if (tier == QStringLiteral("free") &&  licensePro_) continue;
+            }
+
+            annId_      = id;
+            annType_    = a.value("type", QStringLiteral("info")).toString();
+            annTitle_   = a.value("title").toString();
+            annBody_    = a.value("body").toString();
+            annImage_   = a.value("image_url").toString();
+            annButtons_ = a.value("buttons").toList();
+            annVisible_ = true;
+            settings_->addSeenAnnouncement(id);    // mark seen the moment it shows
+            emit announcementChanged();
+            log::info("Announce", "showing %s", id.toUtf8().constData());
+            return;
+        }
+    });
+    announcements_.fetch(QStringLiteral("https://cloud.vivora.dev/announcements"));
+}
+
+void AppController::openAnnouncementUrl(const QString& url) {
+    if (!url.isEmpty()) QDesktopServices::openUrl(QUrl(url));
+}
+
+void AppController::dismissAnnouncement() {
+    if (!annId_.isEmpty()) settings_->addDismissedAnnouncement(annId_);
+    annVisible_ = false;
+    emit announcementChanged();
 }
 
 void AppController::quit() {

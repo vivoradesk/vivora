@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSettings>
 #include <QString>
+#include <QStringList>
 
 namespace vivora::gui {
 
@@ -72,6 +73,11 @@ public:
     QString accountToken() const;        void setAccountToken(const QString&);
     QString accountEmail() const;        void setAccountEmail(const QString&);
     QString accountUserId() const;       void setAccountUserId(const QString&);
+
+    // VIV-70 announcements: ids the user has already seen / dismissed so the
+    // launch modal doesn't re-show them.  Not Q_PROPERTY.
+    QStringList seenAnnouncements() const;       void addSeenAnnouncement(const QString&);
+    QStringList dismissedAnnouncements() const;  void addDismissedAnnouncement(const QString&);
 
 signals:
     void changed();
