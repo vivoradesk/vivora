@@ -750,19 +750,17 @@ ApplicationWindow {
                 }
             }
 
-            // Close ✕ — declared last (top z) so it floats above the image;
-            // a dark chip over images, a plain glyph over the card background.
+            // Close ✕ — floats just OUTSIDE the card's top-right corner (over the
+            // scrim), so it never overlaps the image or any content.
             Rectangle {
-                readonly property bool overImage: App.announcementImageUrl !== ""
-                anchors.top: parent.top; anchors.right: parent.right
-                anchors.topMargin: 10; anchors.rightMargin: 10
-                width: 26; height: 26; radius: 13
-                color: overImage ? (xMa.containsMouse ? "#cc000000" : "#59000000")
-                                 : (xMa.containsMouse ? theme.hoverBg : "transparent")
+                anchors.right: parent.right; anchors.top: parent.top
+                anchors.rightMargin: -14; anchors.topMargin: -14
+                width: 28; height: 28; radius: 14
+                color: xMa.containsMouse ? "#ffffff" : theme.bg
+                border.color: theme.border; border.width: 1
                 Label {
                     anchors.centerIn: parent; text: "✕"; font.pixelSize: 13
-                    color: parent.overImage ? "#ffffff"
-                                            : (xMa.containsMouse ? theme.text : theme.textMuted)
+                    color: xMa.containsMouse ? theme.text : theme.textMuted
                 }
                 MouseArea { id: xMa; anchors.fill: parent; hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor; onClicked: App.dismissAnnouncement() }
