@@ -64,8 +64,31 @@ void AudioReceiver::feed(uint16_t seq, const uint8_t* data, size_t len) {
     jitter_.push(seq, data, len);
 }
 
+void AudioReceiver::set_volume(float v) {
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    volume_.store(v, std::memory_order_relaxed);
+}
+
+void AudioReceiver::set_muted(bool m) {
+    muted_.store(m, std::memory_order_relaxed);
+}
+
 void AudioReceiver::push_pcm(const float* samples, uint32_t frames) {
     if (!output_) return;
+    // Apply output gain / mute (VIV-74) before any channel conversion.
+    // Input here is always interleaved stereo (TRANSPORT_CHANNELS).  Unity
+    // gain keeps the original zero-copy fast path; otherwise scale into the
+    // reusable gain_buf_ scratch.
+    const float g = muted_.load(std::memory_order_relaxed)
+                        ? 0.0f
+                        : volume_.load(std::memory_order_relaxed);
+    if (g != 1.0f) {
+        const size_t n = static_cast<size_t>(frames) * TRANSPORT_CHANNELS;
+        if (gain_buf_.size() < n) gain_buf_.resize(n);
+        for (size_t i = 0; i < n; ++i) gain_buf_[i] = samples[i] * g;
+        samples = gain_buf_.data();
+    }
     // Channel convert 2ch -> device_channels_ if needed.
     if (device_channels_ == TRANSPORT_CHANNELS) {
         output_->write(samples, frames);

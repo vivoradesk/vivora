@@ -92,6 +92,14 @@ private:
     int       exit_code_         = 0;
     bool      torn_down_         = false;
 
+    // In-stream menu state (VIV-74).  view_only_ gates the input callback so
+    // the user can watch without their mouse/keyboard reaching the host;
+    // user_disconnect_ is set by the menu's Disconnect button and ends the
+    // loop on the next iter().  Atomic: the input callback may fire from the
+    // platform's event pump while the menu toggles from the UI thread.
+    std::atomic<bool> view_only_{false};
+    std::atomic<bool> user_disconnect_{false};
+
     // Status-overlay driving (VIV-62): "Connecting…" / "Waiting for host to
     // accept…" before the first frame, and a brief close reason when a
     // session that never produced a frame disconnects.

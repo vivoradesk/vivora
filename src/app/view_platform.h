@@ -38,6 +38,17 @@ struct StatsView {
     char     decoder[16] = {0};   // backend name: "SW HEVC", "VAAPI HEVC", etc.
 };
 
+// Callbacks the in-stream overlay menu (VIV-74) invokes when the user
+// changes a setting.  Wired by the view loop (which owns the session) and
+// handed to the platform, which passes them to its menu widget.  Any field
+// may be empty; the menu guards before calling.
+struct MenuActions {
+    std::function<void(float)> set_volume;     // linear gain 0..1
+    std::function<void(bool)>  set_muted;
+    std::function<void(bool)>  set_view_only;  // true = stop forwarding input
+    std::function<void()>      disconnect;     // end the session
+};
+
 struct ViewPlatform {
     virtual ~ViewPlatform() = default;
 
@@ -84,6 +95,10 @@ struct ViewPlatform {
     // "Connecting…", "Waiting for host to accept…", or a close reason.
     // Empty string hides it.  No-op on platforms without an overlay yet.
     virtual void set_status(const char* /*text*/) {}
+
+    // Provide the callbacks the in-stream menu (VIV-74) invokes.  No-op on
+    // platforms that don't implement the overlay menu yet (Linux/macOS).
+    virtual void set_menu_actions(const MenuActions& /*actions*/) {}
 
     // Cleanup.
     virtual void shutdown() {}

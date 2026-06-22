@@ -365,6 +365,9 @@ if(WIN32)
         ${CMAKE_SOURCE_DIR}/src/client/decode/mf_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/d3d_renderer.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/stream_window.cpp
+        # In-stream control menu (VIV-74) — pure Qt widget, hosted by
+        # StreamWindow today; Linux/macOS can reuse it later.
+        ${CMAKE_SOURCE_DIR}/src/client/render/stream_menu.cpp
     )
     target_include_directories(vivora PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/amf

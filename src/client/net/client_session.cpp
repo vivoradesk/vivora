@@ -300,8 +300,23 @@ bool ClientSession::start_audio() {
         audio_receiver_.reset();
         return false;
     }
+    // Apply any volume/mute the user set before audio came up (VIV-74).
+    audio_receiver_->set_volume(audio_volume_);
+    audio_receiver_->set_muted(audio_muted_);
     log::info("ClientSession", "Audio playback started");
     return true;
+}
+
+void ClientSession::set_audio_volume(float v) {
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    audio_volume_ = v;
+    if (audio_receiver_) audio_receiver_->set_volume(v);
+}
+
+void ClientSession::set_audio_muted(bool m) {
+    audio_muted_ = m;
+    if (audio_receiver_) audio_receiver_->set_muted(m);
 }
 
 void ClientSession::stop_audio() {

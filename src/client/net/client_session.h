@@ -133,6 +133,15 @@ public:
     bool start_audio();
     void stop_audio();
 
+    // In-stream menu audio controls (VIV-74).  Values are cached on the
+    // session so they survive an audio (re)start; when a receiver is live
+    // the change is applied to it immediately.  Volume is a linear gain in
+    // [0,1].
+    void  set_audio_volume(float v);
+    void  set_audio_muted(bool m);
+    float audio_volume() const { return audio_volume_; }
+    bool  audio_muted()  const { return audio_muted_; }
+
     // Pop the next freshly received cursor shape (since last call). Returns
     // false when no new shape has arrived. The view layer uploads it to a
     // GPU texture keyed by shape_id.
@@ -173,6 +182,10 @@ private:
     std::unique_ptr<VideoReceiver> receiver_;
     std::unique_ptr<AudioReceiver> audio_receiver_;
     uint16_t audio_local_port_ = 0;
+    // Cached in-stream-menu audio settings (VIV-74); applied to the receiver
+    // on start_audio() and on every live change.
+    float audio_volume_ = 1.0f;
+    bool  audio_muted_  = false;
     SessionState state_ = SessionState::Disconnected;
     VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};

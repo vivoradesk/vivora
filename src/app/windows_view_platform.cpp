@@ -112,6 +112,10 @@ void WindowsViewPlatform::set_status(const char* text) {
     if (window_) window_->set_status(text ? text : "");
 }
 
+void WindowsViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
+    if (window_) window_->set_menu_actions(actions);
+}
+
 void WindowsViewPlatform::shutdown() {
     window_.reset();
     app_.reset();

@@ -102,11 +102,54 @@ StreamWindow::StreamWindow(QWidget* parent)
         "  padding: 14px 22px;"
         "}");
     status_label_->hide();
+
+    // In-stream control menu (VIV-74).  Created hidden; summoned by Ctrl+F1.
+    // Top-level (parent nullptr) for the same WA_PaintOnScreen reason as the
+    // overlays above.
+    menu_ = new StreamMenu(nullptr);
+    menu_->hide();
+    connect(menu_, &StreamMenu::fullscreenToggled, this, &StreamWindow::toggle_fullscreen);
+    connect(menu_, &StreamMenu::closed, this, [this]() {
+        // Return focus to the stream so input resumes (and relative-mouse
+        // mode re-enters if the host has its cursor hidden).
+        activateWindow();
+        setFocus(Qt::OtherFocusReason);
+    });
 }
 
 StreamWindow::~StreamWindow() {
     if (hud_label_) { hud_label_->hide(); hud_label_->deleteLater(); hud_label_ = nullptr; }
     if (status_label_) { status_label_->hide(); status_label_->deleteLater(); status_label_ = nullptr; }
+    if (menu_) { menu_->hide(); menu_->deleteLater(); menu_ = nullptr; }
+}
+
+void StreamWindow::set_menu_actions(const MenuActions& actions) {
+    if (!menu_) return;
+    menu_->set_actions(actions);
+    // Seed controls to the session defaults (unity volume, not muted, input
+    // forwarding on) without echoing them back through the callbacks.
+    menu_->set_initial_state(1.0f, false, false);
+}
+
+void StreamWindow::toggle_menu() {
+    if (!menu_) return;
+    if (menu_->isVisible()) {
+        menu_->close_menu();
+    } else {
+        feed_menu_info();
+        menu_->open_over(this);
+    }
+}
+
+void StreamWindow::toggle_fullscreen() {
+    if (isFullScreen()) showNormal();
+    else                showFullScreen();
+}
+
+void StreamWindow::feed_menu_info() {
+    if (!menu_) return;
+    menu_->set_info(last_stats_.rtt_ms, last_stats_.width, last_stats_.height,
+                    QString::fromUtf8(last_stats_.decoder));
 }
 
 void StreamWindow::set_status(const QString& text) {
@@ -481,6 +524,11 @@ void StreamWindow::wheelEvent(QWheelEvent* event) {
 
 void StreamWindow::keyPressEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return; // skip auto-repeat, host handles it
+    // Ctrl+F1: toggle the in-stream control menu locally — never forward.
+    if (event->key() == Qt::Key_F1 && (event->modifiers() & Qt::ControlModifier)) {
+        toggle_menu();
+        return;
+    }
     // F9: toggle diagnostics HUD locally — never forward to the host.
     if (event->key() == Qt::Key_F9) {
         hud_visible_ = !hud_visible_;
@@ -507,6 +555,8 @@ void StreamWindow::keyPressEvent(QKeyEvent* event) {
 void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
     if (event->isAutoRepeat()) return;
     if (event->key() == Qt::Key_F9) return;  // local toggle, don't forward
+    if (event->key() == Qt::Key_F1 && (event->modifiers() & Qt::ControlModifier))
+        return;                              // Ctrl+F1 menu toggle, don't forward
     const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_.erase(vk);
@@ -523,6 +573,7 @@ void StreamWindow::update_stats(const StatsView& stats) {
         rebuild_hud_text();
         position_hud();
     }
+    if (menu_ && menu_->isVisible()) feed_menu_info();
 }
 
 void StreamWindow::rebuild_hud_text() {
@@ -570,6 +621,7 @@ void StreamWindow::hideEvent(QHideEvent* event) {
     QWidget::hideEvent(event);
     if (hud_label_) hud_label_->hide();
     if (status_label_) status_label_->hide();
+    if (menu_) menu_->close_menu();
 }
 
 void StreamWindow::showEvent(QShowEvent* event) {

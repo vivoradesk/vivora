@@ -4,6 +4,7 @@
 
 #include "app/view_platform.h"
 #include "client/render/d3d_renderer.h"
+#include "client/render/stream_menu.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
 #include <QCursor>
@@ -48,6 +49,10 @@ public:
     // "Waiting for host to accept…").  Empty string hides it.
     void set_status(const QString& text);
 
+    // Supply the in-stream menu callbacks (VIV-74).  Forwarded to the menu
+    // widget; volume/view-only/disconnect run through the view loop.
+    void set_menu_actions(const MenuActions& actions);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -80,6 +85,11 @@ private:
     void exit_relative_mode();
     void update_clip_rect();
     void apply_pending_visibility();
+
+    // In-stream menu (VIV-74).
+    void toggle_menu();
+    void toggle_fullscreen();
+    void feed_menu_info();
 
     D3dRenderer renderer_;
     bool initialized_ = false;
@@ -130,6 +140,11 @@ private:
     // reason).  Native child like the HUD so it sits over the D3D surface.
     QLabel*   status_label_ = nullptr;
     void position_status();
+
+    // In-stream control menu (VIV-74).  Top-level overlay like the HUD, but
+    // interactive; toggled by Ctrl+F1.  Normal/fullscreen geometry is saved
+    // so a fullscreen toggle can restore the windowed placement.
+    StreamMenu* menu_ = nullptr;
 };
 
 } // namespace vivora

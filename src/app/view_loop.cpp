@@ -160,10 +160,27 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         return false;
     }
 
-    // Wire input: window events → session → host.
+    // Wire input: window events → session → host.  Dropped silently while
+    // view-only is engaged from the in-stream menu (VIV-74).
     platform.set_input_callback([this](const protocol::InputEvent& ev) {
+        if (view_only_.load(std::memory_order_relaxed)) return;
         session_.send_input(ev);
     });
+
+    // Wire the in-stream menu (VIV-74): volume/mute reach the audio receiver
+    // through the session (cached until audio starts); view-only and
+    // disconnect flip loop-local flags read in iter() / the input callback.
+    MenuActions actions;
+    actions.set_volume    = [this](float v) { session_.set_audio_volume(v); };
+    actions.set_muted     = [this](bool m)  { session_.set_audio_muted(m); };
+    actions.set_view_only = [this](bool on) {
+        view_only_.store(on, std::memory_order_relaxed);
+        log::info("VIEW", "view-only %s", on ? "ON" : "OFF");
+    };
+    actions.disconnect    = [this]() {
+        user_disconnect_.store(true, std::memory_order_relaxed);
+    };
+    platform.set_menu_actions(actions);
 
     last_log_time_ = Clock::now();
     return true;
@@ -176,6 +193,12 @@ bool ViewLoopState::iter() {
 
     // External stop (GUI Stop button, AppController shutdown).
     if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) {
+        return false;
+    }
+
+    // In-stream menu Disconnect button (VIV-74).
+    if (user_disconnect_.load(std::memory_order_relaxed)) {
+        log::info("VIEW", "Disconnect requested from in-stream menu");
         return false;
     }
 
