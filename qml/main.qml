@@ -776,4 +776,209 @@ ApplicationWindow {
             }
         }
     }
+
+    // ── Poll modal (VIV-71) ──────────────────────────────────────────────
+    Rectangle {
+        id: pollRoot
+        anchors.fill: parent
+        visible: App.pollVisible
+        color: "#88000000"
+        z: 2000
+        MouseArea { anchors.fill: parent }
+
+        // local answer state
+        property var selected: ({})        // option-id -> true
+        property int rating: 0
+        property bool submitted: false
+        onVisibleChanged: if (visible) { selected = ({}); rating = 0; submitted = false; commentField.text = "" }
+
+        Rectangle {
+            id: pollCard
+            anchors.centerIn: parent
+            width: Math.min(440, parent.width - 40)
+            implicitHeight: pollCol.implicitHeight + 48
+            radius: 14
+            color: theme.bg
+            border.color: theme.border; border.width: 1
+            opacity: 0; scale: 0.95; transformOrigin: Item.Center
+
+            ParallelAnimation {
+                id: pollPop
+                NumberAnimation { target: pollCard; property: "opacity"; to: 1; duration: 150; easing.type: Easing.OutQuad }
+                NumberAnimation { target: pollCard; property: "scale"; to: 1; duration: 200; easing.type: Easing.OutBack; easing.overshoot: 1.5 }
+            }
+            Connections {
+                target: App
+                function onPollChanged() { if (App.pollVisible) { pollCard.opacity = 0; pollCard.scale = 0.95; pollPop.restart() } }
+            }
+
+            ColumnLayout {
+                id: pollCol
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                anchors.margins: 24
+                spacing: 14
+
+                Label {
+                    text: App.pollQuestion
+                    font.pixelSize: 18; font.bold: true; color: theme.text
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.rightMargin: 16
+                }
+                Label {
+                    text: App.pollBody; visible: text !== ""
+                    font.pixelSize: 13; color: theme.textMuted
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+
+                // ── input area (hidden once submitted + results shown) ──
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: 8
+                    visible: !pollRoot.submitted
+
+                    // single / multi → option rows
+                    Repeater {
+                        model: (App.pollResponseType === "single" || App.pollResponseType === "multi")
+                               ? App.pollOptions : []
+                        delegate: Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; Layout.preferredHeight: 38
+                            radius: 8
+                            property bool on: pollRoot.selected[modelData.id] === true
+                            color: on ? Qt.rgba(0.24,0.42,0.98,0.10) : theme.ctrlBg
+                            border.color: on ? theme.accent : theme.border; border.width: 1
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12; spacing: 10
+                                Rectangle {   // radio / checkbox marker
+                                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                                    radius: App.pollResponseType === "multi" ? 4 : 9
+                                    border.color: parent.parent.on ? theme.accent : theme.border; border.width: 2
+                                    color: "transparent"
+                                    Rectangle { anchors.centerIn: parent; visible: parent.parent.parent.on
+                                        width: 10; height: 10; radius: App.pollResponseType === "multi" ? 2 : 5; color: theme.accent }
+                                }
+                                Label { text: modelData.label; color: theme.text; font.pixelSize: 14
+                                        Layout.fillWidth: true; elide: Text.ElideRight }
+                            }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    var s = pollRoot.selected
+                                    if (App.pollResponseType === "single") s = ({})
+                                    s[modelData.id] = !(pollRoot.selected[modelData.id] === true)
+                                    pollRoot.selected = s
+                                }
+                            }
+                        }
+                    }
+
+                    // rating → 1..5
+                    RowLayout {
+                        visible: App.pollResponseType === "rating"; spacing: 8
+                        Repeater {
+                            model: 5
+                            delegate: Rectangle {
+                                required property int index
+                                Layout.preferredWidth: 44; Layout.preferredHeight: 40; radius: 8
+                                property bool on: pollRoot.rating >= index + 1
+                                color: on ? theme.accent : theme.ctrlBg
+                                border.color: on ? "transparent" : theme.border; border.width: 1
+                                Label { anchors.centerIn: parent; text: (index + 1)
+                                        color: parent.on ? "#ffffff" : theme.text; font.pixelSize: 15; font.bold: true }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: pollRoot.rating = index + 1 }
+                            }
+                        }
+                    }
+
+                    // free_text OR optional comment
+                    TextArea {
+                        id: commentField
+                        visible: App.pollResponseType === "free_text"
+                        Layout.fillWidth: true
+                        placeholderText: "Your answer…"
+                        wrapMode: TextArea.Wrap
+                        color: theme.text
+                        background: Rectangle { color: theme.ctrlBg; radius: 8
+                            border.color: commentField.activeFocus ? theme.accent : theme.border; border.width: 1 }
+                    }
+                }
+
+                // ── results (after submit, if enabled) ──
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: 6
+                    visible: pollRoot.submitted && App.pollShowResults
+                    Label { text: "Results · " + (App.pollResults.total !== undefined ? App.pollResults.total : 0) + " votes"
+                            color: theme.textMuted; font.pixelSize: 12; font.bold: true }
+                    Repeater {
+                        model: App.pollOptions
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            Layout.fillWidth: true; spacing: 2
+                            property int cnt: (App.pollResults.counts && App.pollResults.counts[modelData.id]) ? App.pollResults.counts[modelData.id] : 0
+                            property int tot: App.pollResults.total ? App.pollResults.total : 0
+                            property real frac: tot > 0 ? cnt / tot : 0
+                            RowLayout { Layout.fillWidth: true
+                                Label { text: modelData.label; color: theme.text; font.pixelSize: 13; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Label { text: Math.round(frac * 100) + "%"; color: theme.textMuted; font.pixelSize: 12 }
+                            }
+                            Rectangle { Layout.fillWidth: true; height: 7; radius: 4; color: theme.hoverBg
+                                Rectangle { width: parent.width * parent.frac; height: parent.height; radius: 4; color: theme.accent } }
+                        }
+                    }
+                    Label { visible: App.pollResults.avg_rating !== undefined
+                            text: "Average: " + (App.pollResults.avg_rating !== undefined ? App.pollResults.avg_rating.toFixed(1) : "")
+                            color: theme.text; font.pixelSize: 14; font.bold: true }
+                }
+
+                // ── action row ──
+                RowLayout {
+                    Layout.fillWidth: true; Layout.topMargin: 4; spacing: 8
+                    Item { Layout.fillWidth: true }
+                    // Submit (input phase)
+                    Rectangle {
+                        visible: !pollRoot.submitted
+                        property bool ready: {
+                            if (App.pollResponseType === "rating") return pollRoot.rating > 0
+                            if (App.pollResponseType === "free_text") return commentField.text.trim().length > 0
+                            return Object.keys(pollRoot.selected).some(function(k){ return pollRoot.selected[k] })
+                        }
+                        Layout.preferredHeight: 36; Layout.preferredWidth: subLbl.implicitWidth + 32; radius: 8
+                        opacity: ready ? 1 : 0.5
+                        color: subMa.containsMouse && ready ? Qt.darker(theme.accent, 1.15) : theme.accent
+                        Label { id: subLbl; anchors.centerIn: parent; text: "Submit"; color: "#ffffff"; font.pixelSize: 13; font.bold: true }
+                        MouseArea { id: subMa; anchors.fill: parent; hoverEnabled: true; enabled: parent.ready
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                var choice = []
+                                for (var k in pollRoot.selected) if (pollRoot.selected[k]) choice.push(k)
+                                App.submitPollResponse(choice, pollRoot.rating,
+                                    App.pollResponseType === "free_text" ? commentField.text.trim() : "")
+                                pollRoot.submitted = true
+                            }
+                        }
+                    }
+                    // Done (results phase)
+                    Rectangle {
+                        visible: pollRoot.submitted
+                        Layout.preferredHeight: 36; Layout.preferredWidth: doneLbl.implicitWidth + 32; radius: 8
+                        color: doneMa.containsMouse ? Qt.darker(theme.accent, 1.15) : theme.accent
+                        Label { id: doneLbl; anchors.centerIn: parent; text: "Done"; color: "#ffffff"; font.pixelSize: 13; font.bold: true }
+                        MouseArea { id: doneMa; anchors.fill: parent; hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor; onClicked: App.dismissPoll() }
+                    }
+                }
+            }
+
+            // close ✕
+            Rectangle {
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 12; anchors.rightMargin: 12
+                width: 26; height: 26; radius: 7
+                color: pxMa.containsMouse ? theme.hoverBg : "transparent"
+                Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 13
+                        color: pxMa.containsMouse ? theme.text : theme.textMuted }
+                MouseArea { id: pxMa; anchors.fill: parent; hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor; onClicked: App.dismissPoll() }
+            }
+        }
+    }
 }

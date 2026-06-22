@@ -79,6 +79,11 @@ public:
     QStringList seenAnnouncements() const;       void addSeenAnnouncement(const QString&);
     QStringList dismissedAnnouncements() const;  void addDismissedAnnouncement(const QString&);
 
+    // VIV-71 polls: a stable per-install id for anonymous vote dedup, plus the
+    // ids the user has already answered so the launch modal doesn't re-prompt.
+    QString     clientId();                       // generates + persists on first use
+    QStringList answeredPolls() const;            void addAnsweredPoll(const QString&);
+
 signals:
     void changed();
 

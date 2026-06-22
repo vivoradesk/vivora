@@ -3,6 +3,7 @@
 #include "app/gui/address_book.h"
 #include "app/gui/announcements_client.h"
 #include "app/gui/cloud_client.h"
+#include "app/gui/polls_client.h"
 #include "app/gui/settings.h"
 #include "app/gui/update_checker.h"
 #include "host/session/host_approval_gate.h"
@@ -60,6 +61,14 @@ class AppController : public QObject {
     Q_PROPERTY(QString      announcementBody     READ announcementBody     NOTIFY announcementChanged)
     Q_PROPERTY(QString      announcementImageUrl READ announcementImageUrl NOTIFY announcementChanged)
     Q_PROPERTY(QVariantList announcementButtons  READ announcementButtons  NOTIFY announcementChanged)
+    // VIV-71 poll modal.
+    Q_PROPERTY(bool         pollVisible      READ pollVisible      NOTIFY pollChanged)
+    Q_PROPERTY(QString      pollQuestion     READ pollQuestion     NOTIFY pollChanged)
+    Q_PROPERTY(QString      pollBody         READ pollBody         NOTIFY pollChanged)
+    Q_PROPERTY(QString      pollResponseType READ pollResponseType NOTIFY pollChanged)
+    Q_PROPERTY(QVariantList pollOptions      READ pollOptions      NOTIFY pollChanged)
+    Q_PROPERTY(bool         pollShowResults  READ pollShowResults  NOTIFY pollChanged)
+    Q_PROPERTY(QVariantMap  pollResults      READ pollResults      NOTIFY pollResultsChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -92,6 +101,14 @@ public:
     QString      announcementBody()     const { return annBody_; }
     QString      announcementImageUrl() const { return annImage_; }
     QVariantList announcementButtons()  const { return annButtons_; }
+
+    bool         pollVisible()      const { return pollVisible_; }
+    QString      pollQuestion()     const { return pollQuestion_; }
+    QString      pollBody()         const { return pollBody_; }
+    QString      pollResponseType() const { return pollType_; }
+    QVariantList pollOptions()      const { return pollOptions_; }
+    bool         pollShowResults()  const { return pollShowResults_; }
+    QVariantMap  pollResults()      const { return pollResults_; }
 
     // Wired from main.cpp at app init.  AppController borrows the tray
     // pointer; ownership stays with gui_main().
@@ -148,6 +165,11 @@ public slots:
     // VIV-70: open an announcement button's URL / dismiss the current modal.
     Q_INVOKABLE void openAnnouncementUrl(const QString& url);
     Q_INVOKABLE void dismissAnnouncement();
+    // VIV-71: submit the current poll's answer / dismiss the poll modal.
+    // choice = list of option-id strings; rating = 1-5 (0 if N/A).
+    Q_INVOKABLE void submitPollResponse(const QVariantList& choice, int rating,
+                                        const QString& comment);
+    Q_INVOKABLE void dismissPoll();
 
 signals:
     void sharingChanged();
@@ -167,6 +189,9 @@ signals:
     void updateChanged();
     // An announcement is ready to show / was dismissed (VIV-70).
     void announcementChanged();
+    // A poll is ready to show / was answered (VIV-71); results arrived.
+    void pollChanged();
+    void pollResultsChanged();
     // Account action failed — QML shows the message inline in the form.
     void accountError(const QString& message);
     // VIV-53: new client awaiting approval.  QML shows
@@ -240,6 +265,15 @@ private:
     QVariantList annQueue_;
     void         wireAnnouncements();
     void         showNextAnnouncement();
+
+    // VIV-71 polls.  One poll shown at launch (highest priority eligible).
+    PollsClient  polls_;
+    bool         pollVisible_ = false;
+    bool         pollShowResults_ = false;
+    QString      pollId_, pollQuestion_, pollBody_, pollType_;
+    QVariantList pollOptions_;
+    QVariantMap  pollResults_;
+    void         wirePolls();
 };
 
 } // namespace vivora::gui

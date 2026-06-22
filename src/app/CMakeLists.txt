@@ -118,6 +118,7 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/cloud_client.cpp
         gui/update_checker.cpp
         gui/announcements_client.cpp
+        gui/polls_client.cpp
         gui/tray.cpp
         gui/app_icon.cpp
         ${CMAKE_SOURCE_DIR}/qml/qml.qrc

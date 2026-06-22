@@ -1,6 +1,7 @@
 #include "app/gui/settings.h"
 
 #include <QCoreApplication>
+#include <QUuid>
 
 namespace vivora::gui {
 
@@ -142,6 +143,21 @@ QStringList Settings::dismissedAnnouncements() const { return q_.value("announce
 void Settings::addDismissedAnnouncement(const QString& id) {
     QStringList d = dismissedAnnouncements();
     if (!d.contains(id)) { d.append(id); q_.setValue("announce/dismissed", d); }
+}
+
+// VIV-71 polls.
+QString Settings::clientId() {
+    QString id = q_.value("poll/clientId").toString();
+    if (id.isEmpty()) {
+        id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        q_.setValue("poll/clientId", id);
+    }
+    return id;
+}
+QStringList Settings::answeredPolls() const { return q_.value("poll/answered").toStringList(); }
+void Settings::addAnsweredPoll(const QString& id) {
+    QStringList a = answeredPolls();
+    if (!a.contains(id)) { a.append(id); q_.setValue("poll/answered", a); }
 }
 
 } // namespace vivora::gui

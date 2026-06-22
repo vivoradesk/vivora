@@ -139,6 +139,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // VIV-70: fetch in-app announcements and show one if eligible.
     wireAnnouncements();
 
+    // VIV-71: fetch polls and show one if eligible (not yet answered).
+    wirePolls();
+
     // Always-available model (VIV-53): host starts immediately at app
     // launch.  Peer code is visible the moment the user sees the
     // window — no Start button to click.  Stop/Pause is reachable via
@@ -651,6 +654,78 @@ void AppController::dismissAnnouncement() {
     if (!annId_.isEmpty()) settings_->addDismissedAnnouncement(annId_);
     if (!annQueue_.isEmpty()) annQueue_.removeFirst();
     showNextAnnouncement();                         // show the next eligible, if any
+}
+
+void AppController::wirePolls() {
+    polls_.setBaseUrl(settings_->cloudUrl());
+    if (!settings_->accountToken().isEmpty()) polls_.setToken(settings_->accountToken());
+
+    connect(&polls_, &PollsClient::fetched, this, [this](const QVariantList& list) {
+        const QStringList answered = settings_->answeredPolls();
+#if defined(VIVORA_WINDOWS)
+        const QString platform = QStringLiteral("windows");
+#elif defined(VIVORA_MACOS)
+        const QString platform = QStringLiteral("macos");
+#else
+        const QString platform = QStringLiteral("linux");
+#endif
+        for (const QVariant& v : list) {            // server returns priority desc
+            const QVariantMap p = v.toMap();
+            const QString id = p.value("id").toString();
+            if (id.isEmpty() || answered.contains(id)) continue;
+
+            const QVariantMap target = p.value("target").toMap();
+            if (!target.isEmpty()) {
+                const QVariantList plats = target.value("platforms").toList();
+                if (!plats.isEmpty() && !plats.contains(platform)) continue;
+                const QString tier = target.value("tier").toString();
+                if (tier == QStringLiteral("pro")  && !licensePro_) continue;
+                if (tier == QStringLiteral("free") &&  licensePro_) continue;
+            }
+
+            pollId_          = id;
+            pollQuestion_    = p.value("question").toString();
+            pollBody_        = p.value("body").toString();
+            pollType_        = p.value("response_type", QStringLiteral("single")).toString();
+            pollOptions_     = p.value("options").toList();
+            pollShowResults_ = p.value("show_results", true).toBool();
+            pollResults_     = QVariantMap();
+            pollVisible_     = true;
+            emit pollChanged();
+            log::info("Polls", "showing %s", id.toUtf8().constData());
+            return;
+        }
+    });
+    connect(&polls_, &PollsClient::responded, this, [this](const QString& id, bool ok) {
+        if (!ok) return;
+        settings_->addAnsweredPoll(id);
+        if (pollShowResults_) polls_.fetchResults(id);   // reveal aggregate
+    });
+    connect(&polls_, &PollsClient::results, this, [this](const QString& id, const QVariantMap& res) {
+        if (id != pollId_) return;
+        pollResults_ = res;
+        emit pollResultsChanged();
+    });
+
+    polls_.fetch();
+}
+
+void AppController::submitPollResponse(const QVariantList& choice, int rating,
+                                       const QString& comment) {
+    if (pollId_.isEmpty()) return;
+    QVariantMap body;
+    body["respondent"] = settings_->clientId();      // overridden server-side by user_id if logged in
+    if (!choice.isEmpty()) body["choice"] = choice;
+    if (rating > 0)        body["rating"] = rating;
+    if (!comment.isEmpty()) body["comment"] = comment;
+    polls_.respond(pollId_, body);
+}
+
+void AppController::dismissPoll() {
+    // Treat dismiss-without-answer as answered too, so we don't nag every launch.
+    if (!pollId_.isEmpty()) settings_->addAnsweredPoll(pollId_);
+    pollVisible_ = false;
+    emit pollChanged();
 }
 
 void AppController::quit() {
