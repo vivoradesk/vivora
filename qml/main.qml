@@ -678,15 +678,24 @@ ApplicationWindow {
                 id: annCol
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: 18
-                spacing: 12
+                anchors.margins: 24
+                spacing: 14
 
-                Image {
+                // Rounded, clipped image with a little breathing room (top margin
+                // leaves space for the close button in the corner).
+                Rectangle {
                     visible: App.announcementImageUrl !== ""
-                    source: App.announcementImageUrl
                     Layout.fillWidth: true
                     Layout.preferredHeight: visible ? 150 : 0
-                    fillMode: Image.PreserveAspectCrop
+                    Layout.topMargin: visible ? 18 : 0   // clears the close button
+                    radius: 10
+                    clip: true
+                    color: theme.hoverBg
+                    Image {
+                        anchors.fill: parent
+                        source: App.announcementImageUrl
+                        fillMode: Image.PreserveAspectCrop
+                    }
                 }
                 Label {
                     text: App.announcementTitle
@@ -750,14 +759,14 @@ ApplicationWindow {
                 }
             }
 
-            // Close ✕ — floats just OUTSIDE the card's top-right corner (over the
-            // scrim), so it never overlaps the image or any content.
+            // Close ✕ — inside the card's top-right corner, sitting in the
+            // padding above the content (the 24px margin + image top margin keep
+            // it clear of the image / title).
             Rectangle {
-                anchors.right: parent.right; anchors.top: parent.top
-                anchors.rightMargin: -14; anchors.topMargin: -14
-                width: 28; height: 28; radius: 14
-                color: xMa.containsMouse ? "#ffffff" : theme.bg
-                border.color: theme.border; border.width: 1
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 12; anchors.rightMargin: 12
+                width: 26; height: 26; radius: 7
+                color: xMa.containsMouse ? theme.hoverBg : "transparent"
                 Label {
                     anchors.centerIn: parent; text: "✕"; font.pixelSize: 13
                     color: xMa.containsMouse ? theme.text : theme.textMuted
