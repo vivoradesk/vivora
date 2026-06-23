@@ -145,9 +145,11 @@ private:
     void position_status();
 
     // In-stream control menu (VIV-74).  Top-level overlay like the HUD, but
-    // interactive; toggled by Ctrl+F1.  Normal/fullscreen geometry is saved
-    // so a fullscreen toggle can restore the windowed placement.
+    // interactive; toggled by Ctrl+F1.
     StreamMenu* menu_ = nullptr;
+    // Keep stream aspect ratio (letterbox) vs stretch-to-fill.  Mirrors the
+    // renderer's flag so mouse-coordinate mapping matches what's on screen.
+    bool keep_aspect_ = true;
 };
 
 } // namespace vivora

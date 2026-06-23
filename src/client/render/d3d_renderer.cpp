@@ -449,6 +449,12 @@ bool D3dRenderer::re_present() {
     return present_intermediate();
 }
 
+void D3dRenderer::set_keep_aspect(bool keep) {
+    if (keep_aspect_ == keep) return;
+    keep_aspect_ = keep;
+    if (has_frame_) present_intermediate();
+}
+
 bool D3dRenderer::present_intermediate() {
     ComPtr<ID3D11Texture2D> back_buffer;
     HRESULT hr = swapchain_->GetBuffer(0, IID_PPV_ARGS(back_buffer.GetAddressOf()));
@@ -461,21 +467,29 @@ bool D3dRenderer::present_intermediate() {
         return false;
     }
 
-    // Aspect-fit (letterbox) the video rect inside the window.  Use crop
-    // dims (the real content), not the padded decoded size.
-    const double frame_aspect  = (double)crop_width_  / crop_height_;
-    const double window_aspect = (double)window_width_ / window_height_;
+    // Destination rect inside the window.  Aspect-fit (letterbox/pillarbox)
+    // by default; stretch to fill when the user turns aspect off (VIV-74).
+    // Crop dims are the real content (not the padded decoded size).
     LONG dst_w, dst_h, dst_x, dst_y;
-    if (frame_aspect > window_aspect) {
-        dst_w = window_width_;
-        dst_h = (LONG)(window_width_ / frame_aspect);
+    if (!keep_aspect_) {
+        dst_w = (LONG)window_width_;
+        dst_h = (LONG)window_height_;
         dst_x = 0;
-        dst_y = (window_height_ - dst_h) / 2;
-    } else {
-        dst_h = window_height_;
-        dst_w = (LONG)(window_height_ * frame_aspect);
-        dst_x = (window_width_ - dst_w) / 2;
         dst_y = 0;
+    } else {
+        const double frame_aspect  = (double)crop_width_  / crop_height_;
+        const double window_aspect = (double)window_width_ / window_height_;
+        if (frame_aspect > window_aspect) {
+            dst_w = window_width_;
+            dst_h = (LONG)(window_width_ / frame_aspect);
+            dst_x = 0;
+            dst_y = (window_height_ - dst_h) / 2;
+        } else {
+            dst_h = window_height_;
+            dst_w = (LONG)(window_height_ * frame_aspect);
+            dst_x = (window_width_ - dst_w) / 2;
+            dst_y = 0;
+        }
     }
 
     // Clear the whole back buffer (letterbox bars stay black).

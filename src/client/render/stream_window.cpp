@@ -109,6 +109,10 @@ StreamWindow::StreamWindow(QWidget* parent)
     menu_ = new StreamMenu(nullptr);
     menu_->hide();
     connect(menu_, &StreamMenu::fullscreenToggled, this, &StreamWindow::toggle_fullscreen);
+    connect(menu_, &StreamMenu::keepAspectToggled, this, [this](bool keep) {
+        keep_aspect_ = keep;
+        renderer_.set_keep_aspect(keep);
+    });
     connect(menu_, &StreamMenu::closed, this, [this]() {
         // Return focus to the stream so input resumes (and relative-mouse
         // mode re-enters if the host has its cursor hidden).
@@ -128,7 +132,7 @@ void StreamWindow::set_menu_actions(const MenuActions& actions) {
     menu_->set_actions(actions);
     // Seed controls to the session defaults (unity volume, not muted, input
     // forwarding on) without echoing them back through the callbacks.
-    menu_->set_initial_state(1.0f, false, false);
+    menu_->set_initial_state(1.0f, false, false, keep_aspect_);
 }
 
 void StreamWindow::set_peer_label(const QString& peer) {
@@ -493,7 +497,12 @@ void StreamWindow::mouseMoveEvent(QMouseEvent* event) {
     const double window_aspect = win_w / win_h;
 
     double vid_w, vid_h;
-    if (frame_aspect > window_aspect) {
+    if (!keep_aspect_) {
+        // Stretch-to-fill: the image covers the whole window, so map mouse
+        // coords against the full client area (no letterbox bars).
+        vid_w = win_w;
+        vid_h = win_h;
+    } else if (frame_aspect > window_aspect) {
         vid_w = win_w;
         vid_h = win_w / frame_aspect;
     } else {

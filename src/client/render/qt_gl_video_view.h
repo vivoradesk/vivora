@@ -4,6 +4,7 @@
 #include "common/protocol/cursor_message.h"
 
 #include "app/view_platform.h"
+#include "client/render/stream_menu.h"
 
 #include <QCursor>
 #include <QLabel>
@@ -39,6 +40,10 @@ public:
     ~QtGlVideoView() override;
 
     void set_input_callback(InputCallback cb) { input_cb_ = std::move(cb); }
+
+    // In-stream menu (VIV-74): supply callbacks + header subtitle.
+    void set_menu_actions(const vivora::MenuActions& actions);
+    void set_peer_label(const QString& peer);
 
     // Pre-encoder stream dimensions — used to map widget-local mouse
     // coords to the host's input coord space.  Updated when the host's
@@ -142,6 +147,13 @@ private:
     int viewport_x_ = 0, viewport_y_ = 0;
     int viewport_w_ = 0, viewport_h_ = 0;
     void recompute_viewport();
+
+    // In-stream control menu (VIV-74).  Top-level overlay, toggled by Ctrl+F1.
+    vivora::StreamMenu* menu_ = nullptr;
+    bool keep_aspect_ = true;   // letterbox vs stretch-to-fill
+    void toggle_menu();
+    void toggle_fullscreen();
+    void feed_menu_info();
 
     InputCallback input_cb_;
 

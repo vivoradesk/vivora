@@ -36,6 +36,11 @@ public:
     // Resize swapchain (call when window resizes).
     bool resize(uint32_t width, uint32_t height);
 
+    // Toggle aspect-ratio preservation (VIV-74).  true = letterbox/pillarbox
+    // (default); false = stretch the image to fill the whole window.
+    // Re-presents the last frame so the change is visible immediately.
+    void set_keep_aspect(bool keep);
+
     // Set the real (pre-encoder-padding) content dimensions.  The decoded
     // texture may be larger — QSV rounds NV12 to 16-pixel alignment — so
     // we crop by sourcing only the top-left rectangle during VP blt and
@@ -84,6 +89,7 @@ private:
     // picture isn't blown out / washed out.
     bool output_hdr_ = false;
     bool has_frame_ = false;
+    bool keep_aspect_ = true;  // letterbox (true) vs stretch-to-fill (false)
 };
 
 } // namespace vivora

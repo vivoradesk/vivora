@@ -65,6 +65,7 @@ namespace vivora { struct MacVideoViewImpl; }
 @property (nonatomic, strong) CATextLayer* hudLayer;
 @property (nonatomic, assign) BOOL hudVisible;
 @property (nonatomic, strong) CATextLayer* statusLayer;
+- (void)setKeepAspect:(BOOL)keep;
 - (void)enterRelativeMode;
 - (void)exitRelativeMode;
 - (void)toggleHud;
@@ -151,6 +152,12 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     self.hudVisible = !self.hudVisible;
     self.hudLayer.hidden = !self.hudVisible;
     if (self.hudVisible) [self layoutHud];
+}
+
+- (void)setKeepAspect:(BOOL)keep {
+    // Letterbox/pillarbox (preserve aspect) vs stretch to fill (VIV-74).
+    self.videoLayer.videoGravity = keep ? AVLayerVideoGravityResizeAspect
+                                        : AVLayerVideoGravityResize;
 }
 
 - (void)setHudText:(NSString*)text {
@@ -327,12 +334,20 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 
 - (void)keyDown:(NSEvent*)event {
     if (event.isARepeat) return; // host handles auto-repeat
+    // Ctrl+F1 (mac kVK F1 = 0x7A) toggles the in-stream control menu
+    // locally.  Eat it so the host never sees the keypress.
+    if (event.keyCode == 0x7A && (event.modifierFlags & NSEventModifierFlagControl)) {
+        if (impl && impl->menu_hotkey_cb) impl->menu_hotkey_cb();
+        return;
+    }
     // F9 (mac kVK 0x65) toggles the diagnostics HUD locally.  Eat it so
     // the host doesn't see a phantom keypress.
     if (event.keyCode == 0x65) { [self toggleHud]; return; }
     [self sendKey:event.keyCode down:YES];
 }
 - (void)keyUp:(NSEvent*)event {
+    if (event.keyCode == 0x7A && (event.modifierFlags & NSEventModifierFlagControl))
+        return; // Ctrl+F1 menu toggle — local, don't forward
     if (event.keyCode == 0x65) return; // local toggle, don't forward
     [self sendKey:event.keyCode down:NO];
 }
@@ -400,6 +415,9 @@ struct MacVideoViewImpl {
     uint32_t host_w = 0;
     uint32_t host_h = 0;
     VideoCodec codec = VideoCodec::HEVC;
+    // In-stream menu (VIV-74): aspect mode + hotkey toggle callback.
+    bool keep_aspect = true;
+    std::function<void()> menu_hotkey_cb;
     // True if the active format description carries a PQ or HLG transfer
     // function — surfaced through update_stats so the F9 HUD reports HDR.
     // Detected from kCMFormatDescriptionExtension_TransferFunction once
@@ -419,7 +437,7 @@ static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev) {
 static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
                             double vw, double vh, float* out_xn, float* out_yn) {
     float xn, yn;
-    if (impl && impl->host_w > 0 && impl->host_h > 0) {
+    if (impl && impl->host_w > 0 && impl->host_h > 0 && impl->keep_aspect) {
         // AVLayerVideoGravityResizeAspect — fit preserving aspect ratio.
         double host_aspect = (double)impl->host_w / (double)impl->host_h;
         double view_aspect = vw / vh;
@@ -700,6 +718,26 @@ void MacVideoView::set_codec(VideoCodec codec) {
     impl->codec = codec;
 }
 
+void MacVideoView::set_keep_aspect(bool keep) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl) return;
+    impl->keep_aspect = keep;
+    if (impl->view) {
+        @autoreleasepool { [impl->view setKeepAspect:(keep ? YES : NO)]; }
+    }
+}
+
+void MacVideoView::toggle_fullscreen() {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || !impl->window) return;
+    @autoreleasepool { [impl->window toggleFullScreen:nil]; }
+}
+
+void MacVideoView::set_menu_hotkey_callback(std::function<void()> cb) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (impl) impl->menu_hotkey_cb = std::move(cb);
+}
+
 void MacVideoView::flush_decoder() {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl) return;
@@ -833,7 +871,10 @@ void MacVideoView::update_cursor_position(const protocol::CursorPositionMessage&
     const double host_ar = (double)impl->host_w / (double)impl->host_h;
     const double view_ar = (double)view_w / (double)view_h;
     double video_w, video_h, off_x, off_y_bu;
-    if (view_ar > host_ar) {
+    if (!impl->keep_aspect) {
+        // Stretch-to-fill: video covers the whole view (VIV-74).
+        video_w = view_w; video_h = view_h; off_x = 0; off_y_bu = 0;
+    } else if (view_ar > host_ar) {
         video_h   = view_h;
         video_w   = view_h * host_ar;
         off_x     = (view_w - video_w) * 0.5;

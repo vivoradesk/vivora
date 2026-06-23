@@ -269,6 +269,10 @@ target_sources(vivora PRIVATE
     ${CMAKE_SOURCE_DIR}/src/host/session/video_sender.cpp
     ${CMAKE_SOURCE_DIR}/src/host/audio/audio_sender.cpp
     ${CMAKE_SOURCE_DIR}/src/client/audio/audio_receiver.cpp
+    # In-stream control menu (VIV-74) — pure Qt Widgets, hosted by the
+    # per-platform stream view (Windows StreamWindow, Linux QtGlVideoView,
+    # macOS MacVideoView).
+    ${CMAKE_SOURCE_DIR}/src/client/render/stream_menu.cpp
 )
 target_include_directories(vivora PRIVATE
     ${CMAKE_SOURCE_DIR}/src
@@ -365,9 +369,6 @@ if(WIN32)
         ${CMAKE_SOURCE_DIR}/src/client/decode/mf_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/d3d_renderer.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/stream_window.cpp
-        # In-stream control menu (VIV-74) — pure Qt widget, hosted by
-        # StreamWindow today; Linux/macOS can reuse it later.
-        ${CMAKE_SOURCE_DIR}/src/client/render/stream_menu.cpp
     )
     target_include_directories(vivora PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/amf

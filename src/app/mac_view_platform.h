@@ -3,6 +3,9 @@
 
 #include "app/view_platform.h"
 #include "client/render/mac_video_view.h"
+#include "client/render/stream_menu.h"
+
+#include <memory>
 
 class MacViewPlatform : public vivora::ViewPlatform {
 public:
@@ -21,10 +24,17 @@ public:
     void update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) override;
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
+    void set_menu_actions(const vivora::MenuActions& actions) override;
     void shutdown() override;
 
 private:
+    void feed_menu_info();
+
     vivora::MacVideoView view_;
+    // In-stream control menu (VIV-74) — a Qt overlay shown over the Cocoa
+    // stream window, toggled by the Ctrl+F1 callback from the view.
+    std::unique_ptr<vivora::StreamMenu> menu_;
+    vivora::StatsView last_stats_{};
 };
 
 #endif // VIVORA_MACOS

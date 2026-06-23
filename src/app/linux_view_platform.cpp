@@ -32,6 +32,8 @@ bool LinuxViewPlatform::init(int argc, char* argv[],
     // got swallowed before reaching the host. Make the GL view the focus
     // proxy so window-level activation routes keys straight to it.
     window_->setFocusProxy(view_);
+    // Header subtitle for the in-stream menu (VIV-74) — endpoint for now.
+    view_->set_peer_label(QString("%1:%2").arg(host_ip).arg(port));
     window_->resize(1280, 720);
     window_->show();
     view_->setFocus();
@@ -123,6 +125,10 @@ void LinuxViewPlatform::update_stats(const vivora::StatsView& stats) {
 
 void LinuxViewPlatform::set_status(const char* text) {
     if (view_) view_->set_status(QString::fromUtf8(text ? text : ""));
+}
+
+void LinuxViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
+    if (view_) view_->set_menu_actions(actions);
 }
 
 void LinuxViewPlatform::set_stream_size(uint32_t width, uint32_t height) {

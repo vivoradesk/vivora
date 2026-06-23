@@ -2,6 +2,8 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QColor>
 #include <QEvent>
 #include <QFont>
@@ -223,6 +225,11 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
     vo_row->addStretch(1);
     root->addLayout(vo_row);
 
+    root->addSpacing(12);
+    aspect_check_ = new QCheckBox("Keep aspect ratio", this);
+    aspect_check_->setChecked(true);
+    root->addWidget(aspect_check_);
+
     root->addSpacing(16);
     root->addWidget(make_separator(this));
     root->addSpacing(14);
@@ -312,6 +319,10 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         if (suppress_signals_) return;
         if (actions_.set_view_only) actions_.set_view_only(on);
     });
+    connect(aspect_check_, &QCheckBox::toggled, this, [this](bool on) {
+        if (suppress_signals_) return;
+        emit keepAspectToggled(on);
+    });
     connect(fullscreen_btn_, &QPushButton::clicked, this,
             [this]() { emit fullscreenToggled(); });
     connect(disconnect_btn_, &QPushButton::clicked, this, [this]() {
@@ -328,7 +339,8 @@ void StreamMenu::set_header(const QString& app, const QString& peer) {
     peer_label_->setVisible(!peer.isEmpty());
 }
 
-void StreamMenu::set_initial_state(float volume, bool muted, bool view_only) {
+void StreamMenu::set_initial_state(float volume, bool muted, bool view_only,
+                                   bool keep_aspect) {
     suppress_signals_ = true;
     int pct = static_cast<int>(volume * 100.0f + 0.5f);
     pct = qBound(0, pct, 100);
@@ -337,6 +349,7 @@ void StreamMenu::set_initial_state(float volume, bool muted, bool view_only) {
     mute_check_->setChecked(muted);
     volume_slider_->setEnabled(!muted);
     viewonly_check_->setChecked(view_only);
+    aspect_check_->setChecked(keep_aspect);
     suppress_signals_ = false;
 }
 
@@ -368,11 +381,18 @@ void StreamMenu::set_info(const MenuInfo& info) {
 }
 
 void StreamMenu::open_over(QWidget* anchor) {
+    adjustSize();
+    QPoint center;
     if (anchor) {
         const QRect a(anchor->mapToGlobal(QPoint(0, 0)), anchor->size());
-        adjustSize();
-        move(a.center().x() - width() / 2, a.center().y() - height() / 2);
+        center = a.center();
+    } else if (auto* scr = QGuiApplication::primaryScreen()) {
+        // No Qt anchor (e.g. the macOS Cocoa stream window) — centre on the
+        // primary screen.
+        center = scr->geometry().center();
     }
+    if (!center.isNull())
+        move(center.x() - width() / 2, center.y() - height() / 2);
     show();
     raise();
     activateWindow();

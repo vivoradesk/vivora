@@ -64,6 +64,14 @@ public:
     using InputCallback = std::function<void(const protocol::InputEvent&)>;
     void set_input_callback(InputCallback cb);
 
+    // In-stream menu (VIV-74).  keep aspect ratio (letterbox) vs stretch.
+    void set_keep_aspect(bool keep);
+    // Toggle the Cocoa window between fullscreen and windowed.
+    void toggle_fullscreen();
+    // Invoked on the main thread when the user presses the menu hotkey
+    // (Ctrl+F1) over the stream.  The platform shows/hides the Qt menu.
+    void set_menu_hotkey_callback(std::function<void()> cb);
+
 private:
     void* impl_;           // opaque pointer to Obj-C++ impl struct
     bool should_close_ = false;

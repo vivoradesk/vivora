@@ -47,7 +47,8 @@ public:
     void set_header(const QString& app, const QString& peer);
 
     // Seed the controls without firing the action callbacks.
-    void set_initial_state(float volume, bool muted, bool view_only);
+    void set_initial_state(float volume, bool muted, bool view_only,
+                           bool keep_aspect = true);
 
     // Live connection info — fed ~once per second.
     void set_info(const MenuInfo& info);
@@ -57,6 +58,9 @@ public:
 
 signals:
     void fullscreenToggled();
+    // Keep stream aspect ratio (letterbox) vs. stretch to fill the window.
+    // Handled per-platform by the stream view (renderer + mouse mapping).
+    void keepAspectToggled(bool keep);
     void closed();
 
 protected:
@@ -80,6 +84,7 @@ private:
     QLabel*      volume_value_   = nullptr;
     QCheckBox*   mute_check_     = nullptr;
     QCheckBox*   viewonly_check_ = nullptr;
+    QCheckBox*   aspect_check_   = nullptr;
 
     QPushButton* monitor_btn_    = nullptr;
     QPushButton* fullscreen_btn_ = nullptr;

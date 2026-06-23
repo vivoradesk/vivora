@@ -202,6 +202,21 @@ QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
         "  border-radius: 8px;"
         "}");
     status_label_->hide();
+
+    // In-stream control menu (VIV-74).  Top-level overlay; summoned by Ctrl+F1.
+    menu_ = new vivora::StreamMenu(nullptr);
+    menu_->hide();
+    connect(menu_, &vivora::StreamMenu::fullscreenToggled,
+            this, &QtGlVideoView::toggle_fullscreen);
+    connect(menu_, &vivora::StreamMenu::keepAspectToggled, this, [this](bool keep) {
+        keep_aspect_ = keep;
+        recompute_viewport();
+        update();
+    });
+    connect(menu_, &vivora::StreamMenu::closed, this, [this]() {
+        activateWindow();
+        setFocus(Qt::OtherFocusReason);
+    });
 }
 
 void QtGlVideoView::set_status(const QString& text) {
@@ -223,6 +238,7 @@ void QtGlVideoView::position_status() {
 }
 
 QtGlVideoView::~QtGlVideoView() {
+    if (menu_) { menu_->hide(); menu_->deleteLater(); menu_ = nullptr; }
     if (context()) {
         makeCurrent();
         if (y_tex_) glDeleteTextures(1, &y_tex_);
@@ -247,6 +263,12 @@ void QtGlVideoView::recompute_viewport() {
     uint32_t sw = stream_w_, sh = stream_h_;
     if (sw == 0 || sh == 0) { sw = frame_w_; sh = frame_h_; }
     if (sw == 0 || sh == 0 || vw <= 0 || vh <= 0) {
+        viewport_x_ = 0; viewport_y_ = 0;
+        viewport_w_ = vw; viewport_h_ = vh;
+        return;
+    }
+    if (!keep_aspect_) {
+        // Stretch-to-fill: the quad covers the whole widget (VIV-74).
         viewport_x_ = 0; viewport_y_ = 0;
         viewport_w_ = vw; viewport_h_ = vh;
         return;
@@ -571,6 +593,12 @@ void QtGlVideoView::wheelEvent(QWheelEvent* e) {
 
 void QtGlVideoView::keyPressEvent(QKeyEvent* e)   {
     if (e->isAutoRepeat()) return;  // host handles repeat itself
+    // Ctrl+F1: toggle the in-stream control menu.  Client-local, never
+    // forwarded to the host.
+    if (e->key() == Qt::Key_F1 && (e->modifiers() & Qt::ControlModifier)) {
+        toggle_menu();
+        return;
+    }
     // F9: toggle diagnostics HUD.  Don't forward the key to the host —
     // it's a client-local debug control.
     if (e->key() == Qt::Key_F9) {
@@ -594,6 +622,49 @@ void QtGlVideoView::update_stats(const StatsView& stats) {
         rebuild_hud_text();
         position_hud();
     }
+    if (menu_ && menu_->isVisible()) feed_menu_info();
+}
+
+void QtGlVideoView::set_menu_actions(const vivora::MenuActions& actions) {
+    if (!menu_) return;
+    menu_->set_actions(actions);
+    menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+}
+
+void QtGlVideoView::set_peer_label(const QString& peer) {
+    if (menu_) menu_->set_header("Vivora", peer);
+}
+
+void QtGlVideoView::toggle_menu() {
+    if (!menu_) return;
+    if (menu_->isVisible()) {
+        menu_->close_menu();
+    } else {
+        feed_menu_info();
+        menu_->open_over(this);
+    }
+}
+
+void QtGlVideoView::toggle_fullscreen() {
+    QWidget* w = window();
+    if (!w) return;
+    if (w->isFullScreen()) w->showNormal();
+    else                   w->showFullScreen();
+}
+
+void QtGlVideoView::feed_menu_info() {
+    if (!menu_) return;
+    vivora::MenuInfo mi;
+    mi.rtt_ms          = last_stats_.rtt_ms;
+    mi.transport       = QString::fromUtf8(last_stats_.transport);
+    mi.width           = last_stats_.width;
+    mi.height          = last_stats_.height;
+    mi.hz              = last_stats_.target_fps;
+    mi.codec           = QString::fromUtf8(last_stats_.codec);
+    mi.decoder         = QString::fromUtf8(last_stats_.decoder);
+    mi.session_seconds = last_stats_.session_seconds;
+    mi.connected       = last_stats_.width > 0;
+    menu_->set_info(mi);
 }
 
 void QtGlVideoView::rebuild_hud_text() {
@@ -630,6 +701,8 @@ void QtGlVideoView::position_hud() {
 
 void QtGlVideoView::keyReleaseEvent(QKeyEvent* e) {
     if (e->isAutoRepeat()) return;
+    if (e->key() == Qt::Key_F1 && (e->modifiers() & Qt::ControlModifier))
+        return;  // Ctrl+F1 menu toggle — local, don't forward
     emit_key(e->key(), false);
 }
 
