@@ -21,7 +21,16 @@ bool LinuxViewPlatform::init(int argc, char* argv[],
     fmt.setSwapInterval(0);  // no vsync — we already pace via host loop
     QSurfaceFormat::setDefaultFormat(fmt);
 
-    app_ = std::make_unique<QApplication>(argc, argv);
+    // Reuse the existing QApplication when the GUI shell already bootstrapped
+    // one (in-process Connect from the tray/launcher).  Constructing a second
+    // QApplication per process is fatal — in a Release build (Q_ASSERT
+    // compiled out) it doesn't abort cleanly but corrupts Qt's global state
+    // and the process dies silently, which looked like "the client just
+    // closes on Connect".  CLI --view still builds its own.  Mirrors
+    // WindowsViewPlatform.
+    if (!QApplication::instance()) {
+        app_ = std::make_unique<QApplication>(argc, argv);
+    }
 
     window_ = std::make_unique<QMainWindow>();
     window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
