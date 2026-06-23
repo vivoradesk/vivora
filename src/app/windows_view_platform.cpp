@@ -22,6 +22,9 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     }
     window_ = std::make_unique<vivora::StreamWindow>();
     window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
+    // Header subtitle for the in-stream menu (VIV-74).  Friendly device
+    // names aren't plumbed to the view layer yet, so show the endpoint.
+    window_->set_peer_label(QString("%1:%2").arg(host_ip).arg(port));
     window_->show();
     return true;
 }

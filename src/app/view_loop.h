@@ -100,6 +100,11 @@ private:
     std::atomic<bool> view_only_{false};
     std::atomic<bool> user_disconnect_{false};
 
+    // Session uptime for the menu header pill (VIV-74) — stamped once the
+    // session first reaches Connected.
+    TimePoint session_start_{};
+    bool      session_started_ = false;
+
     // Status-overlay driving (VIV-62): "Connecting…" / "Waiting for host to
     // accept…" before the first frame, and a brief close reason when a
     // session that never produced a frame disconnects.

@@ -105,6 +105,8 @@ public:
 
     SessionState state() const { return state_; }
     double rtt_ms() const { return rtt_ms_; }
+    // Wire path for the in-stream menu header (VIV-74).
+    const char* transport_label() const { return relay_active_ ? "Relay" : "P2P"; }
 
     // HUD accessors — populated each PerfReport tick / audio stat tick.
     uint16_t perf_target_fps()  const { return perf_target_fps_; }

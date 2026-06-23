@@ -222,6 +222,10 @@ bool ViewLoopState::iter() {
         }
         audio_started_ = true;
     }
+    if (!session_started_ && session.state() == client::SessionState::Connected) {
+        session_start_ = Clock::now();
+        session_started_ = true;
+    }
 
     // Status overlay (VIV-62): before the first frame, tell the user what's
     // happening instead of a blank window.  Cleared once frames flow.
@@ -399,6 +403,14 @@ bool ViewLoopState::iter() {
         v.drop_pct   = session.last_drop_pct();
         v.audio_pps  = session.last_audio_pps();
         v.plc_pct    = session.last_plc_pct();
+        // Menu header fields (VIV-74).
+        std::snprintf(v.codec, sizeof(v.codec), "%s",
+                      session.host_codec() == VideoCodec::H264 ? "H.264" : "HEVC");
+        std::snprintf(v.transport, sizeof(v.transport), "%s", session.transport_label());
+        v.session_seconds = session_started_
+            ? static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                  now - session_start_).count())
+            : 0;
         std::snprintf(v.decoder, sizeof(v.decoder), "%s",
 #if defined(VIVORA_LINUX)
                       "SW HEVC"

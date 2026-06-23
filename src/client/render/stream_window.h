@@ -53,6 +53,9 @@ public:
     // widget; volume/view-only/disconnect run through the view loop.
     void set_menu_actions(const MenuActions& actions);
 
+    // Peer/device subtitle for the menu header (VIV-74).
+    void set_peer_label(const QString& peer);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;

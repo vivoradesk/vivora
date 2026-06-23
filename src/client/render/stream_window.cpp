@@ -131,6 +131,10 @@ void StreamWindow::set_menu_actions(const MenuActions& actions) {
     menu_->set_initial_state(1.0f, false, false);
 }
 
+void StreamWindow::set_peer_label(const QString& peer) {
+    if (menu_) menu_->set_header("Vivora", peer);
+}
+
 void StreamWindow::toggle_menu() {
     if (!menu_) return;
     if (menu_->isVisible()) {
@@ -148,8 +152,17 @@ void StreamWindow::toggle_fullscreen() {
 
 void StreamWindow::feed_menu_info() {
     if (!menu_) return;
-    menu_->set_info(last_stats_.rtt_ms, last_stats_.width, last_stats_.height,
-                    QString::fromUtf8(last_stats_.decoder));
+    MenuInfo mi;
+    mi.rtt_ms          = last_stats_.rtt_ms;
+    mi.transport       = QString::fromUtf8(last_stats_.transport);
+    mi.width           = last_stats_.width;
+    mi.height          = last_stats_.height;
+    mi.hz              = last_stats_.target_fps;
+    mi.codec           = QString::fromUtf8(last_stats_.codec);
+    mi.decoder         = QString::fromUtf8(last_stats_.decoder);
+    mi.session_seconds = last_stats_.session_seconds;
+    mi.connected       = last_stats_.width > 0;
+    menu_->set_info(mi);
 }
 
 void StreamWindow::set_status(const QString& text) {

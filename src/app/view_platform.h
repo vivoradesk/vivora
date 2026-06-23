@@ -36,6 +36,10 @@ struct StatsView {
     uint32_t height     = 0;      // decoded frame height
     bool     hdr        = false;  // BT.2020 + PQ if true
     char     decoder[16] = {0};   // backend name: "SW HEVC", "VAAPI HEVC", etc.
+    // Extra fields for the in-stream menu header (VIV-74).
+    char     codec[8]    = {0};   // negotiated codec: "HEVC", "H.264"
+    char     transport[8]= {0};   // "P2P" or "Relay"
+    uint32_t session_seconds = 0; // elapsed since the session connected
 };
 
 // Callbacks the in-stream overlay menu (VIV-74) invokes when the user
