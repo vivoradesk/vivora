@@ -238,10 +238,19 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
         // EAGAIN = no frame yet; EOF = stream ended; both expected.
         return false;
     }
-    // Reject frames that libav decoded with missing references — those
-    // visibly disintegrate as gray placeholder regions.  Force an IDR
-    // cycle instead.
-    if (in_frame_->flags & AV_FRAME_FLAG_CORRUPT) {
+    // Reject frames that libav couldn't decode cleanly.  Two distinct
+    // signals, and the gap between them is the "corrupted/frozen picture for
+    // the first few seconds" bug (VIV-77):
+    //   * AV_FRAME_FLAG_CORRUPT — set per the codec's err_recognition policy.
+    //   * decode_error_flags    — non-zero when the HW accelerator failed or
+    //     references were missing ("Could not find ref with POC …",
+    //     "hardware accelerator failed to decode picture").  VAAPI surfaces
+    //     these here WITHOUT the corrupt flag, so they used to slip through
+    //     and render as garbage/frozen output until the next IDR.
+    // Either way the picture is broken — drop it and force an IDR cycle
+    // (project no-artifact rule), rather than displaying a half-decoded frame.
+    if ((in_frame_->flags & AV_FRAME_FLAG_CORRUPT) ||
+        in_frame_->decode_error_flags != 0) {
         av_frame_unref(in_frame_);
         corrupt_ = true;
         return false;
