@@ -8,6 +8,7 @@
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
+#include <cstdlib>
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -266,11 +267,49 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
               (host_addr_.ip >> 16) & 0xff, (host_addr_.ip >> 24) & 0xff,
               host_addr_.port);
     send_hello();
+
+    // VIV-81: optionally offload socket receive to a dedicated thread so the
+    // kernel UDP buffer is drained continuously and never overflows under
+    // burst (the recvbuf-loss → IDR-churn root cause).  Gated by
+    // VIVORA_PIPELINE=threaded; default keeps the legacy in-poll recv.
+    if (const char* p = std::getenv("VIVORA_PIPELINE"))
+        async_recv_ = (std::strcmp(p, "threaded") == 0);
+    if (async_recv_) {
+        recv_ring_ = std::make_unique<util::SpscRing<RawPacket, 1024>>();
+        recv_running_.store(true, std::memory_order_release);
+        recv_thread_ = std::thread(&ClientSession::recv_thread_proc, this);
+        log::info("ClientSession",
+                  "async socket-receive thread started (VIVORA_PIPELINE=threaded)");
+    }
     return true;
+}
+
+void ClientSession::recv_thread_proc() {
+    // Drain the video socket as fast as the wire delivers, parking raw
+    // packets in recv_ring_ for poll() to decrypt/dispatch.  Non-blocking
+    // recv + a short nap when idle: under load it never sleeps, so the kernel
+    // buffer stays near-empty; when quiet it yields the core.
+    RawPacket pkt;
+    while (recv_running_.load(std::memory_order_acquire)) {
+        int n = socket_->recv_from(pkt.data, sizeof(pkt.data), pkt.from);
+        if (n > 0) {
+            pkt.len = n;
+            // Ring full only if poll() stalled badly (shouldn't happen with a
+            // 1024-deep ring + 60Hz poll); drop — host FEC/IDR covers it.
+            recv_ring_->try_push(pkt);
+        } else {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+    }
 }
 
 void ClientSession::stop() {
     stop_audio();
+    // Stop the receive thread before closing the socket it reads (VIV-81).
+    if (recv_running_.exchange(false)) {
+        if (recv_thread_.joinable()) recv_thread_.join();
+    }
+    recv_ring_.reset();
     if (socket_) {
         socket_->close();
         socket_.reset();
@@ -342,12 +381,24 @@ void ClientSession::poll() {
     uint8_t buf[RECV_BUF_SIZE];
     net::SocketAddr sender;
 
-    for (;;) {
-        int n = socket_->recv_from(buf, sizeof(buf), sender);
-        if (n <= 0) break;
-        last_recv_time_ = Clock::now();
-        bytes_received_ += static_cast<uint64_t>(n);
-        handle_packet(buf, static_cast<size_t>(n));
+    if (async_recv_ && recv_ring_) {
+        // Threaded path: process whatever the receive thread has parked.
+        RawPacket pkt;
+        while (recv_ring_->try_pop(pkt)) {
+            if (pkt.len <= 0) continue;
+            last_recv_time_ = Clock::now();
+            bytes_received_ += static_cast<uint64_t>(pkt.len);
+            handle_packet(pkt.data, static_cast<size_t>(pkt.len));
+        }
+    } else {
+        // Legacy path: recv directly here.
+        for (;;) {
+            int n = socket_->recv_from(buf, sizeof(buf), sender);
+            if (n <= 0) break;
+            last_recv_time_ = Clock::now();
+            bytes_received_ += static_cast<uint64_t>(n);
+            handle_packet(buf, static_cast<size_t>(n));
+        }
     }
 
     // Periodic audio firewall keepalive. Sent every ~1s FROM the audio socket

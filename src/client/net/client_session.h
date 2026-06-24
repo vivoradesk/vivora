@@ -10,9 +10,12 @@
 #include "common/protocol/input_event.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/types.h"
+#include "common/utils/spsc_ring.h"
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 namespace vivora::client {
@@ -335,6 +338,26 @@ private:
     // packet (tens of fragments/frame × 60fps).  Cleared on entry; the
     // outer vector keeps its capacity between calls.
     std::vector<std::vector<uint8_t>> fec_recovered_scratch_;
+
+    // Async socket-receive thread (VIV-81; VIVORA_PIPELINE=threaded).  A
+    // dedicated thread drains the video socket into recv_ring_ continuously
+    // so the kernel UDP buffer never overflows under burst regardless of
+    // net.core.rmem_max — the proven root cause of the recvbuf-loss → IDR
+    // churn we hit.  poll() consumes the ring instead of recv_from() when
+    // async_recv_ is on; decrypt/dispatch/relay-unwrap are unchanged (still
+    // run on the poll() thread).  Off by default (legacy direct recv).
+    struct RawPacket {
+        int             len = 0;
+        net::SocketAddr from{};
+        uint8_t         data[RECV_BUF_SIZE];
+    };
+    bool                  async_recv_ = false;
+    std::atomic<bool>     recv_running_{false};
+    std::thread           recv_thread_;
+    // ~2 MB; heap-allocated only in threaded mode (avoids bloating the
+    // by-value ClientSession on the CLI's stack).
+    std::unique_ptr<util::SpscRing<RawPacket, 1024>> recv_ring_;
+    void recv_thread_proc();
 };
 
 } // namespace vivora::client
