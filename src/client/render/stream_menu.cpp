@@ -123,8 +123,8 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         "QLabel#keycap { color: #aeb3bc; background: rgba(255,255,255,0.07);"
         "  border: 1px solid rgba(255,255,255,0.12); border-radius: 4px;"
         "  padding: 2px 6px; font-size: 11px; }"
-        "QCheckBox { spacing: 9px; }"
-        "QCheckBox::indicator { width: 18px; height: 18px; border-radius: 5px;"
+        "QCheckBox { spacing: 10px; min-height: 22px; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 5px;"
         "  border: 1px solid rgba(255,255,255,0.28); background: rgba(255,255,255,0.04); }"
         "QCheckBox::indicator:checked { background: #4a8cff; border-color: #4a8cff; }"
         "QPushButton { background: rgba(255,255,255,0.06); border: none;"
@@ -214,18 +214,19 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
     mute_check_ = new QCheckBox("Mute", this);
     root->addWidget(mute_check_);
 
-    root->addSpacing(12);
+    root->addSpacing(10);
     auto* vo_row = new QHBoxLayout();
-    vo_row->setSpacing(8);
+    vo_row->setContentsMargins(0, 0, 0, 0);
+    vo_row->setSpacing(7);
     viewonly_check_ = new QCheckBox("View only", this);
     auto* vo_hint = new QLabel("(don't send my input)", this);
     vo_hint->setObjectName("hint");
-    vo_row->addWidget(viewonly_check_);
-    vo_row->addWidget(vo_hint);
+    vo_row->addWidget(viewonly_check_, 0, Qt::AlignVCenter);
+    vo_row->addWidget(vo_hint, 0, Qt::AlignVCenter);
     vo_row->addStretch(1);
     root->addLayout(vo_row);
 
-    root->addSpacing(12);
+    root->addSpacing(10);
     aspect_check_ = new QCheckBox("Keep aspect ratio", this);
     aspect_check_->setChecked(true);
     root->addWidget(aspect_check_);
