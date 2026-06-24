@@ -23,6 +23,11 @@ bool MacViewPlatform::init(const char* host_ip, uint16_t port) {
     // view resume input and re-take the cursor.
     QObject::connect(menu_.get(), &vivora::StreamMenu::closed,
                      menu_.get(), [this]() { view_.set_menu_open(false); });
+    // Click on the stream (outside the menu) dismisses it — the Qt overlay
+    // doesn't get a reliable deactivation under Cocoa, so the view tells us.
+    view_.set_menu_dismiss_callback([this]() {
+        if (menu_ && menu_->isVisible()) menu_->close_menu();
+    });
     // Cmd/Ctrl+F1 over the stream → toggle the menu (called on the main
     // thread from the Cocoa view's keyDown).
     view_.set_menu_hotkey_callback([this]() {

@@ -73,6 +73,7 @@ namespace vivora { struct MacVideoViewImpl; }
 - (void)setKeepAspect:(BOOL)keep;
 - (void)setMenuOpen:(BOOL)open;
 - (BOOL)menuSuppressingInput;
+- (BOOL)dismissMenuIfOpen;
 - (void)enterRelativeMode;
 - (void)exitRelativeMode;
 - (void)toggleHud;
@@ -88,6 +89,7 @@ static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev);
 // Invoke the menu-hotkey callback (defined after MacVideoViewImpl is complete,
 // since the @implementation above only has the forward declaration).
 static void invoke_menu_hotkey(MacVideoViewImpl* impl);
+static void invoke_menu_dismiss(MacVideoViewImpl* impl);
 // Returns true if a mapping exists. Extended-key handling relies on vk_code
 // on the Windows injector side (arrows, nav keys, etc.).
 static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk);
@@ -330,11 +332,14 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     vivora::emit_input(impl, ev);
 }
 
-- (void)mouseDown:(NSEvent*)event        { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Left   pressed:YES]; }
+// A click on the stream while the menu is open means "click-away" → dismiss
+// the menu (and don't forward the click to the host).
+- (BOOL)dismissMenuIfOpen { if (menuOpen) { vivora::invoke_menu_dismiss(impl); return YES; } return NO; }
+- (void)mouseDown:(NSEvent*)event        { (void)event; if ([self dismissMenuIfOpen]) return; [self sendMouseButton:vivora::protocol::MouseButton::Left   pressed:YES]; }
 - (void)mouseUp:(NSEvent*)event          { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Left   pressed:NO];  }
-- (void)rightMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Right  pressed:YES]; }
+- (void)rightMouseDown:(NSEvent*)event   { (void)event; if ([self dismissMenuIfOpen]) return; [self sendMouseButton:vivora::protocol::MouseButton::Right  pressed:YES]; }
 - (void)rightMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Right  pressed:NO];  }
-- (void)otherMouseDown:(NSEvent*)event   { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:YES]; }
+- (void)otherMouseDown:(NSEvent*)event   { (void)event; if ([self dismissMenuIfOpen]) return; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:YES]; }
 - (void)otherMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:NO];  }
 
 - (void)scrollWheel:(NSEvent*)event {
@@ -458,6 +463,7 @@ struct MacVideoViewImpl {
     // In-stream menu (VIV-74): aspect mode + hotkey toggle callback.
     bool keep_aspect = true;
     std::function<void()> menu_hotkey_cb;
+    std::function<void()> menu_dismiss_cb;
     // True if the active format description carries a PQ or HLG transfer
     // function — surfaced through update_stats so the F9 HUD reports HDR.
     // Detected from kCMFormatDescriptionExtension_TransferFunction once
@@ -476,6 +482,10 @@ static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev) {
 
 static void invoke_menu_hotkey(MacVideoViewImpl* impl) {
     if (impl && impl->menu_hotkey_cb) impl->menu_hotkey_cb();
+}
+
+static void invoke_menu_dismiss(MacVideoViewImpl* impl) {
+    if (impl && impl->menu_dismiss_cb) impl->menu_dismiss_cb();
 }
 
 static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
@@ -786,6 +796,11 @@ void MacVideoView::set_menu_open(bool open) {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl || !impl->view) return;
     @autoreleasepool { [impl->view setMenuOpen:(open ? YES : NO)]; }
+}
+
+void MacVideoView::set_menu_dismiss_callback(std::function<void()> cb) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (impl) impl->menu_dismiss_cb = std::move(cb);
 }
 
 void MacVideoView::flush_decoder() {

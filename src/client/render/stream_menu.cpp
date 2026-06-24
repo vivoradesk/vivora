@@ -211,25 +211,29 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
     root->addLayout(vol_row);
 
     root->addSpacing(14);
-    mute_check_ = new QCheckBox("Mute", this);
-    root->addWidget(mute_check_);
-
-    root->addSpacing(10);
-    auto* vo_row = new QHBoxLayout();
-    vo_row->setContentsMargins(0, 0, 0, 0);
-    vo_row->setSpacing(7);
-    viewonly_check_ = new QCheckBox("View only", this);
-    auto* vo_hint = new QLabel("(don't send my input)", this);
-    vo_hint->setObjectName("hint");
-    vo_row->addWidget(viewonly_check_, 0, Qt::AlignVCenter);
-    vo_row->addWidget(vo_hint, 0, Qt::AlignVCenter);
-    vo_row->addStretch(1);
-    root->addLayout(vo_row);
-
-    root->addSpacing(10);
-    aspect_check_ = new QCheckBox("Keep aspect ratio", this);
+    // All three checkboxes share one row shape (checkbox [+ hint] + stretch)
+    // so their indicators line up at the same x and the row heights — hence
+    // the inter-row gaps — are identical across platforms.
+    auto add_check = [&](QCheckBox*& cb, const QString& text, const QString& hint) {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(7);
+        cb = new QCheckBox(text, this);
+        row->addWidget(cb, 0, Qt::AlignVCenter);
+        if (!hint.isEmpty()) {
+            auto* h = new QLabel(hint, this);
+            h->setObjectName("hint");
+            row->addWidget(h, 0, Qt::AlignVCenter);
+        }
+        row->addStretch(1);
+        root->addLayout(row);
+    };
+    add_check(mute_check_, "Mute", QString());
+    root->addSpacing(12);
+    add_check(viewonly_check_, "View only", "(don't send my input)");
+    root->addSpacing(12);
+    add_check(aspect_check_, "Keep aspect ratio", QString());
     aspect_check_->setChecked(true);
-    root->addWidget(aspect_check_);
 
     root->addSpacing(16);
     root->addWidget(make_separator(this));

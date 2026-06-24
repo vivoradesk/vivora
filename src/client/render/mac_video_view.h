@@ -79,6 +79,12 @@ public:
     // menu isn't also delivered to the host.
     void set_menu_open(bool open);
 
+    // Invoked when the user clicks the stream while the menu is open — i.e. a
+    // click outside the (separate, Qt) menu window.  The platform dismisses
+    // the menu.  Needed because the Qt overlay doesn't reliably get a
+    // deactivation event under the Cocoa app, so click-away can't rely on it.
+    void set_menu_dismiss_callback(std::function<void()> cb);
+
 private:
     void* impl_;           // opaque pointer to Obj-C++ impl struct
     bool should_close_ = false;
