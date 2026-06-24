@@ -102,6 +102,19 @@ private:
     // process-lifetime static made every session after the first skip HDR
     // detection → HDR streams rendered SDR (washed out) on reconnect (VIV-78).
     bool            color_logged_ = false;
+
+    // HW→SW auto-fallback (VIV-80).  Hardware decoders fail on perfectly
+    // valid frames when the driver is missing/flaky (common on Linux without
+    // the right VAAPI driver; also seen on Windows).  After a streak of
+    // consecutive HW failures we give up on hardware and reopen in software
+    // on the next reinit().  sw_forced_ is the manual VIVORA_NO_HWDEC
+    // override; either path routes through use_sw().
+    bool            sw_forced_      = false;  // VIVORA_NO_HWDEC
+    bool            hw_gave_up_     = false;  // auto-fallback latched
+    int             hw_fail_streak_ = 0;
+    static constexpr int kHwFailGiveUp = 12;  // ~0.2 s at 60 fps of solid failure
+    bool use_sw() const { return sw_forced_ || hw_gave_up_; }
+    void note_hw_failure();
 };
 
 } // namespace vivora::client

@@ -58,8 +58,8 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     // on any failure — missing GPU, no driver, missing kernel module, lack
     // of permission on /dev/dri/renderD*, etc.  Logged either way so it's
     // obvious which path is active in the field.
-    const bool force_sw = std::getenv("VIVORA_NO_HWDEC") != nullptr;
-    int hw_rc = force_sw ? -1
+    sw_forced_ = std::getenv("VIVORA_NO_HWDEC") != nullptr;
+    int hw_rc = use_sw() ? -1
               : av_hwdevice_ctx_create(&hw_device_ctx_, AV_HWDEVICE_TYPE_VAAPI,
                                        nullptr, nullptr, 0);
     if (hw_rc == 0 && hw_device_ctx_) {
@@ -67,7 +67,7 @@ bool FfmpegDecoder::init(VideoCodec codec) {
         ctx_->get_format    = get_hw_format_cb;
         hw_decode_          = true;
     } else {
-        if (force_sw)
+        if (use_sw())
             log::info("FFDec", "VIVORA_NO_HWDEC set — forcing software decode");
         else
             log::warn("FFDec", "VAAPI device init failed (rc=%d) — using SW decode", hw_rc);
@@ -160,6 +160,7 @@ bool FfmpegDecoder::decode(const uint8_t* data, size_t len, uint64_t pts,
         // and produce visible glitches.  Mark corrupt so the upper layer
         // forces an IDR + reinit instead.
         corrupt_ = true;
+        note_hw_failure();
         return false;
     }
     return true;
@@ -193,9 +194,15 @@ bool FfmpegDecoder::reinit() {
     if (!dec) return false;
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
-    if (hw_device_ctx_) {
+    // Re-attach HW only if we haven't given up on it (VIV-80).  After
+    // fallback latches we reopen in software so the broken HW path is
+    // bypassed for the rest of the session.
+    if (hw_device_ctx_ && !use_sw()) {
         ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
         ctx_->get_format    = get_hw_format_cb;
+        hw_decode_          = true;
+    } else {
+        hw_decode_          = false;
     }
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
@@ -262,6 +269,7 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
         in_frame_->decode_error_flags != 0) {
         av_frame_unref(in_frame_);
         corrupt_ = true;
+        note_hw_failure();
         return false;
     }
 
@@ -279,6 +287,7 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
             log::error("FFDec", "hwframe transfer failed");
             av_frame_unref(in_frame_);
             corrupt_ = true;
+            note_hw_failure();
             return false;
         }
         sw_frame_->color_primaries = in_frame_->color_primaries;
@@ -346,10 +355,27 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     out.plane[2]  = picked_frame->data[2];
     out.pts       = static_cast<uint64_t>(picked_frame->pts);
 
+    // A clean frame made it all the way through — the HW path is healthy,
+    // so clear the failure streak (only *consecutive* failures fall back).
+    hw_fail_streak_ = 0;
+
     // The plane buffers stay valid until the next decode()/get_frame() —
     // caller MUST upload before then.  in_frame_, sw_frame_, out_frame_
     // are all preallocated and reused across iterations.
     return true;
+}
+
+void FfmpegDecoder::note_hw_failure() {
+    // Count consecutive hardware-decode failures; after a sustained streak
+    // give up on HW so the next reinit() reopens in software (VIV-80).  Only
+    // meaningful while actually on the HW path and not already fallen back.
+    if (!hw_decode_ || hw_gave_up_) return;
+    if (++hw_fail_streak_ >= kHwFailGiveUp) {
+        hw_gave_up_ = true;
+        log::warn("FFDec",
+                  "hardware decode failed %d frames running — falling back to "
+                  "software decode for this session", hw_fail_streak_);
+    }
 }
 
 } // namespace vivora::client
