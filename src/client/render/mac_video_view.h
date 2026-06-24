@@ -72,6 +72,13 @@ public:
     // (Ctrl+F1) over the stream.  The platform shows/hides the Qt menu.
     void set_menu_hotkey_callback(std::function<void()> cb);
 
+    // While the in-stream menu is open the stream view must release/show the
+    // cursor (so the user can click the menu even if the host hid it / we
+    // were in relative mode) and stop forwarding mouse+keys to the host.  On
+    // close it briefly ignores input so the click-away that dismissed the
+    // menu isn't also delivered to the host.
+    void set_menu_open(bool open);
+
 private:
     void* impl_;           // opaque pointer to Obj-C++ impl struct
     bool should_close_ = false;

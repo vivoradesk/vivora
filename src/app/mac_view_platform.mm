@@ -19,15 +19,21 @@ bool MacViewPlatform::init(const char* host_ip, uint16_t port) {
                      menu_.get(), [this]() { view_.toggle_fullscreen(); });
     QObject::connect(menu_.get(), &vivora::StreamMenu::keepAspectToggled,
                      menu_.get(), [this](bool keep) { view_.set_keep_aspect(keep); });
-    // Ctrl+F1 over the stream → toggle the menu (called on the main thread
-    // from the Cocoa view's keyDown).
+    // When the menu closes (Esc / click-away / Disconnect), let the stream
+    // view resume input and re-take the cursor.
+    QObject::connect(menu_.get(), &vivora::StreamMenu::closed,
+                     menu_.get(), [this]() { view_.set_menu_open(false); });
+    // Cmd/Ctrl+F1 over the stream → toggle the menu (called on the main
+    // thread from the Cocoa view's keyDown).
     view_.set_menu_hotkey_callback([this]() {
         if (!menu_) return;
         if (menu_->isVisible()) {
             menu_->close_menu();
+            view_.set_menu_open(false);
         } else {
             feed_menu_info();
             menu_->open_over(nullptr);
+            view_.set_menu_open(true);
         }
     });
     return true;

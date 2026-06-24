@@ -59,6 +59,11 @@ namespace vivora { struct MacVideoViewImpl; }
     // decoupled from physical motion so the trackpad keeps producing deltas
     // even when the virtual cursor would hit a window edge.
     BOOL relativeMode;
+    // In-stream menu (VIV-74): while open, the view frees/shows the cursor
+    // and ignores mouse/keys.  ignoreMouseUntil swallows the click-away that
+    // dismissed the menu so it doesn't reach the host.
+    BOOL menuOpen;
+    CFTimeInterval ignoreMouseUntil;
 }
 @property (nonatomic, strong) AVSampleBufferDisplayLayer* videoLayer;
 @property (nonatomic, strong) CALayer* cursorLayer;
@@ -66,6 +71,8 @@ namespace vivora { struct MacVideoViewImpl; }
 @property (nonatomic, assign) BOOL hudVisible;
 @property (nonatomic, strong) CATextLayer* statusLayer;
 - (void)setKeepAspect:(BOOL)keep;
+- (void)setMenuOpen:(BOOL)open;
+- (BOOL)menuSuppressingInput;
 - (void)enterRelativeMode;
 - (void)exitRelativeMode;
 - (void)toggleHud;
@@ -163,6 +170,27 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
                                         : AVLayerVideoGravityResize;
 }
 
+- (void)setMenuOpen:(BOOL)open {
+    menuOpen = open;
+    if (open) {
+        // Free the cursor (drop relative mode) and make it visible so the
+        // user can actually interact with the menu — otherwise it stays
+        // frozen/hidden from the stream's relative-mouse handling.
+        [self exitRelativeMode];
+        [NSCursor unhide];
+    } else {
+        // Swallow stream mouse for a moment: the click that dismissed the
+        // menu (click-away) is also delivered to this view and would
+        // otherwise reach the host.
+        ignoreMouseUntil = CACurrentMediaTime() + 0.25;
+    }
+}
+
+// True while the menu is open or within the brief post-close guard window.
+- (BOOL)menuSuppressingInput {
+    return menuOpen || CACurrentMediaTime() < ignoreMouseUntil;
+}
+
 - (void)setHudText:(NSString*)text {
     if (!text) text = @"";
     [CATransaction begin];
@@ -231,6 +259,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 }
 
 - (void)sendMouseMove:(NSEvent*)event {
+    if ([self menuSuppressingInput]) return;  // menu open — let cursor roam free
     if (relativeMode) {
         // Raw HID deltas — decoupled from cursor clamping by
         // CGAssociateMouseAndMouseCursorPosition(false). Matches the
@@ -289,10 +318,11 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 
 // Hide native Mac cursor while over the stream — host-side cursor is
 // drawn into the video via cursorLayer, so we'd otherwise see two.
-- (void)mouseEntered:(NSEvent*)event { (void)event; [NSCursor hide]; }
+- (void)mouseEntered:(NSEvent*)event { (void)event; if (![self menuSuppressingInput]) [NSCursor hide]; }
 - (void)mouseExited:(NSEvent*)event  { (void)event; [NSCursor unhide]; }
 
 - (void)sendMouseButton:(vivora::protocol::MouseButton)btn pressed:(BOOL)down {
+    if ([self menuSuppressingInput]) return;  // don't leak clicks to the host
     vivora::protocol::InputEvent ev;
     ev.type = vivora::protocol::InputEventType::MouseButton;
     ev.button = btn;
@@ -308,6 +338,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 - (void)otherMouseUp:(NSEvent*)event     { (void)event; [self sendMouseButton:vivora::protocol::MouseButton::Middle pressed:NO];  }
 
 - (void)scrollWheel:(NSEvent*)event {
+    if ([self menuSuppressingInput]) return;
     // Mac scroll deltas are in lines (or pixels for precise scrolling).
     // Windows wheel uses 120 per notch. Multiply by 30 as a reasonable default.
     CGFloat dx = event.scrollingDeltaX;
@@ -348,6 +379,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     // F9 (mac kVK 0x65) toggles the diagnostics HUD locally.  Eat it so
     // the host doesn't see a phantom keypress.
     if (event.keyCode == 0x65) { [self toggleHud]; return; }
+    if (menuOpen) return;  // menu has focus — don't forward keys to the host
     [self sendKey:event.keyCode down:YES];
 }
 - (void)keyUp:(NSEvent*)event {
@@ -355,10 +387,12 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)))
         return; // Cmd/Ctrl+F1 menu toggle — local, don't forward
     if (event.keyCode == 0x65) return; // local toggle, don't forward
+    if (menuOpen) return;
     [self sendKey:event.keyCode down:NO];
 }
 
 - (void)flagsChanged:(NSEvent*)event {
+    if (menuOpen) { lastModifierFlags = event.modifierFlags; return; }
     NSUInteger newFlags = event.modifierFlags;
     uint16_t kc = event.keyCode;
     // Decide down/up from the device-specific bit belonging to this keyCode.
@@ -748,6 +782,12 @@ void MacVideoView::set_menu_hotkey_callback(std::function<void()> cb) {
     if (impl) impl->menu_hotkey_cb = std::move(cb);
 }
 
+void MacVideoView::set_menu_open(bool open) {
+    auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (!impl || !impl->view) return;
+    @autoreleasepool { [impl->view setMenuOpen:(open ? YES : NO)]; }
+}
+
 void MacVideoView::flush_decoder() {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl) return;
@@ -854,6 +894,10 @@ void MacVideoView::update_cursor_position(const protocol::CursorPositionMessage&
 
     CALayer* cursor = impl->view.cursorLayer;
     if (!cursor) return;
+
+    // While the in-stream menu is open it owns the cursor (freed + visible);
+    // don't let host cursor-visibility flips drag us back into relative mode.
+    if (impl->view->menuOpen) return;
 
     // Host cursor visibility drives relative-mouse mode: when the host hides
     // its cursor (typical for FPS/camera-locked apps), we switch to sending
