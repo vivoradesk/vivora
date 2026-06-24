@@ -96,6 +96,12 @@ private:
     // reinit().  Project rule: never display a partially-broken frame.
     bool            corrupt_   = false;
     bool            is_hdr_    = false;
+    // Per-instance guard for the one-time colorspace/HDR detection in
+    // get_frame().  MUST be a member, not a function-local static: the GUI
+    // creates a fresh FfmpegDecoder per ViewSession within one process, and a
+    // process-lifetime static made every session after the first skip HDR
+    // detection → HDR streams rendered SDR (washed out) on reconnect (VIV-78).
+    bool            color_logged_ = false;
 };
 
 } // namespace vivora::client

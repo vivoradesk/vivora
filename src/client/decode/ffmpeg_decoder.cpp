@@ -275,9 +275,8 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     // Log colorspace metadata once per stream — tells us if host is
     // sending HDR (BT.2020 + PQ) which our BT.709 shader can't handle
     // correctly without tonemapping.
-    static bool logged_color = false;
-    if (!logged_color) {
-        logged_color = true;
+    if (!color_logged_) {
+        color_logged_ = true;
         // VAAPI commonly leaves AVFrame's color_* at UNSPECIFIED (2),
         // even when the bitstream carries the right VUI params — the
         // driver just doesn't propagate them.  Fall back to ctx_, which
