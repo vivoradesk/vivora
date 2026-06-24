@@ -9,6 +9,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <cstdlib>
 #include <cstring>
 
 namespace vivora::client {
@@ -50,18 +51,26 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     ctx_ = avcodec_alloc_context3(dec);
     if (!ctx_) return false;
 
-    // Try VAAPI HW decode first.  Falls through to SW on any failure —
-    // missing GPU, no driver, missing kernel module, lack of permission
-    // on /dev/dri/renderD*, etc.  Logged at info either way so it's
+    // Try VAAPI HW decode first, unless VIVORA_NO_HWDEC forces software.
+    // The env toggle is both a diagnostic (isolate flaky HW decode from
+    // network loss) and a field fallback for GPUs whose VAAPI HEVC path is
+    // unreliable at high resolution (VIV-79).  Otherwise falls through to SW
+    // on any failure — missing GPU, no driver, missing kernel module, lack
+    // of permission on /dev/dri/renderD*, etc.  Logged either way so it's
     // obvious which path is active in the field.
-    int hw_rc = av_hwdevice_ctx_create(&hw_device_ctx_, AV_HWDEVICE_TYPE_VAAPI,
+    const bool force_sw = std::getenv("VIVORA_NO_HWDEC") != nullptr;
+    int hw_rc = force_sw ? -1
+              : av_hwdevice_ctx_create(&hw_device_ctx_, AV_HWDEVICE_TYPE_VAAPI,
                                        nullptr, nullptr, 0);
     if (hw_rc == 0 && hw_device_ctx_) {
         ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
         ctx_->get_format    = get_hw_format_cb;
         hw_decode_          = true;
     } else {
-        log::warn("FFDec", "VAAPI device init failed (rc=%d) — using SW decode", hw_rc);
+        if (force_sw)
+            log::info("FFDec", "VIVORA_NO_HWDEC set — forcing software decode");
+        else
+            log::warn("FFDec", "VAAPI device init failed (rc=%d) — using SW decode", hw_rc);
         if (hw_device_ctx_) av_buffer_unref(&hw_device_ctx_);
     }
 
