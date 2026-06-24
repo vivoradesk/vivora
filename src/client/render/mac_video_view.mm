@@ -78,6 +78,9 @@ namespace vivora { struct MacVideoViewImpl; }
 // Forward declaration so the view can call into C++.
 namespace vivora {
 static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev);
+// Invoke the menu-hotkey callback (defined after MacVideoViewImpl is complete,
+// since the @implementation above only has the forward declaration).
+static void invoke_menu_hotkey(MacVideoViewImpl* impl);
 // Returns true if a mapping exists. Extended-key handling relies on vk_code
 // on the Windows injector side (arrows, nav keys, etc.).
 static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk);
@@ -337,7 +340,7 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     // Ctrl+F1 (mac kVK F1 = 0x7A) toggles the in-stream control menu
     // locally.  Eat it so the host never sees the keypress.
     if (event.keyCode == 0x7A && (event.modifierFlags & NSEventModifierFlagControl)) {
-        if (impl && impl->menu_hotkey_cb) impl->menu_hotkey_cb();
+        vivora::invoke_menu_hotkey(impl);
         return;
     }
     // F9 (mac kVK 0x65) toggles the diagnostics HUD locally.  Eat it so
@@ -432,6 +435,10 @@ struct MacVideoViewImpl {
 
 static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev) {
     if (impl && impl->input_cb) impl->input_cb(ev);
+}
+
+static void invoke_menu_hotkey(MacVideoViewImpl* impl) {
+    if (impl && impl->menu_hotkey_cb) impl->menu_hotkey_cb();
 }
 
 static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
