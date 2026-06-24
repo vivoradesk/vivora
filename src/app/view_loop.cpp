@@ -55,11 +55,15 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     utils::boost_current_thread_priority();
 
     // The host's static pubkey is mandatory — Noise_NK won't run without it.
-    // --host-key remains optional when --peer is a memorable code: the
-    // rendezvous response carries the pubkey for us in that flow.
-    const bool has_peer_code = cfg.rendezvous_server && cfg.peer_pubkey_hex
-        && *cfg.peer_pubkey_hex
-        && !peer_code::looks_like_hex_pubkey(cfg.peer_pubkey_hex);
+    // --host-key is optional when connecting via a rendezvous --peer, in
+    // EITHER form (VIV-76): a memorable code is resolved to the host pubkey by
+    // the rendezvous LOOKUP, and a hex --peer IS the host's responder static
+    // (pinned in the rendezvous block below).  Previously this gate accepted
+    // only the code form, so clicking a Recent peer (which dials by hex
+    // pubkey) with no --host-key was rejected here, before start() — that was
+    // the "recent peer won't connect, pasted code does" bug.
+    const bool has_rendezvous_peer = cfg.rendezvous_server && *cfg.rendezvous_server
+        && cfg.peer_pubkey_hex && *cfg.peer_pubkey_hex;
     if (cfg.host_key_hex && *cfg.host_key_hex) {
         uint8_t host_pk[32];
         if (!crypto::hex_decode_32(cfg.host_key_hex, host_pk)) {
@@ -68,8 +72,9 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             return false;
         }
         session_.set_host_key(host_pk);
-    } else if (!has_peer_code) {
-        log::error("VIEW", "Missing --host-key HEX (64 hex chars) or --peer code. "
+    } else if (!has_rendezvous_peer) {
+        log::error("VIEW", "Missing --host-key HEX (64 hex chars), or a --peer "
+                           "(pubkey or code) together with a rendezvous server. "
                            "Get either from the host's startup log.");
         exit_code_ = 1;
         return false;
