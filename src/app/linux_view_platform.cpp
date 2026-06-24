@@ -80,13 +80,14 @@ bool LinuxViewPlatform::decode(const uint8_t* data, size_t len,
 
 int LinuxViewPlatform::render() {
     if (!decoder_ || !view_) return 0;
-    // Propagate HDR flag from decoder — set after first frame's color
-    // metadata is read.  Cheap enough to refresh every render iteration;
-    // the setter is a trivial bool store.
-    view_->set_hdr(decoder_->is_hdr());
     int count = 0;
     vivora::client::FfmpegDecoder::YuvFrame f;
     while (decoder_->get_frame(f)) {
+        // Propagate HDR flag AFTER get_frame — that's where the decoder reads
+        // the colour metadata and latches is_hdr_.  Setting it before (as we
+        // used to) meant the very first frame painted with last iteration's
+        // flag → a brief SDR-coloured first frame on an HDR stream (VIV-78).
+        view_->set_hdr(decoder_->is_hdr());
         // First frame: if StreamInfo already arrived, propagate dims;
         // otherwise fall back to decoded size so input mapping has
         // *something* sensible until StreamInfo lands.

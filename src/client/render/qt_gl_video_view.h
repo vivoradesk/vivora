@@ -122,7 +122,11 @@ private:
     // brighten).  Replaces the old hardcoded 50x gain in the HDR shader.
     float    hdr_exposure_       = 50.0f;
     int      hdr_sample_counter_ = 0;
-    void     recompute_hdr_exposure();
+    bool     hdr_exposure_seeded_ = false;  // first HDR frame snaps, then EWMA
+    // snap=true sets exposure straight to the target (no EWMA ramp) — used on
+    // the first HDR frame so the picture isn't briefly mis-exposed for ~1-2s
+    // while the EWMA climbs from the 50.0 default (VIV-78).
+    void     recompute_hdr_exposure(bool snap = false);
 
     // Diagnostics overlay — child QLabel positioned top-right, repositioned
     // on resize.  Shown / hidden by F9, last-pushed stats kept so that a

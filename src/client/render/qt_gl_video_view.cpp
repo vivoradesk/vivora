@@ -320,15 +320,24 @@ void QtGlVideoView::update_yuv(const uint8_t* y, int y_stride,
     // 0.5 Hz at 60).  Cheap: ~4k Y samples on a 1080p frame at 16-px
     // stride.  Cycle is short enough to react to scene changes within
     // ~2 s after EWMA but slow enough to not pump on small flickers.
-    if (is_hdr_ && ++hdr_sample_counter_ >= 30) {
-        hdr_sample_counter_ = 0;
-        recompute_hdr_exposure();
+    if (is_hdr_) {
+        if (!hdr_exposure_seeded_) {
+            // First HDR frame of this stream — snap exposure straight to the
+            // target so the picture is correctly exposed immediately instead
+            // of ramping from the 50.0 default over the next second or two.
+            hdr_exposure_seeded_ = true;
+            hdr_sample_counter_ = 0;
+            recompute_hdr_exposure(/*snap=*/true);
+        } else if (++hdr_sample_counter_ >= 30) {
+            hdr_sample_counter_ = 0;
+            recompute_hdr_exposure();
+        }
     }
 
     update();  // schedule paintGL
 }
 
-void QtGlVideoView::recompute_hdr_exposure() {
+void QtGlVideoView::recompute_hdr_exposure(bool snap) {
     if (frame_w_ == 0 || frame_h_ == 0 || y_buf_.empty()) return;
     // Subsample at 16-px stride in both dimensions — for 1920x1080 that's
     // ~120x67 = ~8000 samples, plenty for a percentile estimate while
@@ -374,10 +383,15 @@ void QtGlVideoView::recompute_hdr_exposure() {
     const float target = std::clamp(HEADROOM / std::max(lin, 1e-4f),
                                     MIN_EXPOSURE, MAX_EXPOSURE);
 
+    // First frame snaps straight to target (no visible ramp); afterwards
     // EWMA: fast darken (avoid blowout flicker), slow brighten (avoid
     // pumping on transient dim frames).
-    const float alpha = (target < hdr_exposure_) ? 0.5f : 0.1f;
-    hdr_exposure_ = hdr_exposure_ * (1.0f - alpha) + target * alpha;
+    if (snap) {
+        hdr_exposure_ = target;
+    } else {
+        const float alpha = (target < hdr_exposure_) ? 0.5f : 0.1f;
+        hdr_exposure_ = hdr_exposure_ * (1.0f - alpha) + target * alpha;
+    }
 }
 
 void QtGlVideoView::initializeGL() {
