@@ -293,7 +293,11 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         k->setObjectName("keycap");
         return k;
     };
+#ifdef Q_OS_MACOS
+    footer->addWidget(keycap("⌘ F1"));
+#else
     footer->addWidget(keycap("Ctrl + F1"));
+#endif
     auto* or_lbl = new QLabel("or", this);
     or_lbl->setObjectName("hint");
     footer->addWidget(or_lbl);

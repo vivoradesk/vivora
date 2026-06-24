@@ -337,9 +337,11 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 
 - (void)keyDown:(NSEvent*)event {
     if (event.isARepeat) return; // host handles auto-repeat
-    // Ctrl+F1 (mac kVK F1 = 0x7A) toggles the in-stream control menu
-    // locally.  Eat it so the host never sees the keypress.
-    if (event.keyCode == 0x7A && (event.modifierFlags & NSEventModifierFlagControl)) {
+    // Cmd+F1 (mac kVK F1 = 0x7A) toggles the in-stream control menu locally.
+    // Cmd is the idiomatic Mac modifier; Ctrl is also accepted for parity
+    // with the Windows/Linux Ctrl+F1.  Eat it so the host never sees it.
+    if (event.keyCode == 0x7A &&
+        (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) {
         vivora::invoke_menu_hotkey(impl);
         return;
     }
@@ -349,8 +351,9 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     [self sendKey:event.keyCode down:YES];
 }
 - (void)keyUp:(NSEvent*)event {
-    if (event.keyCode == 0x7A && (event.modifierFlags & NSEventModifierFlagControl))
-        return; // Ctrl+F1 menu toggle — local, don't forward
+    if (event.keyCode == 0x7A &&
+        (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)))
+        return; // Cmd/Ctrl+F1 menu toggle — local, don't forward
     if (event.keyCode == 0x65) return; // local toggle, don't forward
     [self sendKey:event.keyCode down:NO];
 }
