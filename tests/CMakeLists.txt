@@ -33,6 +33,14 @@ target_link_libraries(noise_test PRIVATE vivora_common)
 target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME noise_test COMMAND noise_test)
 
+# Lock-free pipeline primitives (VIV-81): header-only, so the test only needs
+# a threading library.  Threads::Threads keeps it correct on Linux/macOS too.
+find_package(Threads REQUIRED)
+add_executable(lockfree_test lockfree_test.cpp)
+target_link_libraries(lockfree_test PRIVATE Threads::Threads)
+target_include_directories(lockfree_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME lockfree_test COMMAND lockfree_test)
+
 # Smoke test for vivora-relay — must be run manually with the relay
 # server running on localhost:7100.  Not registered with ctest because the
 # server isn't auto-started here; the test fails fast on missing server.
