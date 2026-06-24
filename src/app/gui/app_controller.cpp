@@ -294,9 +294,25 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     viewSessions_.push_back(std::move(vs));
     activeViews_ = static_cast<int>(viewSessions_.size());
     emit activeViewsChanged();
-    // Pre-populate the address book so the peer shows up under Recent
-    // once the session lands (real pubkey resolution happens later).
-    peers_->touchOutgoing(peerCodeOrHex, peerCodeOrHex);
+    // Pre-populate the address book so the peer shows up under Recent.
+    // When dialing by hex pubkey (e.g. clicking a Recent peer), store the
+    // derived memorable code as the display label instead of the raw hex —
+    // otherwise the entry, keyed by the pubkey, gets its nice code clobbered
+    // with 64 hex chars (VIV-76).  The code is deterministic from the pubkey,
+    // so it matches the code an incoming record already stored and the entry
+    // merges cleanly.  Dialing by code: pubkey isn't known yet, keep prior
+    // behaviour until post-connect resolution lands.
+    {
+        const std::string s = peerCodeOrHex.toStdString();
+        uint8_t pk[32];
+        if (peer_code::looks_like_hex_pubkey(s.c_str())
+            && crypto::hex_decode_32(s, pk)) {
+            peers_->touchOutgoing(peerCodeOrHex,
+                                  QString::fromStdString(peer_code::encode(pk)));
+        } else {
+            peers_->touchOutgoing(peerCodeOrHex, peerCodeOrHex);
+        }
+    }
 #else
     (void)peerCodeOrHex;
     log::warn("AppController", "Connect not yet implemented on this platform");
