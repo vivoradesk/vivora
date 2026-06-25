@@ -213,12 +213,6 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     auto last_fec_flush_time     = TimePoint{};
 
     while (true) {
-        // Drive the paced sender every iteration (VIV-82).  The loop busy-spins
-        // here between frames (capture-interval wait below), so this drains the
-        // send queue at the configured inter-packet gap with no extra thread or
-        // sleep — spreading each frame's packets instead of bursting them.
-        session.pump_sender();
-
         // GUI cooperative stop.  CLI never sets this and uses Ctrl+C.
         if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) {
             log::info("HOST", "Stop requested by controller");

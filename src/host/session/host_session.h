@@ -159,11 +159,6 @@ public:
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
 
-    // Drain due paced-sender packets (VIV-82).  Call as often as possible from
-    // the host loop — especially the idle spin between captures — so a frame's
-    // packets go out spread rather than as a burst.  No-op when pacing is off.
-    void pump_sender() { if (paced_sender_) paced_sender_->pump(); }
-
     // Send an encoded frame to ALL connected clients.
     // Returns number of packets sent (sum), or -1 if no clients.
     // fec_enabled=false bypasses FEC for this frame (used by heartbeat

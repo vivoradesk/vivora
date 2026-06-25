@@ -130,9 +130,8 @@ bool HostSession::start(uint16_t port) {
 }
 
 void HostSession::stop() {
-    // Flush any queued paced packets, then drop the sender before the socket
-    // it sends on is closed (VIV-82).
-    if (paced_sender_) paced_sender_->flush();
+    // Stop the paced send thread (joins) before closing the socket it sends
+    // on (VIV-82).
     paced_sender_.reset();
     if (socket_) {
         socket_->close();
