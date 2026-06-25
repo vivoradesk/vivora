@@ -5,6 +5,7 @@
 #include "common/net/fec_codec.h"
 #include "common/protocol/packet.h"
 #include <cstdint>
+#include <cstdlib>
 
 namespace vivora::client {
 
@@ -36,7 +37,30 @@ public:
     bool feed(const protocol::Packet& packet) { return assembler_.feed(packet); }
 
     // Pop next complete reassembled frame. Returns false if none available.
-    bool pop_frame(net::AssembledFrame& frame) { return assembler_.pop_frame(frame); }
+    //
+    // Slice grouping (VIV-82): with multi-slice encode each picture arrives as
+    // several frames (separate seq, SAME timestamp).  ffmpeg won't assemble a
+    // picture from partial access units fed across separate decode() calls, so
+    // we concatenate the slices of one picture into a single AU here and emit
+    // it when the next picture starts.  Gated by VIVORA_SLICE_GROUP; off =
+    // legacy 1:1 passthrough (no added latency).
+    bool pop_frame(net::AssembledFrame& frame) {
+        if (!slice_group_) return assembler_.pop_frame(frame);
+        net::AssembledFrame f;
+        while (assembler_.pop_frame(f)) {
+            if (!have_accum_) { accum_ = std::move(f); have_accum_ = true; continue; }
+            if (!f.heartbeat && !accum_.heartbeat &&
+                f.timestamp == accum_.timestamp) {
+                accum_.data.insert(accum_.data.end(), f.data.begin(), f.data.end());
+                accum_.keyframe = accum_.keyframe || f.keyframe;
+            } else {
+                frame = std::move(accum_);
+                accum_ = std::move(f);
+                return true;
+            }
+        }
+        return false;
+    }
 
     // Collect pending fragments that need retransmit (see FrameAssembler::collect_nacks).
     std::vector<net::NackBatch> collect_nacks(int64_t gap_ms, int64_t rate_limit_ms) {
@@ -60,6 +84,7 @@ public:
     void reset_stream() {
         assembler_.reset();
         fec_decoder_.reset();
+        have_accum_ = false;  // drop any half-grouped picture on IDR reset
     }
 
 private:
@@ -67,6 +92,15 @@ private:
     net::FecDecoder fec_decoder_;
     net::FrameAssembler assembler_;
     std::vector<std::vector<uint8_t>> recovered_scratch_;  // reused across poll() calls
+
+    // Slice grouping (VIV-82) — see pop_frame().
+    bool slice_group_ = [] {
+        const char* s = std::getenv("VIVORA_SLICE_GROUP");
+        return s && std::atoi(s) != 0;
+    }();
+    net::AssembledFrame accum_;
+    bool have_accum_ = false;
+
     uint64_t packets_received_ = 0;
     uint64_t bytes_received_ = 0;
 
