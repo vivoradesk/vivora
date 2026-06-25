@@ -162,9 +162,12 @@ bool AmfEncoder::create_encoder() {
         }
 
         // Multi-slice (VIV-82): split each frame into N independently decodable
-        // slices so a burst loss damages a localized region (recoverable by
-        // that slice's FEC) instead of the whole frame, and so the decoder can
-        // decode slices in parallel.
+        // slices in ONE output buffer (OUTPUT_MODE_FRAME).  NOTE: OUTPUT_MODE_
+        // SLICE emits each slice as a separate buffer WITH ITS OWN AUD, which
+        // the decoder reads as a picture boundary → N partial pictures → broken
+        // decode.  Per-slice send-spreading therefore needs AUD/access-unit
+        // surgery; deferred.  For now slices buy parallel decode + slice-aligned
+        // structure only.
         if (config_.num_slices > 1) {
             encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_SLICES_PER_FRAME,
                                   (amf_int64)config_.num_slices);
