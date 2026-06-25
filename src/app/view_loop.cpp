@@ -634,8 +634,9 @@ bool ViewLoopState::iter() {
             : 0.0;
         last_log_time_ = now;
         last_log_frames_ = frames_decoded_;
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms",
-            (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms());
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps",
+            (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
+            session.last_bitrate_bps() / 1000);
 
         uint64_t arrived_now = session.receiver()
                                ? session.receiver()->frames_completed()
