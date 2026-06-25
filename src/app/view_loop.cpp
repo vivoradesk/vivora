@@ -187,11 +187,16 @@ bool ViewLoopState::iter_threaded() {
     }
 
     // Decode thread reported a decode error → no-artifact IDR recovery.
-    if (decode_needs_idr_.exchange(false)) {
+    // STICKY: only clear the flag once we actually send the IDR.  Clearing it
+    // unconditionally (exchange) would drop the request whenever the throttle
+    // blocked it, leaving the decode thread waiting for a keyframe nobody asks
+    // for — a multi-second startup stall until the host's periodic IDR.
+    if (decode_needs_idr_.load(std::memory_order_acquire)) {
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
         if (since > MIN_IDR_INTERVAL_MS) {
+            decode_needs_idr_.store(false, std::memory_order_release);
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
