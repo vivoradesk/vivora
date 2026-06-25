@@ -7,6 +7,7 @@
 #include "common/protocol/stream_info.h"
 #include "host/session/host_approval_gate.h"
 #include "host/session/video_sender.h"
+#include "host/session/paced_sender.h"
 #include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
 #include "common/utils/types.h"
@@ -158,6 +159,11 @@ public:
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
 
+    // Drain due paced-sender packets (VIV-82).  Call as often as possible from
+    // the host loop — especially the idle spin between captures — so a frame's
+    // packets go out spread rather than as a burst.  No-op when pacing is off.
+    void pump_sender() { if (paced_sender_) paced_sender_->pump(); }
+
     // Send an encoded frame to ALL connected clients.
     // Returns number of packets sent (sum), or -1 if no clients.
     // fec_enabled=false bypasses FEC for this frame (used by heartbeat
@@ -262,6 +268,10 @@ private:
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<net::IUdpSocket> audio_socket_;
     std::unique_ptr<VideoSender> sender_;
+    // Decoupled paced sender (VIV-82): all sealed wire sends route through it
+    // so a frame goes out spread, not as a WiFi-dropping micro-burst.  Owns a
+    // send thread that uses socket_ — reset before socket_ in stop().
+    std::unique_ptr<PacedSender> paced_sender_;
     std::unique_ptr<AudioSender> audio_sender_;
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;

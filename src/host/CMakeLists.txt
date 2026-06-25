@@ -9,6 +9,7 @@ if(WIN32)
         capture/dxgi_capture.cpp
         encode/amf_encoder.cpp
         session/video_sender.cpp
+        session/paced_sender.cpp
         session/host_session.cpp
     )
     target_include_directories(vivora_host PRIVATE

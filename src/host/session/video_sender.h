@@ -11,6 +11,8 @@
 
 namespace vivora::host {
 
+class PacedSender;  // host/session/paced_sender.h (VIV-82)
+
 // Fragments an encoded frame and sends all packets over UDP.
 // Keeps a ring buffer of recently-sent fragments so they can be retransmitted
 // on client NACK (selective repeat). Generates XOR FEC parity packets.
@@ -27,6 +29,11 @@ public:
     static constexpr int MAX_RETX_PER_POLL = 30;
 
     explicit VideoSender(net::IUdpSocket& socket) : socket_(socket) {}
+
+    // Route all wire sends through a decoupled paced sender (VIV-82) instead
+    // of bursting straight to the socket.  Null restores the direct path
+    // (used by transport_test).
+    void set_paced_sender(PacedSender* p) { paced_ = p; }
 
     void reset_retx_budget() { retx_budget_ = MAX_RETX_PER_POLL; }
 
@@ -114,6 +121,7 @@ private:
     const std::vector<uint8_t>* find_retx(uint32_t key) const;
 
     net::IUdpSocket& socket_;
+    PacedSender*     paced_ = nullptr;  // VIV-82: when set, sends route here
 
     // Relay state.  When relay_active_, every dest passed to send_prepared
     // is ignored at the wire layer (peer is implied by the binding) and

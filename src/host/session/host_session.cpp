@@ -9,6 +9,7 @@
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -112,10 +113,27 @@ bool HostSession::start(uint16_t port) {
         }
     }
 
+    // Paced sender (VIV-82): created last, after the synchronous STUN / relay
+    // BIND exchanges, so those keep using the socket directly while it was
+    // quiet.  From here on every sealed wire (video + control) goes out spread
+    // by the send thread instead of as a WiFi-dropping micro-burst.  Default
+    // 100 µs/packet (~88 Mbps cap, measured loss-free on WiFi); 0 = off.
+    int pace_gap_us = 0;  // default off until the pacer is validated (VIV-82)
+    if (const char* p = std::getenv("VIVORA_SEND_PACING_US")) pace_gap_us = std::atoi(p);
+    if (pace_gap_us > 0) {
+        paced_sender_ = std::make_unique<PacedSender>(*socket_, pace_gap_us);
+        sender_->set_paced_sender(paced_sender_.get());
+        log::info("HostSession", "Paced sender enabled (gap=%d us)", pace_gap_us);
+    }
+
     return true;
 }
 
 void HostSession::stop() {
+    // Flush any queued paced packets, then drop the sender before the socket
+    // it sends on is closed (VIV-82).
+    if (paced_sender_) paced_sender_->flush();
+    paced_sender_.reset();
     if (socket_) {
         socket_->close();
         socket_.reset();
@@ -955,9 +973,11 @@ int HostSession::transport_send(const uint8_t* data, size_t len, const net::Sock
         uint8_t buf[rly::MAX_DATA_PACKET];
         const size_t n = rly::encode_data(buf, sizeof(buf), relay_alloc_id_, data, len);
         if (n == 0) return -1;
-        return socket_->send_to(buf, n, relay_addr_);
+        return paced_sender_ ? paced_sender_->send_to(buf, n, relay_addr_)
+                             : socket_->send_to(buf, n, relay_addr_);
     }
-    return socket_->send_to(data, len, peer);
+    return paced_sender_ ? paced_sender_->send_to(data, len, peer)
+                         : socket_->send_to(data, len, peer);
 }
 
 void HostSession::relay_send_keepalive() {

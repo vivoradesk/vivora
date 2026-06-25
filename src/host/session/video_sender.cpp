@@ -1,4 +1,5 @@
 #include "host/session/video_sender.h"
+#include "host/session/paced_sender.h"
 #include "common/net/relay_protocol.h"
 #include <cstring>
 #include "common/crypto/packet_crypto.h"
@@ -124,9 +125,11 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            r = socket_.send_to(wrap, wn, relay_addr_);
+            r = paced_ ? paced_->send_to(wrap, wn, relay_addr_)
+                       : socket_.send_to(wrap, wn, relay_addr_);
         } else {
-            r = socket_.send_to(out_data, out_len, dest);
+            r = paced_ ? paced_->send_to(out_data, out_len, dest)
+                       : socket_.send_to(out_data, out_len, dest);
         }
         if (r < 0) {
             // Throttled — see PosixUdpSocket::send_to.  The socket layer
@@ -203,9 +206,11 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            r = socket_.send_to(wrap, wn, relay_addr_);
+            r = paced_ ? paced_->send_to(wrap, wn, relay_addr_)
+                       : socket_.send_to(wrap, wn, relay_addr_);
         } else {
-            r = socket_.send_to(out_data, out_len, dest);
+            r = paced_ ? paced_->send_to(out_data, out_len, dest)
+                       : socket_.send_to(out_data, out_len, dest);
         }
         if (r < 0) continue;
         bytes_sent_ += r;
