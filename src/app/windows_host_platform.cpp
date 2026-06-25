@@ -5,6 +5,7 @@
 #include "common/codec/bitrate_controller.h"
 #include "common/utils/log.h"
 #include <chrono>
+#include <cstdlib>
 #include <utility>
 
 bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
@@ -78,6 +79,12 @@ bool WindowsHostPlatform::start_encoder() {
     // trickle off the wire.
     cfg.idr_period  = 1800;
     cfg.codec       = saved_codec_;
+    // Multi-slice output (VIV-82): localizes burst loss and lets the decoder
+    // parallelize.  Opt-in via VIVORA_SLICES while we validate; default 1.
+    if (const char* s = std::getenv("VIVORA_SLICES")) {
+        int n = std::atoi(s);
+        if (n > 1) cfg.num_slices = static_cast<uint32_t>(n);
+    }
     if (dxgi_) cfg.input_format = dxgi_->get_capture_format();
 
     if (!encoder_->init(cfg, dxgi_ ? dxgi_->get_device() : nullptr)) {

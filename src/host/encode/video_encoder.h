@@ -31,6 +31,8 @@ struct EncoderConfig {
     uint32_t fps = 60;
     uint32_t bitrate_bps = 15'000'000;  // 15 Mbps default
     uint32_t idr_period = 120;          // IDR every N frames (0 = auto)
+    uint32_t num_slices = 1;            // slices per frame (>1: burst-loss
+                                        // localization + parallel decode, VIV-82)
     bool low_latency = true;
     VideoCodec codec = VideoCodec::HEVC;
 #ifdef VIVORA_WINDOWS

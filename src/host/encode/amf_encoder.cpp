@@ -161,6 +161,15 @@ bool AmfEncoder::create_encoder() {
             encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_GOP_SIZE, (amf_int64)config_.idr_period);
         }
 
+        // Multi-slice (VIV-82): split each frame into N independently decodable
+        // slices so a burst loss damages a localized region (recoverable by
+        // that slice's FEC) instead of the whole frame, and so the decoder can
+        // decode slices in parallel.
+        if (config_.num_slices > 1) {
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_SLICES_PER_FRAME,
+                                  (amf_int64)config_.num_slices);
+        }
+
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INPUT_FULL_RANGE_COLOR, true);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_FULL_RANGE_COLOR,
                               (amf_int64)(hdr ? AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_STUDIO
@@ -177,6 +186,12 @@ bool AmfEncoder::create_encoder() {
 
         if (config_.idr_period > 0) {
             encoder_->SetProperty(AMF_VIDEO_ENCODER_IDR_PERIOD, (amf_int64)config_.idr_period);
+        }
+
+        // Multi-slice (VIV-82) — see HEVC branch above.
+        if (config_.num_slices > 1) {
+            encoder_->SetProperty(AMF_VIDEO_ENCODER_SLICES_PER_FRAME,
+                                  (amf_int64)config_.num_slices);
         }
 
         // H.264 uses single FullRangeColor bool (deprecated alias, but only one exposed).
