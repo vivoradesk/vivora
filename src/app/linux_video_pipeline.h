@@ -52,9 +52,14 @@ private:
     client::QtGlVideoView*                  view_;
     std::unique_ptr<client::FfmpegDecoder>  dec_;
     Slot                                    slots_[kSlots];
-    // Free slot indices.  Producer = main (recycle), consumer = decode (poll).
+    // Free slot indices.  Strict SPSC: the ONLY producer is the main thread
+    // (recycle), the ONLY consumer is the decode thread (poll_frame).
     util::SpscRing<uint32_t, 8>             free_;
     bool                                    free_primed_ = false;
+    // A slot the decode thread has popped but not yet filled.  Held across
+    // empty polls so we never push back into free_ from the decode thread
+    // (that would make it a second producer and corrupt the SPSC ring).
+    uint32_t                                reserved_idx_ = FrameHandle::kInvalid;
 };
 
 } // namespace vivora

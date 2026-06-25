@@ -36,26 +36,29 @@ SubmitStatus LinuxVideoPipeline::submit(const uint8_t* data, size_t len,
 
 PollStatus LinuxVideoPipeline::poll_frame(FrameHandle& out) {
     if (!dec_) return PollStatus::Empty;
-    uint32_t idx;
-    // Acquire a slot first.  If none is free, report back-pressure WITHOUT
-    // consuming a decoded frame (it stays buffered in the decoder); the main
-    // thread will recycle a slot and we retry.
-    if (!free_.try_pop(idx)) return PollStatus::PoolFull;
+    // Reserve a slot for this attempt and HOLD it across empty polls — pushing
+    // it back into free_ here would make the decode thread a second producer
+    // and corrupt the SPSC free-list (the cause of the post-N-frame freeze).
+    if (reserved_idx_ == FrameHandle::kInvalid) {
+        uint32_t idx;
+        if (!free_.try_pop(idx)) return PollStatus::PoolFull;  // back-pressure
+        reserved_idx_ = idx;
+    }
 
     client::FfmpegDecoder::YuvFrame f;
     if (!dec_->get_frame(f)) {
-        free_.try_push(idx);  // nothing decoded — return the slot
-        return PollStatus::Empty;
+        return PollStatus::Empty;  // nothing decoded — keep reserved_idx_
     }
 
-    Slot& s = slots_[idx];
+    Slot& s = slots_[reserved_idx_];
     s.w  = f.width;  s.h  = f.height;
     s.ys = f.stride[0]; s.us = f.stride[1]; s.vs = f.stride[2];
     s.hdr = dec_->is_hdr();
     s.y.assign(f.plane[0], f.plane[0] + static_cast<size_t>(f.stride[0]) * f.height);
     s.u.assign(f.plane[1], f.plane[1] + static_cast<size_t>(f.stride[1]) * (f.height / 2));
     s.v.assign(f.plane[2], f.plane[2] + static_cast<size_t>(f.stride[2]) * (f.height / 2));
-    out.id = idx;
+    out.id = reserved_idx_;
+    reserved_idx_ = FrameHandle::kInvalid;  // consumed into Q2
     return PollStatus::Produced;
 }
 

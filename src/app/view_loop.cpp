@@ -70,6 +70,7 @@ void ViewLoopState::decode_thread_proc() {
                                             cf.timestamp, cf.keyframe, cf.seq);
         if (st == SubmitStatus::Rejected) {
             if (cf.heartbeat) continue;  // harmless — next heartbeat replaces
+            session_.note_decoder_rejected();
             got_kf = false;
             pipeline_->reinit_decoder();
             decode_needs_idr_.store(true, std::memory_order_release);
@@ -80,6 +81,7 @@ void ViewLoopState::decode_thread_proc() {
             FrameHandle h;
             PollStatus ps = pipeline_->poll_frame(h);
             if (ps != PollStatus::Produced) break;     // Empty or PoolFull
+            session_.note_decoder_accepted();
             if (!q2_->try_push(h)) pipeline_->recycle(h);  // Q2 full: drop newest
         }
     }
