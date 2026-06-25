@@ -152,13 +152,16 @@ bool VideoSender::flush_pending_fec(uint16_t frame_seq, uint32_t timestamp) {
     return true;
 }
 
-int VideoSender::send_prepared(const net::SocketAddr& dest,
-                               crypto::CipherState* send_cs) {
+int VideoSender::send_wire_range(const std::vector<std::vector<uint8_t>>& wires,
+                                 size_t begin, size_t end,
+                                 const net::SocketAddr& dest,
+                                 crypto::CipherState* send_cs) {
     // Max sealed wire: ~1460B (FEC parity + 24B AEAD).  2048 is plenty and
     // lives on the stack so there's no allocation on the hot path.
     uint8_t sealed[2048];
     int sent = 0;
-    for (const auto& wire : prepared_wires_) {
+    for (size_t wi = begin; wi < end; ++wi) {
+        const auto& wire = wires[wi];
         const uint8_t* out_data;
         size_t         out_len;
         if (send_cs) {
@@ -201,7 +204,7 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             if (now - last_log >= std::chrono::seconds(1)) {
                 log::error("VideoSender",
                            "send_to failed at packet %d/%zu (x%llu suppressed)",
-                           sent, prepared_wires_.size(),
+                           sent, end,
                            static_cast<unsigned long long>(suppressed));
                 last_log = now;
                 suppressed = 0;
@@ -214,6 +217,12 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
         sent++;
     }
     return sent;
+}
+
+int VideoSender::send_prepared(const net::SocketAddr& dest,
+                               crypto::CipherState* send_cs) {
+    return send_wire_range(prepared_wires_, 0, prepared_wires_.size(),
+                           dest, send_cs);
 }
 
 int VideoSender::send_frame(const uint8_t* data, size_t data_len,

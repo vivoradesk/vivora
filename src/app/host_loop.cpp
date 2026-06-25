@@ -213,6 +213,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     auto last_fec_flush_time     = TimePoint{};
 
     while (true) {
+        // Drain the next chunk of any keyframe being send-paced (VIV-82 B).
+        // The loop spins fast between captures, so this clock-gated call spreads
+        // a big keyframe over several ms without any sleep.
+        session.drain_kf_pacer();
+
         // GUI cooperative stop.  CLI never sets this and uses Ctrl+C.
         if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) {
             log::info("HOST", "Stop requested by controller");

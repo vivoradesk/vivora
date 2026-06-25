@@ -62,6 +62,20 @@ public:
     int send_prepared(const net::SocketAddr& dest,
                       crypto::CipherState* send_cs = nullptr);
 
+    // Send a RANGE [begin, end) of an explicit wire vector (seal per dest,
+    // relay-wrap as needed).  Used by the keyframe send-pacer (VIV-82), which
+    // drains a copy of the prepared wires a chunk per host-loop tick.
+    int send_wire_range(const std::vector<std::vector<uint8_t>>& wires,
+                        size_t begin, size_t end,
+                        const net::SocketAddr& dest,
+                        crypto::CipherState* send_cs);
+
+    // The wires produced by the last prepare_frame() — the pacer copies these
+    // for a keyframe so the next P-frame's prepare_frame() can overwrite them.
+    const std::vector<std::vector<uint8_t>>& prepared_wires() const {
+        return prepared_wires_;
+    }
+
     // Force-emit parity for the in-progress FEC group, even if it hasn't
     // reached K data shards yet.  Replaces prepared_wires_ with parity-only
     // packets, which the caller then ships via send_prepared().  Used on

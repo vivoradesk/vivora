@@ -57,6 +57,12 @@ bool HostSession::start(uint16_t port) {
             log::info("HostSession", "Per-frame pooled FEC enabled (VIV-82)");
         }
     }
+    if (const char* p = std::getenv("VIVORA_KF_PACE")) {
+        if (std::atoi(p) != 0) {
+            kf_pace_enabled_ = true;
+            log::info("HostSession", "Keyframe send-pacing enabled (VIV-82)");
+        }
+    }
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();
@@ -341,6 +347,23 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     // FEC plan is shared but the on-wire bytes differ per destination.
     sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe, fec_enabled);
 
+    // Keyframe send-pacing (VIV-82 option B): a big keyframe goes out a chunk
+    // per host-loop tick instead of one burst.  P-frames (small) send now.
+    if (kf_pace_enabled_ && keyframe && fec_enabled &&
+        sender_->prepared_wires().size() > KF_PACE_CHUNK) {
+        kf_pacer_.wires = sender_->prepared_wires();   // copy before next P-frame
+        kf_pacer_.dests.clear();
+        for (auto& [addr, client] : clients_) {
+            if (client.handshake_complete && client.approved)
+                kf_pacer_.dests.push_back(addr);
+        }
+        kf_pacer_.pos = 0;
+        kf_pacer_.last_chunk = {};   // first chunk fires immediately
+        kf_pacer_.active = true;
+        drain_kf_pacer();            // emit the first chunk now
+        return static_cast<int>(kf_pacer_.wires.size());
+    }
+
     int total = 0;
     for (auto& [addr, client] : clients_) {
         if (!client.handshake_complete) continue;
@@ -349,6 +372,31 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
         if (n > 0) total += n;
     }
     return total;
+}
+
+void HostSession::drain_kf_pacer() {
+    if (!kf_pacer_.active || !sender_) return;
+    const auto now = Clock::now();
+    if (kf_pacer_.last_chunk.time_since_epoch().count() != 0 &&
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now - kf_pacer_.last_chunk).count() < KF_PACE_GAP_US) {
+        return;  // chunk interval not elapsed yet
+    }
+    const size_t begin = kf_pacer_.pos;
+    const size_t end   = std::min(begin + KF_PACE_CHUNK, kf_pacer_.wires.size());
+    for (const auto& addr : kf_pacer_.dests) {
+        auto it = clients_.find(addr);
+        if (it == clients_.end() || !it->second.approved) continue;
+        sender_->send_wire_range(kf_pacer_.wires, begin, end, addr,
+                                 &it->second.send_cs);
+    }
+    kf_pacer_.pos = end;
+    kf_pacer_.last_chunk = now;
+    if (kf_pacer_.pos >= kf_pacer_.wires.size()) {
+        kf_pacer_.active = false;
+        kf_pacer_.wires.clear();
+        kf_pacer_.dests.clear();
+    }
 }
 
 int HostSession::flush_video_fec(uint16_t frame_seq, uint32_t timestamp) {

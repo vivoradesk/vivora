@@ -159,6 +159,11 @@ public:
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
 
+    // Drain the next chunk of a keyframe being send-paced (VIV-82 option B).
+    // Call every host-loop tick; clock-gated, sends nothing until the chunk
+    // interval elapses.  No-op when no keyframe is pacing or pacing is off.
+    void drain_kf_pacer();
+
     // Send an encoded frame to ALL connected clients.
     // Returns number of packets sent (sum), or -1 if no clients.
     // fec_enabled=false bypasses FEC for this frame (used by heartbeat
@@ -268,6 +273,22 @@ private:
     // send thread that uses socket_ — reset before socket_ in stop().
     std::unique_ptr<PacedSender> paced_sender_;
     std::unique_ptr<AudioSender> audio_sender_;
+
+    // Keyframe send-pacer (VIV-82 option B): a big keyframe is drained a chunk
+    // at a time across host-loop ticks (clock-gated, no sleep) so it doesn't go
+    // out as one ~100-packet burst the WiFi AP drops wholesale.  P-frames send
+    // immediately.  Gated by VIVORA_KF_PACE.
+    struct KfPacer {
+        std::vector<std::vector<uint8_t>> wires;   // copy of prepared keyframe wires
+        std::vector<net::SocketAddr>      dests;   // clients at enqueue time
+        size_t            pos = 0;
+        TimePoint         last_chunk{};
+        bool              active = false;
+    };
+    KfPacer kf_pacer_;
+    bool    kf_pace_enabled_ = false;
+    static constexpr size_t  KF_PACE_CHUNK  = 8;     // packets per chunk
+    static constexpr int64_t KF_PACE_GAP_US = 1000;  // ~1 ms between chunks
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
 
