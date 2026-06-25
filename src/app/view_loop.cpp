@@ -200,6 +200,7 @@ bool ViewLoopState::iter_threaded() {
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
+            log::warn("VIEW", "decode-error IDR requested (threaded)");
         }
     }
 
@@ -244,8 +245,9 @@ bool ViewLoopState::iter_threaded() {
             ? (frames_decoded_ - last_log_frames_) / window_sec : 0.0;
         last_log_time_ = now_check;
         last_log_frames_ = frames_decoded_;
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms (threaded)",
-                  (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms());
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps (threaded)",
+                  (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
+                  session.last_bitrate_bps() / 1000);
 
         StatsView v{};
         v.fps          = static_cast<float>(inst_fps);
