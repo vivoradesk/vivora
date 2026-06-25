@@ -6,6 +6,8 @@
 #include <QString>
 #include <QSurfaceFormat>
 
+#include <cstdlib>
+#include <cstring>
 #include <utility>
 
 bool LinuxViewPlatform::init(int argc, char* argv[],
@@ -46,6 +48,15 @@ bool LinuxViewPlatform::init(int argc, char* argv[],
     window_->resize(1280, 720);
     window_->show();
     view_->setFocus();
+
+    // Threaded pipeline (VIV-81): when enabled, decode runs on its own thread
+    // through this pipeline and presents into view_; the legacy decoder_ path
+    // is unused.  The view loop drives submit/poll/present.
+    const char* pl = std::getenv("VIVORA_PIPELINE");
+    if (pl && std::strcmp(pl, "threaded") == 0) {
+        pipeline_ = std::make_unique<vivora::LinuxVideoPipeline>(view_);
+        vivora::log::info("VIEW", "Linux threaded video pipeline enabled");
+    }
     return true;
 }
 

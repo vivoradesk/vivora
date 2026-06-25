@@ -2,6 +2,7 @@
 #ifdef VIVORA_LINUX
 
 #include "app/view_platform.h"
+#include "app/linux_video_pipeline.h"
 #include "client/decode/ffmpeg_decoder.h"
 #include "client/render/qt_gl_video_view.h"
 
@@ -26,6 +27,7 @@ public:
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
+    vivora::IVideoPipeline* video_pipeline() override { return pipeline_.get(); }
     void upload_cursor_shape(const vivora::protocol::CursorShapeMessage& shape) override;
     void update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) override;
     void shutdown() override;
@@ -35,6 +37,9 @@ private:
     std::unique_ptr<QMainWindow>            window_;
     vivora::client::QtGlVideoView*        view_ = nullptr;  // owned by window_
     std::unique_ptr<vivora::client::FfmpegDecoder> decoder_;
+    // Threaded pipeline (VIV-81) — created only when VIVORA_PIPELINE=threaded;
+    // shares the view_ for present().  Null on the legacy path.
+    std::unique_ptr<vivora::LinuxVideoPipeline> pipeline_;
 
     // StreamInfo can arrive before the first decoded frame or before the
     // window is fully initialized — stash it and apply when ready.
