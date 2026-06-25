@@ -49,6 +49,14 @@ bool HostSession::start(uint16_t port) {
     socket_->set_recvbuf(1024 * 1024);
 
     sender_ = std::make_unique<VideoSender>(*socket_);
+    // Per-frame pooled FEC (VIV-82): one RS group per frame, parity as a % of
+    // the frame — burst-resilient.  Opt-in while we validate; default legacy.
+    if (const char* p = std::getenv("VIVORA_FEC_PERFRAME")) {
+        if (std::atoi(p) != 0) {
+            sender_->set_per_frame_fec(true);
+            log::info("HostSession", "Per-frame pooled FEC enabled (VIV-82)");
+        }
+    }
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();

@@ -35,6 +35,12 @@ enum PacketFlags : uint8_t {
                              // must not count it toward adaptive-framerate
                              // reject/drop metrics or trigger an IDR cycle
                              // on decode failure (next heartbeat replaces).
+    FLAG_FEC_RANGED = 0x40,  // FEC parity uses the ranged header (VIV-82):
+                             // group data packets are a CONSECUTIVE key range
+                             // [base_key .. base_key+K-1], so the parity carries
+                             // only base_key (4B) instead of a K-long key+len
+                             // list — lets K span a whole frame (pooled parity)
+                             // without the parity packet exceeding the MTU.
 };
 
 // Wire format: 10 bytes header

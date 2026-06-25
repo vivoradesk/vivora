@@ -390,10 +390,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             // saturates WiFi and causes the loss-spirals we observed.
             uint32_t encoder_bps = br;
             if (auto* s = session.sender()) {
-                uint8_t k = s->fec_group_size();
-                uint8_t m = s->fec_parity_count();
-                if (k > 0) encoder_bps = static_cast<uint32_t>(
-                    static_cast<uint64_t>(br) * k / (k + m));
+                // Carve FEC parity out of the wire budget.  pct = overhead %
+                // (per-frame mode: the pooled %; legacy: 100*M/K) — the formula
+                // below is identical to the old k/(k+m) when pct = 100*M/K.
+                uint32_t pct = s->fec_overhead_pct();
+                encoder_bps = static_cast<uint32_t>(
+                    static_cast<uint64_t>(br) * 100 / (100 + pct));
             }
             // Floor — at FAILURE_DRIVEN_M_MAX=30 with K=10 the carve-out
             // takes the encoder to 25% of wire (e.g. 250 kbps from a

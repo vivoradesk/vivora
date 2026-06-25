@@ -29,6 +29,12 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
 {
     prepared_wires_.clear();
 
+    if (per_frame_fec_) {
+        prepare_frame_per_frame(data, data_len, frame_seq, timestamp,
+                                keyframe, fec_enabled);
+        return;
+    }
+
     // A keyframe spans ~40 UDP fragments; losing a single FEC group worth
     // of packets stalls the stream until the next IDR retry.  Flush the
     // in-progress P-frame group at current M, then temporarily boost M
@@ -82,6 +88,59 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
         fec_encoder_.set_parity_count(saved_m);
     }
 
+    packets_sent_ += static_cast<uint64_t>(frag_idx);
+}
+
+void VideoSender::prepare_frame_per_frame(const uint8_t* data, size_t data_len,
+                                          uint16_t frame_seq, uint32_t timestamp,
+                                          bool keyframe, bool fec_enabled)
+{
+    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp,
+                                        keyframe, /*heartbeat=*/!fec_enabled);
+    const int N = static_cast<int>(packets.size());
+    uint16_t frag_idx = 0;
+
+    if (!fec_enabled) {
+        // Heartbeat: no parity — a lost one is replaced by the next ~16ms later.
+        for (auto& pkt : packets) {
+            prepared_wires_.push_back(pkt.serialize());
+            ++frag_idx;
+        }
+        packets_sent_ += static_cast<uint64_t>(frag_idx);
+        return;
+    }
+
+    // Pool parity over the whole frame: M = pct% of K, so a contiguous burst is
+    // covered by the frame's shared redundancy instead of overflowing one small
+    // fixed-K group.  Keyframes take the max (losing one kills the whole GOP).
+    // GF(256) caps a group at K+M <= 255, so split large frames into groups.
+    int pct = current_fec_pct();
+    if (keyframe && pct < 75) pct = 75;
+    // Ranged FEC keeps the parity packet a fixed size, so K can span the whole
+    // frame (pooled parity).  Cap K so K + M stays within GF(256)'s 255 shards
+    // at this parity %: K*(1 + pct/100) <= 255.  Bigger frames split.
+    const int MAX_K = (255 * 100) / (100 + pct);
+
+    int idx = 0;
+    while (idx < N) {
+        const int K = std::min(N - idx, MAX_K);
+        int M = (K * pct + 99) / 100;          // ceil(K * pct / 100)
+        if (M < 1) M = 1;
+        if (K + M > 255) M = 255 - K;
+        fec_encoder_.set_group_size(static_cast<uint8_t>(K));
+        fec_encoder_.set_parity_count(static_cast<uint8_t>(M));
+
+        for (int j = 0; j < K; ++j) {
+            auto wire = packets[idx + j].serialize();
+            auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
+                                               frame_seq, timestamp);
+            store_retx(retx_key(frame_seq, frag_idx), wire);
+            prepared_wires_.push_back(std::move(wire));
+            for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+            ++frag_idx;
+        }
+        idx += K;
+    }
     packets_sent_ += static_cast<uint64_t>(frag_idx);
 }
 

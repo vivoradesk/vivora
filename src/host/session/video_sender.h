@@ -95,6 +95,22 @@ public:
     uint8_t fec_parity_count() const { return fec_encoder_.parity_count(); }
     float last_loss_rate() const { return last_loss_rate_; }
 
+    // Per-frame pooled FEC (VIV-82): one RS group per frame with parity as a
+    // PERCENTAGE of the frame (pooled, burst-resilient) instead of fixed-K=10
+    // rolling groups.  Gated; off = legacy behaviour.
+    void set_per_frame_fec(bool on) { per_frame_fec_ = on; fec_encoder_.set_ranged(on); }
+    bool per_frame_fec() const { return per_frame_fec_; }
+
+    // Current redundancy overhead as a percentage — used by the host-loop wire
+    // carve-out (encoder_bps = wire * 100 / (100 + pct)).  Per-frame mode: the
+    // steady percentage; legacy: 100*M/K (equivalent to the old K/(K+M) carve).
+    uint32_t fec_overhead_pct() const {
+        if (per_frame_fec_) return static_cast<uint32_t>(current_fec_pct());
+        uint8_t k = fec_encoder_.group_size();
+        uint8_t m = fec_encoder_.parity_count();
+        return k ? static_cast<uint32_t>(100u * m / k) : 0;
+    }
+
     // Feed RTT for proactive K lowering on WiFi stalls.
     void on_rtt(double rtt_ms);
 
@@ -113,6 +129,12 @@ private:
     static uint32_t retx_key(uint16_t seq, uint16_t frag) {
         return (static_cast<uint32_t>(seq) << 16) | frag;
     }
+
+    // Per-frame pooled FEC packetization (VIV-82): one RS group per frame
+    // (split into <=255-packet groups), parity = current_fec_pct()% of K.
+    void prepare_frame_per_frame(const uint8_t* data, size_t data_len,
+                                 uint16_t frame_seq, uint32_t timestamp,
+                                 bool keyframe, bool fec_enabled);
 
     void store_retx(uint32_t key, const std::vector<uint8_t>& wire);
     // Linear-scan lookup over the ring.  RETX_BUFFER_CAPACITY (2048) element
@@ -167,6 +189,15 @@ private:
     uint64_t bytes_sent_ = 0;
     uint64_t retransmits_ = 0;
     float last_loss_rate_ = 0.0f;
+
+    // Per-frame FEC (VIV-82).  current_fec_pct() maps the adaptive M ladder
+    // (steady_m_) to a redundancy percentage: ~25% floor, ramping to a 75% cap
+    // as failure-driven M climbs under burst loss.
+    bool per_frame_fec_ = false;
+    int current_fec_pct() const {
+        int p = static_cast<int>(steady_m_) * 10;
+        return p < 25 ? 25 : (p > 75 ? 75 : p);
+    }
 
     // Prepared wire packets (data + FEC) ready for send_prepared().
     std::vector<std::vector<uint8_t>> prepared_wires_;

@@ -39,6 +39,13 @@ public:
     uint8_t group_size()   const { return k_; }
     uint8_t parity_count() const { return m_; }
 
+    // Ranged parity header (VIV-82): emit base_key instead of the K-long
+    // key+len list, so a group's K can span a whole frame (pooled parity)
+    // without the parity packet exceeding the MTU.  Requires the group's data
+    // packets to have CONSECUTIVE keys (true for per-frame grouping).
+    void set_ranged(bool r) { ranged_ = r; }
+    bool ranged() const { return ranged_; }
+
     // Accept one data packet.  Returns M parity wire packets when the group
     // just closed (count reached K), otherwise an empty vector.
     std::vector<std::vector<uint8_t>> feed(
@@ -70,6 +77,7 @@ private:
     std::vector<uint32_t>             pkt_keys_;
     std::vector<uint16_t>             pkt_lens_;
     uint8_t                           count_ = 0;
+    bool                              ranged_ = false;
 };
 
 // ---- Decoder (client side) ------------------------------------------------
@@ -103,8 +111,10 @@ private:
     struct FecGroup {
         uint8_t  k = 0;
         uint8_t  m = 0;
+        bool     ranged = false;  // VIV-82: keys are base_key+j; lens come from
+                                  // each recovered packet's own header
         std::vector<uint32_t>             pkt_keys;    // [k]
-        std::vector<uint16_t>             pkt_lens;    // [k]
+        std::vector<uint16_t>             pkt_lens;    // [k] (unused when ranged)
         std::vector<std::vector<uint8_t>> data_shards;   // [k]  (empty = missing)
         std::vector<std::vector<uint8_t>> parity_shards; // [m]  (empty = missing)
         uint8_t  received_data   = 0;
