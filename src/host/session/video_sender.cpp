@@ -383,6 +383,23 @@ void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
     uint8_t target_m = std::max(loss_m, failure_driven_m_);
     if (target_m > FAILURE_DRIVEN_M_MAX) target_m = FAILURE_DRIVEN_M_MAX;
 
+    // Cap FEC overhead as a % of the data group.  Without this the legacy path
+    // (100*M/K, uncapped) let M ramp to 20-30 = 200-300% overhead, carving the
+    // encoder down to a third of the wire (4M video on a 12M wire) — and it
+    // STILL didn't stop the bursts.  Blanket parity past ~50% is wasteful;
+    // bigger bursts are NACK's job.  Tunable via VIVORA_FEC_MAX_PCT (VIV-82).
+    static const int max_overhead_pct = [] {
+        const char* e = std::getenv("VIVORA_FEC_MAX_PCT");
+        int v = e ? std::atoi(e) : 50;
+        return v < 10 ? 10 : (v > 200 ? 200 : v);
+    }();
+    const uint8_t k = fec_encoder_.group_size();
+    if (k > 0) {
+        int cap = k * max_overhead_pct / 100;
+        if (cap < 1) cap = 1;
+        if (target_m > cap) target_m = static_cast<uint8_t>(cap);
+    }
+
     // Use the tracked steady-state M rather than whatever the encoder
     // currently has — keyframe boost temporarily raises the encoder's M
     // for its own groups, and the RTT lock can pin it higher still.
