@@ -287,8 +287,13 @@ public:
         } else {
             // Loss ≤ 2% — channel healthy, hold or recover.
             high_loss_streak_ = 0;
-            // Only count as "stable" for recovery if loss < 1.5%.
-            if (loss_pending_ < 0.015) ++stable_cycles_;
+            // Count as "stable" for recovery for any sub-cut loss.  A WiFi link
+            // with ~1.5-1.8% baseline loss that FEC fully recovers (failed=0)
+            // used to sit in a dead zone — above the old 1.5% stable threshold
+            // but below the 2% cut threshold — so recovery never accumulated
+            // and the bitrate stuck at ~6 Mbps wire (VIV-82).  Recoverable loss
+            // below the cut threshold must not block the climb.
+            if (loss_pending_ < 0.02) ++stable_cycles_;
             else stable_cycles_ = 0;
             loss_pending_ = 0.0;
 
