@@ -257,24 +257,36 @@ public:
         uint32_t next;
         if (manual_target_ != 0) {
             next = base;
-        } else if (loss_pending_ > 0.08) {
-            // Severe loss (>8%) — aggressive cut.
-            next = static_cast<uint32_t>(current_bps_ * 0.5);
-            if (next < adapt_floor) next = adapt_floor;
-            on_cut();
-        } else if (loss_pending_ > 0.04) {
-            // Heavy loss (4-8%) — FEC overloaded, strong cut.
-            next = static_cast<uint32_t>(current_bps_ * 0.7);
-            if (next < adapt_floor) next = adapt_floor;
-            on_cut();
         } else if (loss_pending_ > 0.02) {
-            // Early loss (2-4%) — FEC still handling it, but start
-            // backing off before retx storm and cascading degradation.
-            next = static_cast<uint32_t>(current_bps_ * 0.85);
+            // Loss above the gentle floor.  A SINGLE high-loss cycle is usually
+            // a transient WiFi burst that FEC/NACK already recovered (drop stays
+            // ~0) — cratering the bitrate 15→6 on it, then slowly climbing back
+            // into the next burst, is exactly the "doesn't hold high" behaviour
+            // (VIV-82).  So the first high-loss cycle only trims gently and
+            // keeps the climb alive; the full cut + recovery penalty applies
+            // only once loss is SUSTAINED across cycles (real congestion).
+            ++high_loss_streak_;
+            double mult;
+            if (high_loss_streak_ < HIGH_LOSS_SUSTAIN) {
+                mult = 0.92;                      // transient burst — gentle trim
+            } else if (loss_pending_ > 0.08) {
+                mult = 0.5;                       // sustained severe
+            } else if (loss_pending_ > 0.04) {
+                mult = 0.7;                       // sustained heavy
+            } else {
+                mult = 0.85;                      // sustained early
+            }
+            next = static_cast<uint32_t>(current_bps_ * mult);
             if (next < adapt_floor) next = adapt_floor;
-            on_cut();
+            if (high_loss_streak_ >= HIGH_LOSS_SUSTAIN) {
+                on_cut();                         // penalize recovery: real congestion
+            } else {
+                loss_pending_  = 0.0;             // transient: consume, keep climbing
+                stable_cycles_ = 0;
+            }
         } else {
             // Loss ≤ 2% — channel healthy, hold or recover.
+            high_loss_streak_ = 0;
             // Only count as "stable" for recovery if loss < 1.5%.
             if (loss_pending_ < 0.015) ++stable_cycles_;
             else stable_cycles_ = 0;
@@ -333,10 +345,12 @@ private:
     static constexpr uint32_t RECOVERY_DIVISOR_BASE = 100; // +1% of default per cycle
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
     static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
+    static constexpr int      HIGH_LOSS_SUSTAIN     = 2;     // cycles of high loss before a full cut
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;
     uint32_t manual_target_ = 0;       // 0 = unset
+    int      high_loss_streak_ = 0;    // consecutive >2% loss cycles (transient vs sustained)
     uint32_t current_bps_   = 0;
     uint32_t stable_cycles_ = 0;       // consecutive adapt cycles with loss < 3%
     double   loss_pending_  = 0.0;     // max loss since last adaptation; consumed after cut
