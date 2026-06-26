@@ -359,22 +359,25 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             bitrate_ctl.set_probe_bandwidth(session.probe_bw_bps());
         }
 
-        // Feed telemetry to bitrate controller.  Drive it off EFFECTIVE
-        // (post-FEC/NACK) loss — frames the client actually failed to deliver.
-        // The raw FEC loss_rate is badly inflated by reordering / small per-frame
-        // groups (it counts packets "missing" at group-resolution that then
-        // arrive late or recover): the client reported 9-80% "loss" with FEC
-        // total_failed ~0 and drop ~0, which pinned the bitrate at ~6 Mbps on a
-        // gigabit link.  Only genuinely undelivered frames should back us off
-        // (VIV-82).  Now that the VAAPI false-positive reject churn is fixed,
-        // effective loss sits at ~0 on a clean link so the controller can ramp.
+        // Feed telemetry to bitrate controller.  Loss signal = client FEC loss
+        // (channel loss before recovery) maxed with host retx rate.  (VIV-82
+        // tried post-FEC "effective" loss to dodge the inflated metric, but it
+        // probed up, choked, and oscillated/floored at ~6 Mbps with periodic
+        // dips — worse than stable raw-loss.  Reverted; the metric fix belongs
+        // in the FEC loss accounting, not the controller.)
         bitrate_ctl.on_rtt(session.rtt_ms());
         {
-            double loss_signal = session.last_effective_loss();
-            if (session.sender()) {  // keep the retx cursor current
+            double loss_signal = session.last_loss_rate();
+            if (session.sender()) {
+                uint64_t cur_retx = session.sender()->retransmits();
                 uint64_t cur_pkts = session.sender()->packets_sent();
-                if (cur_pkts - last_pkts_sample >= 20) {
-                    last_retx_sample = session.sender()->retransmits();
+                uint64_t d_retx = cur_retx - last_retx_sample;
+                uint64_t d_pkts = cur_pkts - last_pkts_sample;
+                if (d_pkts >= 20) {
+                    double retx_ratio = static_cast<double>(d_retx)
+                                      / static_cast<double>(d_pkts);
+                    if (retx_ratio > loss_signal) loss_signal = retx_ratio;
+                    last_retx_sample = cur_retx;
                     last_pkts_sample = cur_pkts;
                 }
             }
