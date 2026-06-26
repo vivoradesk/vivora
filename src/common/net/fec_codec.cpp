@@ -677,29 +677,6 @@ void FecDecoder::reset() {
     ewma_loss_ = 0.0f;
 }
 
-void FecDecoder::collect_nack_keys(std::vector<uint32_t>& out, int64_t rl_ms) {
-    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    size_t budget = MAX_FEC_NACK_PER_CALL;
-    for (auto& [gid, g] : groups_) {
-        (void)gid;
-        if (budget == 0) break;
-        if (g.resolved || !g.header_received) continue;  // need k known
-        if (g.received_data >= g.k) continue;            // nothing missing
-        if (now - g.last_nack_ms < rl_ms) continue;      // rate-limit per group
-        bool any = false;
-        for (uint8_t j = 0; j < g.k && budget > 0; ++j) {
-            if (j < g.data_shards.size() && g.data_shards[j].empty() &&
-                j < g.pkt_keys.size()) {
-                out.push_back(g.pkt_keys[j]);
-                --budget;
-                any = true;
-            }
-        }
-        if (any) g.last_nack_ms = now;
-    }
-}
-
 void FecDecoder::expire_old_groups() {
     if (groups_.size() <= MAX_GROUPS) return;
 

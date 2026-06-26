@@ -1,4 +1,3 @@
-#include <algorithm>
 #include "client/net/client_session.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
@@ -553,27 +552,6 @@ void ClientSession::poll() {
             auto batches = receiver_->collect_nacks(gap_ms, rl_ms);
             for (const auto& b : batches) {
                 send_nack(b.seq_no, b.frag_indices.data(), b.frag_indices.size());
-            }
-
-            // FEC-triggered NACK (VIV-82): a whole-group burst loss (no fragment
-            // of the frame arrived) has no assembler record, so the gap-based
-            // NACK above can't see it — that was the dominant freeze cause.  Ask
-            // the FEC decoder for the keys it's still missing and NACK them.
-            std::vector<uint32_t> fec_keys;
-            receiver_->collect_fec_nacks(fec_keys, rl_ms);
-            if (!fec_keys.empty()) {
-                std::sort(fec_keys.begin(), fec_keys.end());
-                size_t i = 0;
-                while (i < fec_keys.size()) {
-                    uint16_t seq = static_cast<uint16_t>(fec_keys[i] >> 16);
-                    std::vector<uint16_t> frags;
-                    while (i < fec_keys.size() &&
-                           static_cast<uint16_t>(fec_keys[i] >> 16) == seq) {
-                        frags.push_back(static_cast<uint16_t>(fec_keys[i] & 0xFFFF));
-                        ++i;
-                    }
-                    send_nack(seq, frags.data(), frags.size());
-                }
             }
         }
 
