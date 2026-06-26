@@ -67,6 +67,12 @@ public:
         return assembler_.collect_nacks(gap_ms, rate_limit_ms);
     }
 
+    // VIV-82: keys of data packets the FEC decoder is still missing (whole-group
+    // burst losses the assembler never recorded).  See FecDecoder::collect_nack_keys.
+    void collect_fec_nacks(std::vector<uint32_t>& out, int64_t rl_ms) {
+        fec_decoder_.collect_nack_keys(out, rl_ms);
+    }
+
     // Packet loss rate from FEC decoder (EWMA, 0.0–1.0).
     float    loss_rate()     const { return fec_decoder_.loss_rate(); }
     uint64_t fec_recovered() const { return fec_decoder_.total_recovered(); }

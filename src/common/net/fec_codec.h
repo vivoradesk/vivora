@@ -107,6 +107,13 @@ public:
     // more often than every ~18 minutes.
     void reset();
 
+    // VIV-82: collect keys ((seq<<16)|frag) of data packets still missing across
+    // pending groups, for NACK.  Unlike the assembler's gap-based NACK, this
+    // sees WHOLE-group burst losses (no fragment of the frame arrived, so the
+    // assembler has no record of them) — the dominant cause of freezes.
+    // Rate-limited per group (re-emit no more than once per rl_ms).
+    void collect_nack_keys(std::vector<uint32_t>& out, int64_t rl_ms);
+
 private:
     struct FecGroup {
         uint8_t  k = 0;
@@ -128,6 +135,7 @@ private:
         // missing_data==0 shortcut and the later decode path double-counting
         // if they ever overlap for the same group.
         bool     loss_counted = false;
+        int64_t  last_nack_ms = 0;  // VIV-82: rate-limit FEC-triggered NACK
     };
 
     void populate_group_from_ring(FecGroup& group);
@@ -160,6 +168,7 @@ private:
     std::deque<std::pair<uint32_t, int64_t>> ring_fifo_;
     static constexpr size_t  MAX_RING    = 2048;
     static constexpr int64_t RING_TTL_MS = 300;
+    static constexpr size_t  MAX_FEC_NACK_PER_CALL = 64;  // storm guard
 
     float ewma_loss_ = 0.0f;
     static constexpr float  EWMA_ALPHA = 0.15f;
