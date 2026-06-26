@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "app/gui/app_controller.h"
 
 #include "app/gui/address_book.h"
@@ -158,6 +159,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     // testing UI changes doesn't burn the encoder + show TCC prompts.
     if (qEnvironmentVariableIsEmpty("VIVORA_NO_AUTOSTART")) {
         QTimer::singleShot(500, this, [this] { startSharing(); });
+    }
+
+    // Dev hook: VIVORA_AUTO_CONNECT=<peer code> auto-connects as a viewer on
+    // startup, so the GUI client can be exercised headlessly (no click).
+    if (const char* peer = std::getenv("VIVORA_AUTO_CONNECT")) {
+        const QString pc = QString::fromUtf8(peer);
+        if (!pc.isEmpty())
+            QTimer::singleShot(1500, this, [this, pc] { connectToPeer(pc); });
     }
 
     // Dev hook: VIVORA_FAKE_APPROVAL=1 fires a synthetic incoming-connection
