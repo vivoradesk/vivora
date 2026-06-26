@@ -180,6 +180,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
     auto last_stats_send = std::chrono::steady_clock::now();
+    auto loss_grace_until = std::chrono::steady_clock::now();
     bool had_clients = false;
     // Phase B+: encoder lifecycle.  We track the previous tick's
     // client count to fire start_encoder() exactly once on the 0→N
@@ -382,6 +383,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                     last_pkts_sample = cur_pkts;
                 }
             }
+            // Suppress loss for a grace period after an IDR recovery: the
+            // client's FEC decoder reset on the drop reports a burst of
+            // "missing" packets that is an artifact of the reset, not real
+            // congestion.  Feeding it crashed the bitrate to the floor on every
+            // freeze, so the bitrate "stuck at 4M" (VIV-82).
+            if (std::chrono::steady_clock::now() < loss_grace_until)
+                loss_signal = 0.0;
             bitrate_ctl.on_loss_ratio(loss_signal);
 
             bool changed = false;
@@ -448,6 +456,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             platform.request_idr();
             session.clear_idr_needed();
             force_encode = true;
+            // Don't let the post-reset loss burst (FEC decoder reset on the
+            // client) crash the bitrate — ignore loss for ~1.5s (VIV-82).
+            loss_grace_until = std::chrono::steady_clock::now()
+                             + std::chrono::milliseconds(1500);
             // Trigger origin is logged at the source (HostSession logs
             // "Client requested IDR (frame loss recovery)" for the loss
             // path; "First client connected" / "New client connected"
