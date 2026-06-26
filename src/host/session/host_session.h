@@ -287,8 +287,13 @@ private:
     };
     KfPacer kf_pacer_;
     bool    kf_pace_enabled_ = false;
-    static constexpr size_t  KF_PACE_CHUNK  = 8;     // packets per chunk
-    static constexpr int64_t KF_PACE_GAP_US = 1000;  // ~1 ms between chunks
+    // 1 packet per ~100 µs (~88 Mbps) — the rate the BW probe measured as
+    // loss-free on this WiFi.  Sending even a small chunk (8) back-to-back
+    // still overran the AP; one-at-a-time is what stays clean.  The host loop
+    // spins far faster than 100 µs during the inter-capture idle, so this is
+    // clock-gated with no sleep.
+    static constexpr size_t  KF_PACE_CHUNK  = 1;
+    static constexpr int64_t KF_PACE_GAP_US = 100;
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
 
