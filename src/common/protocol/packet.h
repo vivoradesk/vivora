@@ -22,6 +22,7 @@ enum class PacketType : uint8_t {
     CursorPosition = 0x13,  // Host → client: cursor x/y/visible + shape_id (per-frame)
     StreamInfo     = 0x14,  // Host → client: real (cropped) frame dimensions
     PerfReport     = 0x15,  // Client → host: sustainable framerate + decoder load
+    HostStats      = 0x16,  // Host → client: current encoder target bitrate (kbps)
 };
 
 enum PacketFlags : uint8_t {

@@ -298,6 +298,11 @@ public:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
                 // run (RECOVER_RESET_CYCLES) resets back to base.
                 uint32_t step = recover_cap / recovery_divisor_;
+                // Cap the absolute climb rate: the channel reacts badly to fast
+                // bitrate jumps, and a big step overshoots the sustainable rate
+                // and then crashes (VIV-82).  ≤MAX_RECOVER_STEP per 500ms cycle
+                // = ~0.5 Mbps/s, regardless of how high the ceiling is.
+                if (step > MAX_RECOVER_STEP) step = MAX_RECOVER_STEP;
                 if (step == 0) step = 1;
                 next = std::min(recover_cap, current_bps_ + step);
                 had_growth_ = true;
@@ -346,6 +351,7 @@ private:
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
     static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
     static constexpr int      HIGH_LOSS_SUSTAIN     = 2;     // cycles of high loss before a full cut
+    static constexpr uint32_t MAX_RECOVER_STEP      = 250'000; // ≤0.25M/cycle = ~0.5 Mbps/s climb cap
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;

@@ -22,7 +22,8 @@ struct StatsView {
     float    fps        = 0.0f;   // decoded frames per second
     float    arrived_fps= 0.0f;   // network-assembled frames per second
     float    rtt_ms     = 0.0f;   // round-trip time to host
-    uint32_t bitrate_kbps = 0;    // inbound bitrate from main socket
+    uint32_t bitrate_kbps = 0;    // inbound (actual wire) bitrate from main socket
+    uint32_t encoding_kbps = 0;   // host's encoder target bitrate (HostStats)
     float    reject_pct = 0.0f;   // decoder reject rate over last 1s
     float    drop_pct   = 0.0f;   // network frame drop rate over last 1s
     uint16_t target_fps = 60;     // current adaptive framerate target

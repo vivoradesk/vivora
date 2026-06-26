@@ -895,6 +895,26 @@ void HostSession::send_stream_info(uint16_t width, uint16_t height) {
               width, height, clients_.size());
 }
 
+void HostSession::send_encoder_bitrate(uint32_t kbps) {
+    if (!socket_ || clients_.empty()) return;
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::HostStats;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload.resize(4);
+    pkt.payload[0] = static_cast<uint8_t>(kbps & 0xFF);
+    pkt.payload[1] = static_cast<uint8_t>((kbps >> 8) & 0xFF);
+    pkt.payload[2] = static_cast<uint8_t>((kbps >> 16) & 0xFF);
+    pkt.payload[3] = static_cast<uint8_t>((kbps >> 24) & 0xFF);
+    pkt.header.payload_len = 4;
+    auto wire = pkt.serialize();
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        send_sealed(client, wire);
+    }
+}
+
 void HostSession::send_cursor_shape(const protocol::CursorShapeMessage& msg) {
     if (!socket_ || clients_.empty()) return;
 

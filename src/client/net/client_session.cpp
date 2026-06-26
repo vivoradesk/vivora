@@ -671,6 +671,16 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
         case protocol::PacketType::StreamInfo:
             handle_stream_info(payload, payload_len);
             break;
+        case protocol::PacketType::HostStats:
+            // Host's current encoder target bitrate (kbps, u32 LE) — for the
+            // "encoding (actual)" HUD readout (VIV-82).
+            if (payload_len >= 4) {
+                encoding_kbps_ = static_cast<uint32_t>(payload[0])
+                               | (static_cast<uint32_t>(payload[1]) << 8)
+                               | (static_cast<uint32_t>(payload[2]) << 16)
+                               | (static_cast<uint32_t>(payload[3]) << 24);
+            }
+            break;
         case protocol::PacketType::Video: {
             // Feed plaintext wire bytes through FEC decoder → assembler.
             // FEC decoder consumes FLAG_FEC parity packets internally and

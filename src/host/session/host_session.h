@@ -238,6 +238,11 @@ public:
     // trim encoder-alignment padding and scale mouse input correctly.
     void send_stream_info(uint16_t width, uint16_t height);
 
+    // Broadcast the current encoder target bitrate (kbps) so the client HUD can
+    // show "encoding (actual)" — the gently-climbing target vs the measured
+    // wire rate that fills it on content (VIV-82).
+    void send_encoder_bitrate(uint32_t kbps);
+
     // True when a new client just connected since last check.
     // Consumed (reset) on read — used by host loop for warmup arming.
     bool consume_new_client_flag() {

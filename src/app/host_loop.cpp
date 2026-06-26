@@ -179,6 +179,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // applied to the encoder (not the controller's internal current), so
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
+    auto last_stats_send = std::chrono::steady_clock::now();
     bool had_clients = false;
     // Phase B+: encoder lifecycle.  We track the previous tick's
     // client count to fire start_encoder() exactly once on the 0→N
@@ -424,6 +425,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 last_applied_br = encoder_bps;
                 log::info("HOST", "Encoder bitrate -> %u kbps (wire %u, FEC overhead carved)",
                           encoder_bps / 1000, br / 1000);
+            }
+
+            // ~1 Hz: tell the client our encoder target so its HUD can show
+            // "encoding (actual)" — the gently-climbing target vs the measured
+            // wire that fills it on content (VIV-82).
+            auto now_stats = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now_stats - last_stats_send).count() >= 1000) {
+                session.send_encoder_bitrate(last_applied_br / 1000);
+                last_stats_send = now_stats;
             }
         }
 

@@ -838,14 +838,14 @@ void MacVideoView::update_stats(const StatsView& stats) {
         const bool hdr = impl->is_hdr;
         NSString* txt = [NSString stringWithFormat:
             @"FPS:    %5.1f decoded / %5.1f arrived / target %u\n"
-             "RTT:    %5.1f ms   Bitrate: %u kbps\n"
+             "RTT:    %5.1f ms   Bitrate: %u (%u) kbps\n"
              "Reject: %5.2f%% (%llu)   Drop: %5.2f%% (%llu)\n"
              "Audio:  %u pps   PLC %u%%\n"
              "FEC:    %llu recovered / %llu failed\n"
              "Stream: %ux%u%s\n"
              "Decoder: VTB HW",
             stats.fps, stats.arrived_fps, (unsigned)stats.target_fps,
-            stats.rtt_ms, (unsigned)stats.bitrate_kbps,
+            stats.rtt_ms, (unsigned)stats.encoding_kbps, (unsigned)stats.bitrate_kbps,
             stats.reject_pct, (unsigned long long)stats.total_rejected,
             stats.drop_pct,   (unsigned long long)stats.total_dropped,
             (unsigned)stats.audio_pps, (unsigned)stats.plc_pct,

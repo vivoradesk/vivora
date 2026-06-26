@@ -395,6 +395,7 @@ bool ViewLoopState::iter() {
         v.arrived_fps  = last_arrived_fps_;
         v.rtt_ms       = static_cast<float>(session.rtt_ms());
         v.bitrate_kbps   = session.last_bitrate_bps() / 1000;
+        v.encoding_kbps  = session.encoding_kbps();
         v.width          = session.stream_width();
         v.height         = session.stream_height();
         v.total_rejected = session.total_rejected();
