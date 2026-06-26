@@ -347,10 +347,24 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     // FEC plan is shared but the on-wire bytes differ per destination.
     sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe, fec_enabled);
 
-    // Keyframe send-pacing (VIV-82 option B): a big keyframe goes out a chunk
-    // per host-loop tick instead of one burst.  P-frames (small) send now.
-    if (kf_pace_enabled_ && keyframe && fec_enabled &&
-        sender_->prepared_wires().size() > KF_PACE_CHUNK) {
+    // Send-pacing (VIV-82 option B): drain the frame a packet per ~100µs across
+    // host-loop ticks instead of one burst the WiFi AP drops.  Applies to every
+    // non-tiny frame — P-frames burst-lose too (smaller), which was cutting the
+    // bitrate to 3-5 Mbps.  Tiny frames and heartbeats send immediately.
+    if (kf_pace_enabled_ && fec_enabled &&
+        sender_->prepared_wires().size() > PACE_MIN_PACKETS) {
+        // If the previous frame is still draining (shouldn't happen at 60fps —
+        // a frame paces in <16ms), flush its tail now so it isn't truncated.
+        if (kf_pacer_.active) {
+            for (const auto& addr : kf_pacer_.dests) {
+                auto it = clients_.find(addr);
+                if (it != clients_.end() && it->second.approved)
+                    sender_->send_wire_range(kf_pacer_.wires, kf_pacer_.pos,
+                                             kf_pacer_.wires.size(), addr,
+                                             &it->second.send_cs);
+            }
+            kf_pacer_.active = false;
+        }
         kf_pacer_.wires = sender_->prepared_wires();   // copy before next P-frame
         kf_pacer_.dests.clear();
         for (auto& [addr, client] : clients_) {

@@ -294,6 +294,11 @@ private:
     // clock-gated with no sleep.
     static constexpr size_t  KF_PACE_CHUNK  = 1;
     static constexpr int64_t KF_PACE_GAP_US = 100;
+    // Pace any frame with more than this many packets — P-frames burst-lose on
+    // WiFi too (just smaller), which cut the bitrate to 3-5 Mbps; tiny frames
+    // skip pacing to avoid needless latency.  A frame paces in size*100µs, well
+    // under a 60fps interval.
+    static constexpr size_t  PACE_MIN_PACKETS = 4;
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
 
