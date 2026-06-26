@@ -113,6 +113,14 @@ private:
     bool            hw_gave_up_     = false;  // auto-fallback latched
     int             hw_fail_streak_ = 0;
     static constexpr int kHwFailGiveUp = 12;  // ~0.2 s at 60 fps of solid failure
+    // Time-windowed fallback: a flaky HW decoder (some Intel VAAPI HEVC) fails
+    // intermittently — a few frames every couple of seconds — which never trips
+    // the consecutive streak above yet churns IDRs and craters the bitrate.
+    // kHwFailWindowGiveUp failures within kHwFailWindowMs also give up (VIV-82).
+    int64_t         hw_win_start_ms_ = 0;
+    int             hw_win_fails_    = 0;
+    static constexpr int     kHwFailWindowGiveUp = 4;
+    static constexpr int64_t kHwFailWindowMs     = 15000;
     bool use_sw() const { return sw_forced_ || hw_gave_up_; }
     void note_hw_failure();
 };

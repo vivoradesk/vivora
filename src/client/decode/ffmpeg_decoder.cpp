@@ -375,11 +375,30 @@ void FfmpegDecoder::note_hw_failure() {
     // give up on HW so the next reinit() reopens in software (VIV-80).  Only
     // meaningful while actually on the HW path and not already fallen back.
     if (!hw_decode_ || hw_gave_up_) return;
+    // (a) solid consecutive failure — fast path.
     if (++hw_fail_streak_ >= kHwFailGiveUp) {
         hw_gave_up_ = true;
         log::warn("FFDec",
                   "hardware decode failed %d frames running — falling back to "
                   "software decode for this session", hw_fail_streak_);
+        return;
+    }
+    // (b) intermittent-but-persistent failure — windowed path.  The streak
+    // resets on every clean frame, so a flaky decoder that errors once every
+    // few seconds never hits (a); this catches it.
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - hw_win_start_ms_ > kHwFailWindowMs) {
+        hw_win_start_ms_ = now;
+        hw_win_fails_    = 0;
+    }
+    if (++hw_win_fails_ >= kHwFailWindowGiveUp) {
+        hw_gave_up_ = true;
+        log::warn("FFDec",
+                  "hardware decode failed %d times in <%llds — flaky HW, "
+                  "falling back to software decode for this session",
+                  hw_win_fails_,
+                  static_cast<long long>(kHwFailWindowMs / 1000));
     }
 }
 
