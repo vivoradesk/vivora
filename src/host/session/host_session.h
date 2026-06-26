@@ -210,6 +210,12 @@ public:
     // Max loss rate across all clients.
     float last_loss_rate() const;
 
+    // Effective (post-FEC/NACK) loss the client actually suffered — the worst
+    // drop/reject % across clients, as a 0..1 ratio.  This is what the bitrate
+    // controller should react to: raw channel loss that FEC fully recovers must
+    // NOT hold the bitrate down (VIV-82) — only undelivered frames should.
+    float last_effective_loss() const;
+
     // Best probe result (lowest ceiling wins for conservative adaptation).
     uint32_t probe_bw_bps() const;
     bool probe_pending() const;

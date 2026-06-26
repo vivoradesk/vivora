@@ -450,6 +450,15 @@ double HostSession::rtt_ms() const {
     return worst;
 }
 
+float HostSession::last_effective_loss() const {
+    uint8_t worst = 0;
+    for (const auto& [addr, client] : clients_) {
+        worst = std::max(worst, std::max(client.perf_drop_pct,
+                                         client.perf_reject_pct));
+    }
+    return static_cast<float>(worst) / 100.0f;
+}
+
 float HostSession::last_loss_rate() const {
     float worst = 0.0f;
     if (sender_) return sender_->last_loss_rate();

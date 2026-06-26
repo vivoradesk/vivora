@@ -265,12 +265,37 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     //     and render as garbage/frozen output until the next IDR.
     // Either way the picture is broken — drop it and force an IDR cycle
     // (project no-artifact rule), rather than displaying a half-decoded frame.
-    if ((in_frame_->flags & AV_FRAME_FLAG_CORRUPT) ||
-        in_frame_->decode_error_flags != 0) {
+    // Hard corruption (codec marked the picture itself bad) → drop + IDR.
+    if (in_frame_->flags & AV_FRAME_FLAG_CORRUPT) {
         av_frame_unref(in_frame_);
         corrupt_ = true;
         note_hw_failure();
         return false;
+    }
+    // Soft signal: decode_error_flags != 0.  On VAAPL (Intel iGPU here) this
+    // fires as a FALSE POSITIVE on perfectly good, fully-delivered frames —
+    // the SW decoder decodes the identical bitstream with zero errors.
+    // Rejecting on it (the old VIV-77 behaviour) churned IDRs every few
+    // seconds with NO real packet loss, which spiked the client's reported
+    // loss and collapsed the bitrate to ~7 Mbps on a gigabit link (VIV-82).
+    // So DISPLAY the frame (it's fine) and only count it toward the
+    // HW→SW give-up streak — a genuinely broken HW decoder errors on a long
+    // run of consecutive frames and still falls back, while one-off VAAPI
+    // noise no longer disrupts the stream.
+    if (in_frame_->decode_error_flags != 0) {
+        static int64_t last_log = 0;
+        const int64_t nowm = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (nowm - last_log > 2000) {
+            log::warn("FFDec", "decode_error_flags=0x%x — displaying anyway "
+                      "(treated as HW false-positive)",
+                      in_frame_->decode_error_flags);
+            last_log = nowm;
+        }
+        // Fall through and display — the frame is good (SW decodes the same
+        // bitstream clean).  The clean-frame streak reset below still lets a
+        // genuinely broken HW path (hard CORRUPT / hwframe-transfer failures)
+        // fall back to software.
     }
 
     // VAAPI path: surface lives on the GPU.  Readback to a separate

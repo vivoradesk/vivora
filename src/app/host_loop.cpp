@@ -363,6 +363,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // Loss signal combines:
         //   (a) client-reported FEC loss (channel loss before recovery)
         //   (b) host-observed retx rate (packets we had to resend)
+        // NOTE: driving this off post-FEC "effective" loss instead made the
+        // controller probe up aggressively then cut ×0.5 on every overshoot,
+        // oscillating BELOW the steady ~7 Mbps — worse.  On a 3-5%-loss WiFi
+        // link ~7 Mbps video is the real ceiling (loss + the FEC overhead
+        // needed to recover it eat the rest).  See VIV-82 / VIV-79.
         bitrate_ctl.on_rtt(session.rtt_ms());
         {
             double loss_signal = session.last_loss_rate();
