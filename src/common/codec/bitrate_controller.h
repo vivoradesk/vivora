@@ -175,11 +175,17 @@ public:
             // is usually unreachable, and ramping all the way to it just
             // produces a post-warmup cascade of cuts. Cap at measured BW
             // from probe (if available), else use static ceiling.
-            const uint32_t fallback = ceiling_override_bps_ > 0
-                                    ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
-            const uint32_t ceiling = probe_ceiling_bps_ > 0
-                                   ? probe_ceiling_bps_ : fallback;
-            const uint32_t warmup_end = std::min(base, ceiling);
+            // The channel chokes on a fast warm-up jump (VIV-82: a 14→25 Mbps
+            // step in one go made the link drop it).  Ramp the warm-up gently
+            // to a MODEST ceiling only; the gradual per-cycle recovery below
+            // then climbs from there to the full probe/override ceiling in
+            // small steps the channel can actually follow.
+            const uint32_t full_ceiling = probe_ceiling_bps_ > 0
+                                        ? probe_ceiling_bps_
+                                        : (ceiling_override_bps_ > 0
+                                               ? ceiling_override_bps_
+                                               : WARMUP_CEILING_BPS);
+            const uint32_t warmup_end = std::min(base, WARMUP_CEILING_BPS);
             if (warmup_elapsed < WARMUP_MS) {
                 const double t = static_cast<double>(warmup_elapsed)
                                / static_cast<double>(WARMUP_MS);
@@ -200,9 +206,11 @@ public:
             // toward it just causes congestion oscillation.
             warmup_active_     = false;
             warmup_just_ended_ = true;
-            recovery_ceiling_bps_ = warmup_end;
-            log::info("BitrateCtl", "Warmup done, recovery ceiling = %u kbps",
-                      warmup_end / 1000);
+            // Recovery may climb to the FULL ceiling — gently, in small steps.
+            recovery_ceiling_bps_ = std::min(base, full_ceiling);
+            log::info("BitrateCtl",
+                      "Warmup done at %u kbps, recovery ceiling = %u kbps",
+                      warmup_end / 1000, recovery_ceiling_bps_ / 1000);
             const bool diff = warmup_end != current_bps_;
             current_bps_ = warmup_end;
             if (changed) *changed = diff;
