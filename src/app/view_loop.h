@@ -140,6 +140,7 @@ private:
     std::thread          decode_thread_;
     std::atomic<bool>    decode_running_{false};
     std::atomic<bool>    decode_needs_idr_{false};  // decode → main: reject
+    std::atomic<bool>    decode_drop_until_kf_{false};  // main → decode: loss, drop to KF (VIV-82)
     bool                 iter_threaded();
     void                 decode_thread_proc();
 

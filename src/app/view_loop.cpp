@@ -57,6 +57,12 @@ void ViewLoopState::decode_thread_proc() {
     bool got_kf = false;
     CompressedFrame cf;
     while (decode_running_.load(std::memory_order_acquire)) {
+        // Network loss: the view loop dropped a frame, so the P-frames still
+        // queued here reference it — decoding them produces a grey/torn picture.
+        // Drop until the next keyframe instead (VIV-82 no-artifact rule); the
+        // render just holds the last good frame until the IDR keyframe arrives.
+        if (decode_drop_until_kf_.exchange(false, std::memory_order_acq_rel))
+            got_kf = false;
         if (!q1_->try_pop(cf)) {
             std::this_thread::sleep_for(std::chrono::microseconds(200));
             continue;
@@ -148,6 +154,10 @@ bool ViewLoopState::iter_threaded() {
     // decode-error recovery separately via decode_needs_idr_).
     const uint64_t drops = session.frames_dropped();
     if (drops > last_drops_) {
+        // Tell the decode thread to drop queued P-frames until the next keyframe
+        // — they reference the lost frame and would decode to grey (VIV-82).
+        if (frames_decoded_ > 0)
+            decode_drop_until_kf_.store(true, std::memory_order_release);
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
@@ -245,12 +255,21 @@ bool ViewLoopState::iter_threaded() {
             ? (frames_decoded_ - last_log_frames_) / window_sec : 0.0;
         last_log_time_ = now_check;
         last_log_frames_ = frames_decoded_;
+        // Network-assembled frames/sec (arrived) — VIV-82: the threaded stats
+        // block never computed this, so the HUD's "arrived" read 0.
+        uint64_t arrived_now = session.receiver()
+                               ? session.receiver()->frames_completed() : 0;
+        last_arrived_fps_ = window_sec > 0
+            ? static_cast<float>((arrived_now - last_arrived_count_) / window_sec)
+            : 0.0f;
+        last_arrived_count_ = arrived_now;
         log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps (threaded)",
                   (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
                   session.last_bitrate_bps() / 1000);
 
         StatsView v{};
         v.fps          = static_cast<float>(inst_fps);
+        v.arrived_fps  = last_arrived_fps_;
         v.rtt_ms       = static_cast<float>(session.rtt_ms());
         v.bitrate_kbps = session.last_bitrate_bps() / 1000;
         v.encoding_kbps = session.encoding_kbps();  // VIV-82: HostStats target
