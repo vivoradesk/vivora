@@ -274,6 +274,8 @@ target_sources(vivora PRIVATE
     # per-platform stream view (Windows StreamWindow, Linux QtGlVideoView,
     # macOS MacVideoView).
     ${CMAKE_SOURCE_DIR}/src/client/render/stream_menu.cpp
+    # "Switch monitor…" panel (VIV-50) — pure Qt Widgets, same hosting.
+    ${CMAKE_SOURCE_DIR}/src/client/render/monitor_panel.cpp
 )
 target_include_directories(vivora PRIVATE
     ${CMAKE_SOURCE_DIR}/src

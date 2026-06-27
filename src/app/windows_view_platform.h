@@ -29,6 +29,7 @@ public:
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
     vivora::IVideoPipeline* video_pipeline() override;
+    void set_monitor_list(const std::vector<vivora::protocol::MonitorDesc>& monitors) override;
     void shutdown() override;
 
 private:

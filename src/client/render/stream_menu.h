@@ -58,6 +58,9 @@ public:
 
 signals:
     void fullscreenToggled();
+    // "Switch monitor…" clicked — the owning stream view opens the monitor
+    // panel and asks the host for its display list (VIV-50).
+    void monitorClicked();
     // Keep stream aspect ratio (letterbox) vs. stretch to fill the window.
     // Handled per-platform by the stream view (renderer + mouse mapping).
     void keepAspectToggled(bool keep);

@@ -25,6 +25,9 @@ public:
     void request_idr() override;
     vivora::VideoCodec actual_codec() const override;
 
+    std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
+    bool select_monitor(uint32_t index) override;
+
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;

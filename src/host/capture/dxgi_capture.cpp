@@ -407,6 +407,24 @@ Resolution DxgiCapture::get_resolution() const {
     return resolution_;
 }
 
+bool DxgiCapture::switch_monitor(uint32_t monitor_index) {
+    // Release any held frame and drop the current duplication before moving.
+    if (frame_acquired_ && duplication_) {
+        duplication_->ReleaseFrame();
+        frame_acquired_ = false;
+    }
+    duplication_.Reset();
+    output5_.Reset();
+    monitor_index_ = monitor_index;
+    if (!init_output_duplication(monitor_index)) {
+        log::error(TAG, "switch_monitor: failed to duplicate output %u", monitor_index);
+        return false;
+    }
+    log::info(TAG, "Switched capture to monitor %u: %ux%u",
+              monitor_index, resolution_.width, resolution_.height);
+    return true;
+}
+
 // Factory implementation
 std::unique_ptr<IScreenCapture> IScreenCapture::create() {
     return std::make_unique<DxgiCapture>();

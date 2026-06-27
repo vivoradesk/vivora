@@ -132,6 +132,11 @@ void WindowsViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
     if (window_) window_->set_menu_actions(actions);
 }
 
+void WindowsViewPlatform::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    if (window_) window_->set_monitor_list(monitors);
+}
+
 void WindowsViewPlatform::shutdown() {
     pipeline_.reset();   // before window_ — it holds a StreamWindow*
     window_.reset();

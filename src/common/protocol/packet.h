@@ -23,6 +23,9 @@ enum class PacketType : uint8_t {
     StreamInfo     = 0x14,  // Host → client: real (cropped) frame dimensions
     PerfReport     = 0x15,  // Client → host: sustainable framerate + decoder load
     HostStats      = 0x16,  // Host → client: current encoder target bitrate (kbps)
+    MonitorListRequest = 0x17,  // Client → host: enumerate capturable displays (VIV-50)
+    MonitorList        = 0x18,  // Host → client: list of displays (MonitorListMessage)
+    SelectMonitor      = 0x19,  // Client → host: switch capture to display index
 };
 
 enum PacketFlags : uint8_t {

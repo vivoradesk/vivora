@@ -33,6 +33,15 @@ public:
     std::vector<MonitorInfo> enumerate_monitors() override;
     Resolution get_resolution() const override;
 
+    // Runtime monitor switch (VIV-50).  Tears down the current output
+    // duplication and re-creates it for |monitor_index| on the SAME D3D11
+    // device, so an encoder built on get_device() stays valid (provided both
+    // displays hang off the same adapter — multi-GPU switching would need a
+    // device rebuild, not supported here).  Updates get_resolution() and the
+    // capture format.  Returns false if the new output can't be duplicated.
+    bool switch_monitor(uint32_t monitor_index);
+    uint32_t current_monitor_index() const { return monitor_index_; }
+
     // Access to D3D11 device (needed by encoder for zero-copy)
     ID3D11Device* get_device() const { return device_.Get(); }
     ID3D11DeviceContext* get_context() const { return context_.Get(); }

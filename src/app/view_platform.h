@@ -3,10 +3,12 @@
 #include "common/codec/video_codec.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
+#include "common/protocol/monitor_info.h"
 #include "common/protocol/stream_info.h"
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <vector>
 
 namespace vivora {
 
@@ -54,6 +56,12 @@ struct MenuActions {
     std::function<void(bool)>  set_muted;
     std::function<void(bool)>  set_view_only;  // true = stop forwarding input
     std::function<void()>      disconnect;     // end the session
+    // VIV-50 monitor selection.  request_monitors asks the host for its
+    // display list (delivered back asynchronously via
+    // ViewPlatform::set_monitor_list); select_monitor switches the host's
+    // captured display by index.
+    std::function<void()>          request_monitors;
+    std::function<void(uint32_t)>  select_monitor;
 };
 
 struct ViewPlatform {
@@ -111,6 +119,10 @@ struct ViewPlatform {
     // only when VIVORA_PIPELINE=threaded.  Returns null on the legacy path
     // and on platforms that don't implement it yet.
     virtual IVideoPipeline* video_pipeline() { return nullptr; }
+
+    // Deliver the host's display list to the in-stream monitor panel (VIV-50).
+    // No-op on platforms without the overlay menu.
+    virtual void set_monitor_list(const std::vector<protocol::MonitorDesc>& /*monitors*/) {}
 
     // Cleanup.
     virtual void shutdown() {}

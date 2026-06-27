@@ -4,6 +4,7 @@
 #include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
 #include "common/protocol/cursor_message.h"
+#include "common/protocol/monitor_info.h"
 #include "common/protocol/stream_info.h"
 #include "host/session/host_approval_gate.h"
 #include "host/session/video_sender.h"
@@ -243,6 +244,29 @@ public:
     // wire rate that fills it on content (VIV-82).
     void send_encoder_bitrate(uint32_t kbps);
 
+    // VIV-50 monitor selection.  The session only marshals the wire messages;
+    // host_loop owns the capture platform, so it answers a list request by
+    // enumerating the platform and applies a switch request to it.
+    //
+    // consume_monitor_list_request(): true (and reset) if any client asked for
+    // the display list since the last check — host_loop replies via
+    // send_monitor_list(platform.list_monitors()).
+    bool consume_monitor_list_request() {
+        bool v = monitor_list_requested_;
+        monitor_list_requested_ = false;
+        return v;
+    }
+    // consume_monitor_select(): writes the requested display index and returns
+    // true if a switch is pending (reset on read), else false.
+    bool consume_monitor_select(uint32_t& index) {
+        if (!monitor_select_pending_) return false;
+        index = monitor_select_index_;
+        monitor_select_pending_ = false;
+        return true;
+    }
+    // Broadcast the capturable-display list to all connected clients.
+    void send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
+
     // True when a new client just connected since last check.
     // Consumed (reset) on read — used by host loop for warmup arming.
     bool consume_new_client_flag() {
@@ -325,6 +349,11 @@ private:
 
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;
+
+    // VIV-50 monitor selection request state (consumed by host_loop).
+    bool     monitor_list_requested_ = false;
+    bool     monitor_select_pending_ = false;
+    uint32_t monitor_select_index_   = 0;
 
     // STUN discovery: target server (zeroed = disabled) and the result
     // captured at start() for external signaling to pick up.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/protocol/monitor_info.h"
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -26,6 +27,15 @@ struct HostPlatform {
     // Encoder control.
     virtual void set_bitrate(uint32_t bps) = 0;
     virtual void request_idr() = 0;
+
+    // Monitor selection (VIV-50).  list_monitors() enumerates the displays
+    // this host can capture (with the currently-streamed one flagged
+    // `viewing`); select_monitor() retargets capture to the given index,
+    // rebuilding the encoder for the new resolution.  Defaults model a
+    // single-display host that can't switch — platforms wire these as the
+    // capability lands (Windows/DXGI first).
+    virtual std::vector<protocol::MonitorDesc> list_monitors() { return {}; }
+    virtual bool select_monitor(uint32_t /*index*/) { return false; }
 
     // The codec the encoder actually produces.  May differ from what the
     // caller requested if the backend had to fall back (e.g. NVENC refusing

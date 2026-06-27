@@ -22,8 +22,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // loop; a background compile or Windows Update scan preempting it adds
     // straight jitter to end-to-end latency.
     utils::boost_current_thread_priority();
-    const uint32_t cap_w = platform.capture_width();
-    const uint32_t cap_h = platform.capture_height();
+    // Mutable: a VIV-50 monitor switch re-targets capture to a display of a
+    // possibly different resolution, after which these are refreshed and the
+    // new dimensions are pushed to clients via StreamInfo.
+    uint32_t cap_w = platform.capture_width();
+    uint32_t cap_h = platform.capture_height();
 
     // Bitrate controller — picks a sensible default from resolution, allows
     // a manual override via --bitrate, and exposes hooks for future
@@ -543,6 +546,41 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             // recovery storm doesn't look like a client-flap storm in
             // the host log.
             log::info("HOST", "Forwarding IDR request to encoder");
+        }
+
+        // VIV-50 monitor selection.  Answer a display-list request by
+        // enumerating the platform, and apply a pending display switch.
+        if (session.consume_monitor_list_request()) {
+            session.send_monitor_list(platform.list_monitors());
+        }
+        uint32_t want_monitor = 0;
+        if (session.consume_monitor_select(want_monitor)) {
+            log::info("HOST", "Client requested switch to display %u", want_monitor);
+            if (platform.select_monitor(want_monitor)) {
+                // Capture now targets a (possibly) different-resolution display:
+                // refresh dims, re-arm input mapping, tell clients the new size,
+                // and force a keyframe so the decoder re-inits cleanly.
+                cap_w = platform.capture_width();
+                cap_h = platform.capture_height();
+                session.set_screen_resolution(platform.input_width(),
+                                              platform.input_height());
+                session.send_stream_info(static_cast<uint16_t>(cap_w),
+                                         static_cast<uint16_t>(cap_h));
+                platform.request_idr();
+                force_encode = true;
+                // The switch resets the client's decoder (new resolution) — give
+                // the resulting loss burst the same grace as an IDR recovery so
+                // it doesn't crash the bitrate (VIV-82).
+                loss_grace_until = std::chrono::steady_clock::now()
+                                 + std::chrono::milliseconds(1500);
+                // Re-advertise so the panel's "viewing" highlight follows.
+                session.send_monitor_list(platform.list_monitors());
+                log::info("HOST", "Switched to display %u (%ux%u)",
+                          want_monitor, cap_w, cap_h);
+            } else {
+                log::warn("HOST", "Display switch to %u failed — staying on current",
+                          want_monitor);
+            }
         }
 
         // Adaptive framerate gate: skip this iteration's capture if it

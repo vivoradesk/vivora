@@ -8,6 +8,7 @@
 #include "common/audio/audio_output.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
+#include "common/protocol/monitor_info.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/types.h"
 #include "common/utils/spsc_ring.h"
@@ -166,6 +167,16 @@ public:
     // Returns false if nothing new has arrived since the last call.
     bool take_new_stream_info(protocol::StreamInfoMessage& out);
 
+    // VIV-50 monitor selection.  request_monitor_list() asks the host to
+    // enumerate its capturable displays (answered asynchronously — poll
+    // take_new_monitor_list()).  select_monitor() switches the host's capture
+    // to the given display index.
+    void request_monitor_list();
+    void select_monitor(uint8_t index);
+    // Pop a freshly-received display list (since last call).  Returns false if
+    // nothing new arrived.
+    bool take_new_monitor_list(std::vector<protocol::MonitorDesc>& out);
+
 private:
     void handle_packet(const uint8_t* data, size_t len);
     void handle_control(const uint8_t* payload, size_t len);
@@ -177,6 +188,7 @@ private:
     void handle_cursor_shape(const uint8_t* payload, size_t len);
     void handle_cursor_position(const uint8_t* payload, size_t len);
     void handle_stream_info(const uint8_t* payload, size_t len);
+    void handle_monitor_list(const uint8_t* payload, size_t len);
     void send_hello();
     void send_bw_probe_ack();
 
@@ -283,6 +295,11 @@ private:
     // (host re-sends the same values every keyframe for loss resilience).
     protocol::StreamInfoMessage stream_info_{};
     bool new_stream_info_ = false;
+
+    // Latest display list from the host (VIV-50).  `new_monitor_list_` latches
+    // on arrival so the view layer pushes it into the monitor panel once.
+    std::vector<protocol::MonitorDesc> monitor_list_;
+    bool new_monitor_list_ = false;
 
     // Shape fragment reassembly buffer keyed by shape_id. Each entry holds
     // one chunk per fragment index; missing chunks remain empty until the

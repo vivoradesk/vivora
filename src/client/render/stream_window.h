@@ -4,9 +4,11 @@
 
 #include "app/view_platform.h"
 #include "client/render/d3d_renderer.h"
+#include "client/render/monitor_panel.h"
 #include "client/render/stream_menu.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
+#include "common/protocol/monitor_info.h"
 #include <QCursor>
 #include <QLabel>
 #include <QTimer>
@@ -52,6 +54,9 @@ public:
     // Supply the in-stream menu callbacks (VIV-74).  Forwarded to the menu
     // widget; volume/view-only/disconnect run through the view loop.
     void set_menu_actions(const MenuActions& actions);
+
+    // Deliver the host's display list to the in-stream monitor panel (VIV-50).
+    void set_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
 
     // Peer/device subtitle for the menu header (VIV-74).
     void set_peer_label(const QString& peer);
@@ -150,6 +155,15 @@ private:
     // Keep stream aspect ratio (letterbox) vs stretch-to-fill.  Mirrors the
     // renderer's flag so mouse-coordinate mapping matches what's on screen.
     bool keep_aspect_ = true;
+
+    // "Switch monitor…" panel (VIV-50).  Owned top-level overlay like the
+    // menu; opened from the menu's monitorClicked signal.
+    MonitorPanel* monitor_panel_ = nullptr;
+    MenuActions   menu_actions_;     // cached so the panel can reach select/request
+    std::vector<protocol::MonitorDesc> last_monitors_;  // most recent host list
+    // Set while handing focus from the menu to the panel so the menu's
+    // close doesn't bounce focus back to the stream and dismiss the panel.
+    bool suppress_menu_refocus_ = false;
 };
 
 } // namespace vivora
