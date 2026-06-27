@@ -60,6 +60,12 @@ void ViewLoopState::decode_thread_proc() {
     uint64_t d_pop=0, d_sub=0, d_prod=0, d_dropf=0, d_flag=0, d_rej=0, d_poolfull=0;
     auto d_last = std::chrono::steady_clock::now();
     while (decode_running_.load(std::memory_order_acquire)) {
+        // Network loss: the view loop dropped a frame, so the P-frames still
+        // queued here reference it — decoding them produces a grey/torn picture.
+        // Drop until the next keyframe (VIV-82 no-artifact rule).
+        if (decode_drop_until_kf_.exchange(false, std::memory_order_acq_rel)) {
+            got_kf = false; ++d_flag;
+        }
         auto d_now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
                 d_now - d_last).count() >= 1000) {
@@ -80,7 +86,16 @@ void ViewLoopState::decode_thread_proc() {
         // Keyframe gating: drop P-frames until the first keyframe of a GOP.
         if (!got_kf) {
             if (cf.keyframe) { got_kf = true; pipeline_->flush_decoder(); }
-            else { ++d_dropf; continue; }
+            else {
+                // Keep asking for an IDR while we're starved of a keyframe —
+                // without this, after a loss-triggered got_kf=false the next
+                // keyframe is only the periodic GOP one (~30s away), so the
+                // decode thread sat at 0 fps the whole time (the deadlock the
+                // grey-on-loss fix introduced).  decode_needs_idr_ is throttled
+                // in iter_threaded, so this is at most one IDR per interval.
+                decode_needs_idr_.store(true, std::memory_order_release);
+                ++d_dropf; continue;
+            }
         }
         ++d_sub;
         SubmitStatus st = pipeline_->submit(cf.data.data(), cf.data.size(),
@@ -170,6 +185,10 @@ bool ViewLoopState::iter_threaded() {
     // decode-error recovery separately via decode_needs_idr_).
     const uint64_t drops = session.frames_dropped();
     if (drops > last_drops_) {
+        // Tell the decode thread to drop queued P-frames until the next keyframe
+        // — they reference the lost frame and would decode to grey (VIV-82).
+        if (frames_decoded_ > 0)
+            decode_drop_until_kf_.store(true, std::memory_order_release);
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
