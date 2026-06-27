@@ -422,20 +422,24 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     };
     platform.set_menu_actions(actions);
 
-    // Threaded pipeline (VIV-81): opt-in via VIVORA_PIPELINE=threaded, and
-    // only if the platform actually provides an IVideoPipeline — otherwise
-    // fall back to the legacy single-threaded path.
-    if (const char* p = std::getenv("VIVORA_PIPELINE")) {
-        if (std::strcmp(p, "threaded") == 0) {
+    // Threaded pipeline (VIV-81): ON BY DEFAULT (VIV-82).  The single-threaded
+    // path serialized decode + render + recv-drain in one loop, which dropped
+    // fps badly on a big 3440x1440 stream (the box is plenty fast — Boosteroid
+    // SW-decodes it at 120fps — the serialization was the bottleneck).  Decode
+    // now runs on its own thread (lock-free Q1/Q2), fps is steady.  Used only if
+    // the platform provides an IVideoPipeline (Linux today); others fall back to
+    // the legacy path.  VIVORA_PIPELINE=legacy forces the old single-threaded path.
+    {
+        const char* p = std::getenv("VIVORA_PIPELINE");
+        const bool want_legacy = p && (std::strcmp(p, "legacy") == 0 ||
+                                       std::strcmp(p, "inpoll") == 0);
+        if (!want_legacy) {
             pipeline_ = platform.video_pipeline();
             if (pipeline_) {
                 threaded_ = true;
                 q1_ = std::make_unique<util::SpscRing<CompressedFrame, 8>>();
                 q2_ = std::make_unique<util::SpscRing<FrameHandle, 4>>();
                 log::info("VIEW", "Threaded view loop enabled (decode thread + lock-free Q1/Q2)");
-            } else {
-                log::warn("VIEW", "VIVORA_PIPELINE=threaded but platform has no "
-                                  "IVideoPipeline — using legacy path");
             }
         }
     }
