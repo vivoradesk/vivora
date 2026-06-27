@@ -115,6 +115,10 @@ public:
     void set_per_frame_fec(bool on) { per_frame_fec_ = on; fec_encoder_.set_ranged(on); }
     bool per_frame_fec() const { return per_frame_fec_; }
 
+    // Legacy FEC group size.  Bigger K recovers a bigger burst at the SAME
+    // overhead % (M scales with K) — see host_session start() (VIV-82).
+    void set_fec_group_size(uint8_t k) { fec_encoder_.set_group_size(k); }
+
     // Current redundancy overhead as a percentage — used by the host-loop wire
     // carve-out (encoder_bps = wire * 100 / (100 + pct)).  Per-frame mode: the
     // steady percentage; legacy: 100*M/K (equivalent to the old K/(K+M) carve).

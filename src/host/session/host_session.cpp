@@ -63,6 +63,20 @@ bool HostSession::start(uint16_t port) {
             log::info("HostSession", "Keyframe send-pacing enabled (VIV-82)");
         }
     }
+    // VIV-82: enlarge the legacy FEC group.  At a fixed overhead %, a bigger
+    // group recovers a bigger burst (K=10/M=5 → 5-pkt burst; K=24/M=12 → 12-pkt
+    // burst).  A ~1ms WiFi glitch loses ~10 consecutive paced packets, which
+    // wiped a whole K=10 group → P-frame freeze.  Default 24; tunable.  Only the
+    // legacy path (per-frame computes K per frame).
+    if (!sender_->per_frame_fec()) {
+        int k = 24;
+        if (const char* p = std::getenv("VIVORA_FEC_K")) {
+            k = std::atoi(p);
+            if (k < 4) k = 4; else if (k > 64) k = 64;
+        }
+        sender_->set_fec_group_size(static_cast<uint8_t>(k));
+        log::info("HostSession", "Legacy FEC group size K=%d (VIV-82)", k);
+    }
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();
