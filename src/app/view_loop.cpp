@@ -253,6 +253,7 @@ bool ViewLoopState::iter_threaded() {
         v.fps          = static_cast<float>(inst_fps);
         v.rtt_ms       = static_cast<float>(session.rtt_ms());
         v.bitrate_kbps = session.last_bitrate_bps() / 1000;
+        v.encoding_kbps = session.encoding_kbps();  // VIV-82: HostStats target
         v.width        = session.stream_width();
         v.height       = session.stream_height();
         v.total_rejected = session.total_rejected();
