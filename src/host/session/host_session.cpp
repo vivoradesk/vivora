@@ -353,19 +353,26 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     // bitrate to 3-5 Mbps.  Tiny frames and heartbeats send immediately.
     if (kf_pace_enabled_ && fec_enabled &&
         sender_->prepared_wires().size() > PACE_MIN_PACKETS) {
-        // If the previous frame is still draining (shouldn't happen at 60fps —
-        // a frame paces in <16ms), flush its tail now so it isn't truncated.
-        if (kf_pacer_.active) {
-            for (const auto& addr : kf_pacer_.dests) {
-                auto it = clients_.find(addr);
-                if (it != clients_.end() && it->second.approved)
-                    sender_->send_wire_range(kf_pacer_.wires, kf_pacer_.pos,
-                                             kf_pacer_.wires.size(), addr,
-                                             &it->second.send_cs);
+        const auto& nw = sender_->prepared_wires();
+        // If the previous frame is STILL draining, do NOT flush its tail as a
+        // burst — that is exactly what lost the big 3440x1440 keyframe (it paces
+        // in ~17ms > one 16ms frame interval, so the next frame used to flush
+        // its tail) and drove the ~7s freeze cycle.  Instead APPEND this frame's
+        // wires so the keyframe finishes pacing and this frame paces right after
+        // it.  The pacer drains far faster than frames arrive (~10k vs ~2k
+        // pkt/s), so the queue only builds during a keyframe overrun and then
+        // drains — it never grows unbounded (VIV-82).
+        if (kf_pacer_.active && kf_pacer_.pos < kf_pacer_.wires.size()) {
+            if (kf_pacer_.pos > 0) {  // drop already-sent wires, keep bounded
+                kf_pacer_.wires.erase(kf_pacer_.wires.begin(),
+                                      kf_pacer_.wires.begin() + kf_pacer_.pos);
+                kf_pacer_.pos = 0;
             }
-            kf_pacer_.active = false;
+            kf_pacer_.wires.insert(kf_pacer_.wires.end(), nw.begin(), nw.end());
+            drain_kf_pacer();
+            return static_cast<int>(nw.size());
         }
-        kf_pacer_.wires = sender_->prepared_wires();   // copy before next P-frame
+        kf_pacer_.wires = nw;   // fresh job
         kf_pacer_.dests.clear();
         for (auto& [addr, client] : clients_) {
             if (client.handshake_complete && client.approved)
