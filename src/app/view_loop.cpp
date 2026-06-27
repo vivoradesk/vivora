@@ -56,26 +56,45 @@ void ViewLoopState::teardown() {
 void ViewLoopState::decode_thread_proc() {
     bool got_kf = false;
     CompressedFrame cf;
+    // VIV-82 startup-deadlock diagnostics (temporary).
+    uint64_t d_pop=0, d_sub=0, d_prod=0, d_dropf=0, d_flag=0, d_rej=0, d_poolfull=0;
+    auto d_last = std::chrono::steady_clock::now();
     while (decode_running_.load(std::memory_order_acquire)) {
         // Network loss: the view loop dropped a frame, so the P-frames still
         // queued here reference it — decoding them produces a grey/torn picture.
         // Drop until the next keyframe instead (VIV-82 no-artifact rule); the
         // render just holds the last good frame until the IDR keyframe arrives.
-        if (decode_drop_until_kf_.exchange(false, std::memory_order_acq_rel))
-            got_kf = false;
+        if (decode_drop_until_kf_.exchange(false, std::memory_order_acq_rel)) {
+            got_kf = false; ++d_flag;
+        }
+        auto d_now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                d_now - d_last).count() >= 1000) {
+            log::info("DEC", "got_kf=%d pop=%llu sub=%llu prod=%llu dropP=%llu "
+                      "flag=%llu rej=%llu poolfull=%llu",
+                      got_kf?1:0, (unsigned long long)d_pop, (unsigned long long)d_sub,
+                      (unsigned long long)d_prod, (unsigned long long)d_dropf,
+                      (unsigned long long)d_flag, (unsigned long long)d_rej,
+                      (unsigned long long)d_poolfull);
+            d_pop=d_sub=d_prod=d_dropf=d_flag=d_rej=d_poolfull=0;
+            d_last = d_now;
+        }
         if (!q1_->try_pop(cf)) {
             std::this_thread::sleep_for(std::chrono::microseconds(200));
             continue;
         }
+        ++d_pop;
         // Keyframe gating: drop P-frames until the first keyframe of a GOP.
         if (!got_kf) {
             if (cf.keyframe) { got_kf = true; pipeline_->flush_decoder(); }
-            else continue;
+            else { ++d_dropf; continue; }
         }
+        ++d_sub;
         SubmitStatus st = pipeline_->submit(cf.data.data(), cf.data.size(),
                                             cf.timestamp, cf.keyframe, cf.seq);
         if (st == SubmitStatus::Rejected) {
             if (cf.heartbeat) continue;  // harmless — next heartbeat replaces
+            ++d_rej;
             session_.note_decoder_rejected();
             got_kf = false;
             pipeline_->reinit_decoder();
@@ -86,7 +105,9 @@ void ViewLoopState::decode_thread_proc() {
         for (;;) {
             FrameHandle h;
             PollStatus ps = pipeline_->poll_frame(h);
-            if (ps != PollStatus::Produced) break;     // Empty or PoolFull
+            if (ps == PollStatus::PoolFull) { ++d_poolfull; break; }
+            if (ps != PollStatus::Produced) break;     // Empty
+            ++d_prod;
             session_.note_decoder_accepted();
             if (!q2_->try_push(h)) pipeline_->recycle(h);  // Q2 full: drop newest
         }
