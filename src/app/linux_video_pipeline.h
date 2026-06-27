@@ -41,7 +41,11 @@ public:
     void wake_render() override {}                          // poll-in-iter model
 
 private:
-    static constexpr int kSlots = 5;   // Q2 depth (3) + present (1) + margin
+    // Pool must comfortably cover: Q2 capacity (4) + reserved (1) + presenting
+    // (1) = 6.  It was 5 — under-sized for Q2=4 — so a brief render lag let the
+    // slots over-subscribe → poll_frame PoolFull → the decode thread stalled
+    // (the intermittent "post-N-frame" startup deadlock, VIV-82).  8 gives slack.
+    static constexpr int kSlots = 8;
     struct Slot {
         std::vector<uint8_t> y, u, v;
         int      ys = 0, us = 0, vs = 0;
@@ -55,7 +59,7 @@ private:
     Slot                                    slots_[kSlots];
     // Free slot indices.  Strict SPSC: the ONLY producer is the main thread
     // (recycle), the ONLY consumer is the decode thread (poll_frame).
-    util::SpscRing<uint32_t, 8>             free_;
+    util::SpscRing<uint32_t, 16>            free_;  // must hold all kSlots indices
     bool                                    free_primed_ = false;
     // A slot the decode thread has popped but not yet filled.  Held across
     // empty polls so we never push back into free_ from the decode thread
