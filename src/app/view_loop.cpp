@@ -109,7 +109,9 @@ void ViewLoopState::decode_thread_proc() {
             if (ps != PollStatus::Produced) break;     // Empty
             ++d_prod;
             session_.note_decoder_accepted();
-            if (!q2_->try_push(h)) pipeline_->recycle(h);  // Q2 full: drop newest
+            // Q2 full: re-reserve the slot (NOT recycle — recycle would make the
+            // decode thread a second SPSC free-list producer and deadlock, VIV-82).
+            if (!q2_->try_push(h)) pipeline_->unreserve(h);
         }
     }
 }

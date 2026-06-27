@@ -77,6 +77,12 @@ void LinuxVideoPipeline::recycle(FrameHandle h) {
     if (h.id < static_cast<uint32_t>(kSlots)) free_.try_push(h.id);
 }
 
+void LinuxVideoPipeline::unreserve(FrameHandle h) {
+    // Re-reserve the slot for the next poll_frame instead of pushing it to the
+    // free list — keeps the decode thread off the SPSC producer side (VIV-82).
+    if (h.id < static_cast<uint32_t>(kSlots)) reserved_idx_ = h.id;
+}
+
 } // namespace vivora
 
 #endif // VIVORA_LINUX

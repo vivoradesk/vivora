@@ -37,6 +37,7 @@ public:
     bool reinit_decoder() override;                         // decode thread
     void present(FrameHandle h) override;                   // main thread
     void recycle(FrameHandle h) override;                   // main thread
+    void unreserve(FrameHandle h) override;                 // decode thread (q2-full)
     void wake_render() override {}                          // poll-in-iter model
 
 private:
