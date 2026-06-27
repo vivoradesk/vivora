@@ -358,7 +358,7 @@ private:
     std::thread           recv_thread_;
     // ~2 MB; heap-allocated only in threaded mode (avoids bloating the
     // by-value ClientSession on the CLI's stack).
-    std::unique_ptr<util::SpscRing<RawPacket, 1024>> recv_ring_;
+    std::unique_ptr<util::SpscRing<RawPacket, 8192>> recv_ring_;
     void recv_thread_proc();
 };
 

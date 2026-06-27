@@ -92,7 +92,7 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     }
 
     socket_->set_nonblocking(true);
-    socket_->set_recvbuf(1024 * 1024);
+    socket_->set_recvbuf(8 * 1024 * 1024);  // 8MB — absorb decode-spike backlog (VIV-82)
 
     host_addr_.ip = net::parse_ip(host_ip);
     host_addr_.port = port;
@@ -270,12 +270,16 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 
     // VIV-81: optionally offload socket receive to a dedicated thread so the
     // kernel UDP buffer is drained continuously and never overflows under
-    // burst (the recvbuf-loss → IDR-churn root cause).  Gated by
-    // VIVORA_PIPELINE=threaded; default keeps the legacy in-poll recv.
+    // burst (the recvbuf-loss → IDR-churn root cause).  ON BY DEFAULT now
+    // (VIV-82) — without it a slow poll()/decode lets the kernel recvbuf
+    // overflow (RcvbufErrors in the 100k's, mass packet loss → freezes).
+    // VIVORA_PIPELINE=legacy forces the old in-poll recv for debugging.
     if (const char* p = std::getenv("VIVORA_PIPELINE"))
-        async_recv_ = (std::strcmp(p, "threaded") == 0);
+        async_recv_ = (std::strcmp(p, "legacy") != 0 && std::strcmp(p, "inpoll") != 0);
+    else
+        async_recv_ = true;
     if (async_recv_) {
-        recv_ring_ = std::make_unique<util::SpscRing<RawPacket, 1024>>();
+        recv_ring_ = std::make_unique<util::SpscRing<RawPacket, 8192>>();
         recv_running_.store(true, std::memory_order_release);
         recv_thread_ = std::thread(&ClientSession::recv_thread_proc, this);
         log::info("ClientSession",
