@@ -132,6 +132,7 @@ private:
         uint16_t seq       = 0;
         bool     keyframe  = false;
         bool     heartbeat = false;
+        bool     discontinuity = false;  // VIV-82: refs broken (frame dropped before)
     };
     bool                 threaded_ = false;
     IVideoPipeline*      pipeline_ = nullptr;

@@ -15,6 +15,9 @@ struct AssembledFrame {
     uint32_t timestamp = 0;
     bool keyframe = false;
     bool heartbeat = false;     // host marked frame as keep-alive (FLAG_HEARTBEAT)
+    bool discontinuity = false; // VIV-82: a frame was dropped right before this
+                                // one, so its reference chain is broken — the
+                                // decoder must not show it (greys) until an IDR.
 };
 
 // A batch of fragments to request retransmission of for one frame.
@@ -83,6 +86,8 @@ private:
     bool has_seq_ = false;
     uint16_t next_deliver_seq_ = 0;
     bool has_deliver_seq_ = false;
+    bool pending_discontinuity_ = false;  // VIV-82: a frame was skipped; tag the
+                                          // next delivered frame as discontinuous.
 
     static constexpr int64_t FRAME_TIMEOUT_MS = 100;
     // Max total NACK fragments per collect_nacks() call to avoid flooding.

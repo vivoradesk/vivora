@@ -166,6 +166,7 @@ void FrameAssembler::try_deliver() {
             // stay invisible to drop detection and the decoder keeps
             // consuming P-frames whose reference chain is broken.
             frames_dropped_++;
+            pending_discontinuity_ = true;  // VIV-82: next frame's refs are broken
             next_deliver_seq_++;
             continue;
         }
@@ -177,6 +178,8 @@ void FrameAssembler::try_deliver() {
         frame.timestamp = pf.timestamp;
         frame.keyframe = pf.keyframe;
         frame.heartbeat = pf.heartbeat;
+        frame.discontinuity = pending_discontinuity_;
+        pending_discontinuity_ = false;
         frame.data = std::move(pf.assembled);
         completed_.push(std::move(frame));
         frames_completed_++;
@@ -248,6 +251,7 @@ void FrameAssembler::reset() {
     has_deliver_seq_ = false;
     newest_seq_ = 0;
     next_deliver_seq_ = 0;
+    pending_discontinuity_ = false;
 }
 
 void FrameAssembler::expire_stale() {
