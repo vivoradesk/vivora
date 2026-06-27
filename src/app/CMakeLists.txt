@@ -319,6 +319,7 @@ if(UNIX AND NOT APPLE)
 
     target_sources(vivora PRIVATE
         linux_view_platform.cpp
+        linux_video_pipeline.cpp
         linux_host_platform.cpp
         ${CMAKE_SOURCE_DIR}/src/client/decode/ffmpeg_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/qt_gl_video_view.cpp

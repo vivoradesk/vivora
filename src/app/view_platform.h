@@ -10,6 +10,8 @@
 
 namespace vivora {
 
+class IVideoPipeline;  // app/video_pipeline.h (threaded pipeline, VIV-81)
+
 // Platform-specific view (client) operations: windowing, decode, render.
 // One implementation per platform.
 // The common view loop (run_view_loop) drives session/IDR-recovery/keyframe
@@ -104,6 +106,11 @@ struct ViewPlatform {
     // Provide the callbacks the in-stream menu (VIV-74) invokes.  No-op on
     // platforms that don't implement the overlay menu yet (Linux/macOS).
     virtual void set_menu_actions(const MenuActions& /*actions*/) {}
+
+    // Threaded pipeline (VIV-81): the platform's decode→present split, used
+    // only when VIVORA_PIPELINE=threaded.  Returns null on the legacy path
+    // and on platforms that don't implement it yet.
+    virtual IVideoPipeline* video_pipeline() { return nullptr; }
 
     // Cleanup.
     virtual void shutdown() {}
