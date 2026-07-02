@@ -199,6 +199,7 @@ bool FfmpegDecoder::decode(const uint8_t* data, size_t len, uint64_t pts,
     // libav logged a missing-ref/concealment while decoding this packet — the
     // output would be grey.  Reject it → the upper layer drops + IDRs (VIV-82).
     if (rc >= 0 && g_decode_error.load(std::memory_order_relaxed)) {
+        log::warn("FFDec", "GREYCATCH send: rejected concealed frame");
         corrupt_ = true;
         note_hw_failure();
         return false;
@@ -324,6 +325,10 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     if ((in_frame_->flags & AV_FRAME_FLAG_CORRUPT) ||
         in_frame_->decode_error_flags != 0 ||
         g_decode_error.load(std::memory_order_relaxed)) {  // libav logged conceal
+        log::warn("FFDec", "GREYCATCH recv: corrupt=%d def=%d greylog=%d",
+                  (in_frame_->flags & AV_FRAME_FLAG_CORRUPT) ? 1 : 0,
+                  in_frame_->decode_error_flags,
+                  g_decode_error.load(std::memory_order_relaxed) ? 1 : 0);
         av_frame_unref(in_frame_);
         corrupt_ = true;
         note_hw_failure();
