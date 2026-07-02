@@ -81,6 +81,14 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     // the encoder produces multi-slice output.  HW decode ignores both.
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
+    // No-artifact (VIV-82): make the decoder ERROR on missing references /
+    // broken bitstream ("Could not find ref with POC …") instead of silently
+    // concealing the damage in grey.  Under packet loss the SW HEVC decoder
+    // would otherwise emit grey-filled frames with decode_error_flags UNSET, so
+    // get_frame()'s reject check missed them.  With EXPLODE they surface as a
+    // decode error → get_frame drops → drop-to-keyframe + IDR (a brief freeze,
+    // never grey).
+    ctx_->err_recognition = AV_EF_EXPLODE;
 
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "avcodec_open2 failed");
@@ -207,6 +215,7 @@ bool FfmpegDecoder::reinit() {
     }
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
+    ctx_->err_recognition = AV_EF_EXPLODE;  // reject broken frames, never grey (VIV-82)
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "reinit: avcodec_open2 failed");
         avcodec_free_context(&ctx_);
