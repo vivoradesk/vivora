@@ -390,7 +390,13 @@ void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
     // bigger bursts are NACK's job.  Tunable via VIVORA_FEC_MAX_PCT (VIV-82).
     static const int max_overhead_pct = [] {
         const char* e = std::getenv("VIVORA_FEC_MAX_PCT");
-        int v = e ? std::atoi(e) : 50;
+        int v = e ? std::atoi(e) : 75;  // 75% (was 50): NACK is too slow at 60fps
+                                        // to cover bursts, so let FEC parity go
+                                        // higher.  The bitrate carve-out already
+                                        // shrinks the encoder to hold the wire
+                                        // budget constant, so this trades video
+                                        // detail (not extra wire) for burst
+                                        // coverage (VIV-82).
         return v < 10 ? 10 : (v > 200 ? 200 : v);
     }();
     const uint8_t k = fec_encoder_.group_size();

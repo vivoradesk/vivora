@@ -295,7 +295,11 @@ private:
     std::unordered_map<uint32_t, ShapeReassembly> shape_reassembly_;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
-    static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;
+    // 150ms (was 500): a FEC group failure detected on the client only reached
+    // the host at the next report boundary, so the host raised parity in
+    // reaction to the PREVIOUS burst while the next one hit at the old M.  Faster
+    // reporting lets adaptive FEC track bursts closer to real time (VIV-82).
+    static constexpr int64_t FEC_REPORT_INTERVAL_MS = 150;
     static constexpr int64_t PERF_REPORT_INTERVAL_MS = 1000;
     // Bounds for the auto-tuned target framerate.  120 is the wire/spec
     // max; 15 is the floor below which interactivity feels broken.

@@ -471,7 +471,13 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             ++group.received_parity;
         }
 
-        try_recover(group, recovered, false);
+        // Recover in-line the instant we hold k shards, instead of deferring to
+        // the next tick() poll cycle — that deferral added ~16ms (one 60fps
+        // frame) of latency to every FEC recovery, enough to miss the decode
+        // deadline and stall the frame (VIV-82).  RS decode still only runs when
+        // actually recoverable (try_recover guards on k shards present).
+        try_recover(group, recovered,
+                    group.received_data + group.received_parity >= group.k);
 
     } else if (hdr.type == PacketType::Video) {
         // ---- Data packet ----
@@ -526,7 +532,10 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
                     group.data_shards[j] = clean_wire;
                     ++group.received_data;
                     if (!is_retx) ++group.fresh_received;
-                    try_recover(group, recovered, false);
+                    // Recover in-line once we hold k shards (VIV-82) — see the
+                    // parity path above for why the tick()-deferred decode hurt.
+                    try_recover(group, recovered,
+                                group.received_data + group.received_parity >= group.k);
                     break;
                 }
             }
