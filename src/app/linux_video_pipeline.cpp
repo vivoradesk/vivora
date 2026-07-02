@@ -62,7 +62,14 @@ PollStatus LinuxVideoPipeline::poll_frame(FrameHandle& out) {
     return PollStatus::Produced;
 }
 
-void LinuxVideoPipeline::flush_decoder() { if (dec_) dec_->flush(); }
+void LinuxVideoPipeline::flush_decoder() {
+    // Hard re-create, NOT flush().  libav 4.4 (Ubuntu 22.04) HEVC's
+    // flush_buffers leaks POC-MSB tracking across IDRs → "Could not find ref"
+    // cascades → the decoder conceals the broken area in grey.  This is exactly
+    // why the serial LinuxViewPlatform::flush_decoder recreates the context;
+    // the threaded path used the leaky flush() and so greyed under loss (VIV-82).
+    if (dec_) dec_->reinit();
+}
 bool LinuxVideoPipeline::reinit_decoder() { return dec_ && dec_->reinit(); }
 
 void LinuxVideoPipeline::present(FrameHandle h) {
