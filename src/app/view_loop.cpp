@@ -108,23 +108,25 @@ void ViewLoopState::decode_thread_proc() {
             got_kf = false; ++d_flag;
             if (ftrace()) log::info("FTRACE", "disc  seq=%u -> drop-to-kf", cf.seq);
         }
-        // Keyframe gating: drop P-frames until the first keyframe of a GOP.
-        if (!got_kf) {
-            if (cf.keyframe) {
-                got_kf = true; pipeline_->flush_decoder();
-                if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + reinit", cf.seq);
-            }
-            else {
-                if (ftrace()) log::info("FTRACE", "dropP seq=%u (no kf yet)", cf.seq);
-                // Keep asking for an IDR while we're starved of a keyframe —
-                // without this, after a loss-triggered got_kf=false the next
-                // keyframe is only the periodic GOP one (~30s away), so the
-                // decode thread sat at 0 fps the whole time (the deadlock the
-                // grey-on-loss fix introduced).  decode_needs_idr_ is throttled
-                // in iter_threaded, so this is at most one IDR per interval.
-                decode_needs_idr_.store(true, std::memory_order_release);
-                ++d_dropf; continue;
-            }
+        // Reinit on EVERY keyframe, not just the first after a gap.  libav 4.4
+        // HEVC leaks POC tracking across IDRs, so a SECOND keyframe decoded in
+        // the same context — common under IDR churn (loss → we request IDR → the
+        // host sends several keyframes close together) — throws "Duplicate POC" /
+        // "Could not find ref" → reject → we request IDR again → a self-
+        // sustaining churn that was the real error/freeze source under loss.  A
+        // fresh context per keyframe breaks the cycle (VIV-82).
+        if (cf.keyframe) {
+            got_kf = true;
+            pipeline_->flush_decoder();
+            if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + reinit", cf.seq);
+        } else if (!got_kf) {
+            // Keyframe gating: drop P-frames until the first keyframe of a GOP.
+            // Keep asking for an IDR while starved — otherwise, after a loss-
+            // triggered got_kf=false, the next keyframe is only the periodic GOP
+            // one (~30s away).  decode_needs_idr_ is throttled in iter_threaded.
+            if (ftrace()) log::info("FTRACE", "dropP seq=%u (no kf yet)", cf.seq);
+            decode_needs_idr_.store(true, std::memory_order_release);
+            ++d_dropf; continue;
         }
         ++d_sub;
         if (ftrace()) log::info("FTRACE", "submit seq=%u kf=%d", cf.seq, cf.keyframe ? 1 : 0);
