@@ -243,15 +243,22 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
     return out;
 }
 
-void FrameAssembler::reset() {
+void FrameAssembler::reset(bool preserve_position) {
     pending_.clear();
     std::queue<AssembledFrame> empty;
     std::swap(completed_, empty);
+    pending_discontinuity_ = false;
+    if (preserve_position) {
+        // Keep the delivery cursor so try_deliver() SKIPS (never re-delivers)
+        // frames it already handed out; it just resyncs forward from
+        // next_deliver_seq_ to newest_seq_, tagging the gap discontinuous so the
+        // decode thread drops to the next keyframe (VIV-82).
+        return;
+    }
     has_seq_ = false;
     has_deliver_seq_ = false;
     newest_seq_ = 0;
     next_deliver_seq_ = 0;
-    pending_discontinuity_ = false;
 }
 
 void FrameAssembler::expire_stale() {

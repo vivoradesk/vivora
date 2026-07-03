@@ -49,7 +49,14 @@ public:
     // after loss when we're about to request an IDR — anything still
     // pending references the missing frame and would feed corrupted
     // data to the decoder.
-    void reset();
+    //
+    // preserve_position (VIV-82): keep the in-order delivery cursor
+    // (next_deliver_seq_ / newest_seq_) so already-delivered frames are NOT
+    // re-delivered after a mid-stream loss-recovery reset.  Re-delivery fed the
+    // decoder duplicate frames → "Duplicate POC" → reject → IDR churn.  Only the
+    // in-progress buffers (pending_/completed_) are dropped in that mode.  The
+    // default (full reset) is for a fresh stream where there is no cursor yet.
+    void reset(bool preserve_position = false);
 
 private:
     struct PendingFrame {

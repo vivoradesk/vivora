@@ -82,7 +82,10 @@ public:
     // Also drops FEC decoder state so old groups + ring entries don't
     // linger across the IDR boundary.
     void reset_stream() {
-        assembler_.reset();
+        // Preserve the delivery cursor: this is only ever called mid-stream for
+        // loss/decode-error recovery, and a full reset re-delivered already-seen
+        // frames → duplicate POC → decoder reject → IDR churn (VIV-82).
+        assembler_.reset(/*preserve_position=*/true);
         fec_decoder_.reset();
         have_accum_ = false;  // drop any half-grouped picture on IDR reset
     }
