@@ -247,14 +247,19 @@ void FrameAssembler::reset(bool preserve_position) {
     pending_.clear();
     std::queue<AssembledFrame> empty;
     std::swap(completed_, empty);
-    pending_discontinuity_ = false;
     if (preserve_position) {
         // Keep the delivery cursor so try_deliver() SKIPS (never re-delivers)
         // frames it already handed out; it just resyncs forward from
-        // next_deliver_seq_ to newest_seq_, tagging the gap discontinuous so the
-        // decode thread drops to the next keyframe (VIV-82).
+        // next_deliver_seq_ to newest_seq_.  Everything delivered after a loss-
+        // recovery reset is discontinuous vs the decoder's state, so FORCE the
+        // next delivered frame to carry the flag → the decode thread drops to the
+        // next keyframe.  (Clearing it here — as the full reset does — wiped the
+        // gap's discontinuity signal that the skip had just set, so the post-gap
+        // P-frame decoded against lost refs and got rejected: VIV-82.)
+        pending_discontinuity_ = true;
         return;
     }
+    pending_discontinuity_ = false;
     has_seq_ = false;
     has_deliver_seq_ = false;
     newest_seq_ = 0;
