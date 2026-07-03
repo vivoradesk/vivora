@@ -119,6 +119,13 @@ public:
     // overhead % (M scales with K) — see host_session start() (VIV-82).
     void set_fec_group_size(uint8_t k) { fec_encoder_.set_group_size(k); }
 
+    // Burst-resilient interleaving depth (VIV-82).  >1 splits each frame into D
+    // groups and transmits them round-robin, so a consecutive wire burst hits D
+    // groups by ~1/D each instead of wiping one whole group.  1 = off (legacy
+    // send order).  Env VIVORA_FEC_INTERLEAVE.
+    void set_fec_interleave(uint8_t d) { fec_interleave_ = d < 1 ? 1 : d; }
+    uint8_t fec_interleave() const { return fec_interleave_; }
+
     // Current redundancy overhead as a percentage — used by the host-loop wire
     // carve-out (encoder_bps = wire * 100 / (100 + pct)).  Per-frame mode: the
     // steady percentage; legacy: 100*M/K (equivalent to the old K/(K+M) carve).
@@ -153,6 +160,12 @@ private:
     void prepare_frame_per_frame(const uint8_t* data, size_t data_len,
                                  uint16_t frame_seq, uint32_t timestamp,
                                  bool keyframe, bool fec_enabled);
+
+    // Interleaved FEC packetization (VIV-82): D contiguous-key groups sent
+    // round-robin for burst resilience.  See set_fec_interleave().
+    void prepare_frame_interleaved(const uint8_t* data, size_t data_len,
+                                   uint16_t frame_seq, uint32_t timestamp,
+                                   bool keyframe);
 
     void store_retx(uint32_t key, const std::vector<uint8_t>& wire);
     // Linear-scan lookup over the ring.  RETX_BUFFER_CAPACITY (2048) element
@@ -212,6 +225,7 @@ private:
     // (steady_m_) to a redundancy percentage: ~25% floor, ramping to a 75% cap
     // as failure-driven M climbs under burst loss.
     bool per_frame_fec_ = false;
+    uint8_t fec_interleave_ = 1;   // VIV-82 burst interleaving depth; 1 = off
     int current_fec_pct() const {
         int p = static_cast<int>(steady_m_) * 10;
         return p < 25 ? 25 : (p > 75 ? 75 : p);

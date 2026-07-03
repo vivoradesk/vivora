@@ -35,6 +35,15 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
         return;
     }
 
+    // Burst-resilient interleaving (VIV-82): split the frame into D groups with
+    // consecutive keys, then transmit their packets round-robin so a consecutive
+    // wire burst hits D groups by ~1/D each (recoverable) instead of wiping one
+    // group whole.  Decoder is unchanged — it matches by key, order-independent.
+    if (fec_interleave_ > 1 && fec_enabled) {
+        prepare_frame_interleaved(data, data_len, frame_seq, timestamp, keyframe);
+        return;
+    }
+
     // A keyframe spans ~40 UDP fragments; losing a single FEC group worth
     // of packets stalls the stream until the next IDR retry.  Flush the
     // in-progress P-frame group at current M, then temporarily boost M
@@ -142,6 +151,85 @@ void VideoSender::prepare_frame_per_frame(const uint8_t* data, size_t data_len,
         idx += K;
     }
     packets_sent_ += static_cast<uint64_t>(frag_idx);
+}
+
+void VideoSender::prepare_frame_interleaved(const uint8_t* data, size_t data_len,
+                                            uint16_t frame_seq, uint32_t timestamp,
+                                            bool keyframe)
+{
+    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp,
+                                        keyframe, /*heartbeat=*/false);
+    const int N = static_cast<int>(packets.size());
+    if (N == 0) return;
+
+    // Parity budget: same % as the non-interleaved path (keyframes take the max
+    // — losing one kills the whole GOP).  Interleaving lets a LOWER M cover the
+    // same burst, but we keep the % so overhead is unchanged (carve-out invariant).
+    int pct = current_fec_pct();
+    if (keyframe && pct < 75) pct = 75;
+
+    // Group count: at least the interleave depth, more if the frame is big enough
+    // that N/D would exceed the encoder's 128-shard group cap.
+    int G = fec_interleave_;
+    if (G > N) G = N;
+    while ((N + G - 1) / G > 128) ++G;   // keep per-group K <= 128
+
+    fec_encoder_.set_ranged(true);       // consecutive keys per group → tiny header
+
+    struct GroupWires {
+        std::vector<std::vector<uint8_t>> data;
+        std::vector<std::vector<uint8_t>> parity;
+    };
+    std::vector<GroupWires> groups;
+    groups.reserve(G);
+
+    int idx = 0;
+    for (int g = 0; g < G; ++g) {
+        // Distribute the remainder across the first groups so sizes differ by ≤1.
+        const int K = (N - idx) / (G - g);
+        int M = (K * pct + 99) / 100;    // ceil(K * pct / 100)
+        if (M < 1) M = 1;
+        if (K + M > 255) M = 255 - K;
+        fec_encoder_.set_group_size(static_cast<uint8_t>(K));
+        fec_encoder_.set_parity_count(static_cast<uint8_t>(M));
+
+        GroupWires gw;
+        gw.data.reserve(K);
+        for (int j = 0; j < K; ++j) {
+            const int fi = idx + j;
+            auto wire = packets[fi].serialize();
+            store_retx(retx_key(frame_seq, static_cast<uint16_t>(fi)), wire);
+            auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
+                                               frame_seq, timestamp);
+            gw.data.push_back(std::move(wire));
+            for (auto& w : fec_wires) gw.parity.push_back(std::move(w));
+        }
+        // The group closes exactly at its K-th packet, so feed() already emitted
+        // the parity; flush() as a defensive no-op in case K was clamped.
+        if (gw.parity.empty()) {
+            auto fw = fec_encoder_.flush(frame_seq, timestamp);
+            for (auto& w : fw) gw.parity.push_back(std::move(w));
+        }
+        groups.push_back(std::move(gw));
+        idx += K;
+    }
+
+    // Transpose: round-robin the data packets across groups (col 0 of every
+    // group, then col 1, …), then the parity the same way.  Now consecutive wire
+    // packets belong to different groups, so a burst spreads across all of them.
+    size_t max_d = 0;
+    for (auto& g : groups) max_d = std::max(max_d, g.data.size());
+    for (size_t j = 0; j < max_d; ++j)
+        for (auto& g : groups)
+            if (j < g.data.size()) prepared_wires_.push_back(std::move(g.data[j]));
+
+    size_t max_p = 0;
+    for (auto& g : groups) max_p = std::max(max_p, g.parity.size());
+    for (size_t j = 0; j < max_p; ++j)
+        for (auto& g : groups)
+            if (j < g.parity.size()) prepared_wires_.push_back(std::move(g.parity[j]));
+
+    packets_sent_ += static_cast<uint64_t>(N);
 }
 
 bool VideoSender::flush_pending_fec(uint16_t frame_seq, uint32_t timestamp) {
