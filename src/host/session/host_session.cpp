@@ -80,14 +80,16 @@ bool HostSession::start(uint16_t port) {
 
     // VIV-82 burst-resilient FEC interleaving: split each frame into D groups and
     // transmit them round-robin so a consecutive-packet burst spreads across all
-    // D groups (recoverable) instead of wiping one whole group.  Default off (1);
-    // D=6 recommended for bursty 10-30% loss.  Decoder needs no change.
+    // D groups (recoverable) instead of wiping one whole group.  ON by default
+    // (D=6) — it made 10% bursty loss smooth in testing (~2x fps, no artifacts)
+    // and the decoder needs no change.  Set VIVORA_FEC_INTERLEAVE=1 to disable.
+    int interleave = 6;
     if (const char* p = std::getenv("VIVORA_FEC_INTERLEAVE")) {
-        int d = std::atoi(p);
-        if (d < 1) d = 1; else if (d > 16) d = 16;
-        sender_->set_fec_interleave(static_cast<uint8_t>(d));
-        log::info("HostSession", "FEC interleave depth D=%d (VIV-82)", d);
+        interleave = std::atoi(p);
+        if (interleave < 1) interleave = 1; else if (interleave > 16) interleave = 16;
     }
+    sender_->set_fec_interleave(static_cast<uint8_t>(interleave));
+    log::info("HostSession", "FEC interleave depth D=%d (VIV-82)", interleave);
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();

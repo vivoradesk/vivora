@@ -78,14 +78,15 @@ int ViewLoopState::min_idr_interval_ms() {
 void ViewLoopState::decode_thread_proc() {
     bool got_kf = false;
     CompressedFrame cf;
-    // VIV-82 startup-deadlock diagnostics (temporary).
+    // Per-second decode counters — logged only under VIVORA_FTRACE (VIV-82).
     uint64_t d_pop=0, d_sub=0, d_prod=0, d_dropf=0, d_flag=0, d_rej=0, d_poolfull=0;
     auto d_last = std::chrono::steady_clock::now();
     while (decode_running_.load(std::memory_order_acquire)) {
         auto d_now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
                 d_now - d_last).count() >= 1000) {
-            log::info("DEC", "got_kf=%d pop=%llu sub=%llu prod=%llu dropP=%llu "
+            if (ftrace())
+                log::info("DEC", "got_kf=%d pop=%llu sub=%llu prod=%llu dropP=%llu "
                       "flag=%llu rej=%llu poolfull=%llu",
                       got_kf?1:0, (unsigned long long)d_pop, (unsigned long long)d_sub,
                       (unsigned long long)d_prod, (unsigned long long)d_dropf,
