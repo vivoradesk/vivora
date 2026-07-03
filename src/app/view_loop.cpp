@@ -53,6 +53,17 @@ void ViewLoopState::teardown() {
     if (platform_) platform_->shutdown();
 }
 
+int ViewLoopState::min_idr_interval_ms() {
+    // Read once.  Lower = faster recovery retries under loss (shorter freezes)
+    // at the cost of more IDRs on the wire; clamp to a sane range (VIV-82).
+    static const int v = [] {
+        const char* e = std::getenv("VIVORA_IDR_INTERVAL_MS");
+        int x = e ? std::atoi(e) : 250;
+        return x < 50 ? 50 : (x > 2000 ? 2000 : x);
+    }();
+    return v;
+}
+
 void ViewLoopState::decode_thread_proc() {
     bool got_kf = false;
     CompressedFrame cf;
@@ -190,7 +201,7 @@ bool ViewLoopState::iter_threaded() {
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (frames_decoded_ > 0 && since > MIN_IDR_INTERVAL_MS) {
+        if (frames_decoded_ > 0 && since > min_idr_interval_ms()) {
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
@@ -204,7 +215,7 @@ bool ViewLoopState::iter_threaded() {
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (since > MIN_IDR_INTERVAL_MS) {
+        if (since > min_idr_interval_ms()) {
             session.request_idr();
             last_idr_request_ = now;
         }
@@ -235,7 +246,7 @@ bool ViewLoopState::iter_threaded() {
         auto now = Clock::now();
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (since > MIN_IDR_INTERVAL_MS) {
+        if (since > min_idr_interval_ms()) {
             decode_needs_idr_.store(false, std::memory_order_release);
             session.reset_video_stream();
             session.request_idr();
@@ -580,7 +591,7 @@ bool ViewLoopState::iter() {
         auto now = Clock::now();
         auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (got_keyframe_ && since_idr_req > MIN_IDR_INTERVAL_MS) {
+        if (got_keyframe_ && since_idr_req > min_idr_interval_ms()) {
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
@@ -595,12 +606,12 @@ bool ViewLoopState::iter() {
     // No-keyframe-yet retry: a completely lost keyframe (all UDP
     // fragments dropped in one WiFi burst) is invisible to the
     // assembler's gap detection.  Shares last_idr_request_ with the
-    // drop block via MIN_IDR_INTERVAL_MS.
+    // drop block via min_idr_interval_ms().
     if (!got_keyframe_ && session.state() == client::SessionState::Connected) {
         auto now = Clock::now();
         auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (since_idr_req > MIN_IDR_INTERVAL_MS) {
+        if (since_idr_req > min_idr_interval_ms()) {
             session.request_idr();
             last_idr_request_ = now;
             log::warn("VIEW", "No keyframe yet, requesting IDR");
@@ -640,7 +651,7 @@ bool ViewLoopState::iter() {
             auto now = Clock::now();
             auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - last_idr_request_).count();
-            if (since_idr_req > MIN_IDR_INTERVAL_MS) {
+            if (since_idr_req > min_idr_interval_ms()) {
                 session.reset_video_stream();
                 session.request_idr();
                 last_idr_request_ = now;

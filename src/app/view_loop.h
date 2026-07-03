@@ -74,7 +74,12 @@ public:
     client::SessionState state() const;
 
 private:
-    static constexpr int MIN_IDR_INTERVAL_MS = 600;
+    // Min interval between IDR requests.  Was a fixed 600ms — but under frequent
+    // loss that throttle IS the freeze floor: a loss shortly after an IDR can't
+    // re-request for 600ms.  Now env-tunable (VIVORA_IDR_INTERVAL_MS), default
+    // 250ms, so recovery retries ~2.5x faster (VIV-82).  The recovery keyframe
+    // is heavily FEC-boosted (kf_m up to 24) so it survives to make this pay off.
+    static int min_idr_interval_ms();
 
     // Set once in init(); read on every iter().
     ViewPlatform*     platform_ = nullptr;
