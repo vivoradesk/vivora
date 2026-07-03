@@ -45,6 +45,7 @@ namespace vivora {
 struct FrameHandle {
     static constexpr uint32_t kInvalid = 0xFFFFFFFFu;
     uint32_t id = kInvalid;
+    uint16_t seq = 0;   // source frame seq (via decoder pts) — for VIV-82 tracing
     bool valid() const { return id != kInvalid; }
 };
 

@@ -58,6 +58,7 @@ PollStatus LinuxVideoPipeline::poll_frame(FrameHandle& out) {
     s.u.assign(f.plane[1], f.plane[1] + static_cast<size_t>(f.stride[1]) * (f.height / 2));
     s.v.assign(f.plane[2], f.plane[2] + static_cast<size_t>(f.stride[2]) * (f.height / 2));
     out.id = reserved_idx_;
+    out.seq = static_cast<uint16_t>(f.pts);  // seq round-tripped via decoder pts
     reserved_idx_ = FrameHandle::kInvalid;  // consumed into Q2
     return PollStatus::Produced;
 }

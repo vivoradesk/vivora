@@ -53,6 +53,17 @@ void ViewLoopState::teardown() {
     if (platform_) platform_->shutdown();
 }
 
+// Per-frame lifecycle tracing (VIV-82): VIVORA_FTRACE=1 logs recv→submit→
+// decode/drop/reject→render + every IDR request, each with the frame seq, to
+// pinpoint where frames are lost under loss.  Off by default (very chatty).
+static bool ftrace() {
+    static const bool on = [] {
+        const char* e = std::getenv("VIVORA_FTRACE");
+        return e && e[0] == '1';
+    }();
+    return on;
+}
+
 int ViewLoopState::min_idr_interval_ms() {
     // Read once.  Lower = faster recovery retries under loss (shorter freezes)
     // at the cost of more IDRs on the wire; clamp to a sane range (VIV-82).
@@ -93,11 +104,18 @@ void ViewLoopState::decode_thread_proc() {
         // picture.  The assembler tags it discontinuity; drop from here until the
         // next keyframe (VIV-82 no-artifact).  Per-frame so there's no lag/race
         // like the old global flag had.  A keyframe is self-contained → keep it.
-        if (cf.discontinuity && !cf.keyframe) { got_kf = false; ++d_flag; }
+        if (cf.discontinuity && !cf.keyframe) {
+            got_kf = false; ++d_flag;
+            if (ftrace()) log::info("FTRACE", "disc  seq=%u -> drop-to-kf", cf.seq);
+        }
         // Keyframe gating: drop P-frames until the first keyframe of a GOP.
         if (!got_kf) {
-            if (cf.keyframe) { got_kf = true; pipeline_->flush_decoder(); }
+            if (cf.keyframe) {
+                got_kf = true; pipeline_->flush_decoder();
+                if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + reinit", cf.seq);
+            }
             else {
+                if (ftrace()) log::info("FTRACE", "dropP seq=%u (no kf yet)", cf.seq);
                 // Keep asking for an IDR while we're starved of a keyframe —
                 // without this, after a loss-triggered got_kf=false the next
                 // keyframe is only the periodic GOP one (~30s away), so the
@@ -109,11 +127,13 @@ void ViewLoopState::decode_thread_proc() {
             }
         }
         ++d_sub;
+        if (ftrace()) log::info("FTRACE", "submit seq=%u kf=%d", cf.seq, cf.keyframe ? 1 : 0);
         SubmitStatus st = pipeline_->submit(cf.data.data(), cf.data.size(),
                                             cf.timestamp, cf.keyframe, cf.seq);
         if (st == SubmitStatus::Rejected) {
             if (cf.heartbeat) continue;  // harmless — next heartbeat replaces
             ++d_rej;
+            if (ftrace()) log::info("FTRACE", "REJECT seq=%u (decode error) -> reinit + IDR", cf.seq);
             session_.note_decoder_rejected();
             got_kf = false;
             pipeline_->reinit_decoder();
@@ -127,10 +147,14 @@ void ViewLoopState::decode_thread_proc() {
             if (ps == PollStatus::PoolFull) { ++d_poolfull; break; }
             if (ps != PollStatus::Produced) break;     // Empty
             ++d_prod;
+            if (ftrace()) log::info("FTRACE", "decoded seq=%u", h.seq);
             session_.note_decoder_accepted();
             // Q2 full: re-reserve the slot (NOT recycle — recycle would make the
             // decode thread a second SPSC free-list producer and deadlock, VIV-82).
-            if (!q2_->try_push(h)) pipeline_->unreserve(h);
+            if (!q2_->try_push(h)) {
+                if (ftrace()) log::info("FTRACE", "Q2FULL drop decoded seq=%u", h.seq);
+                pipeline_->unreserve(h);
+            }
         }
     }
 }
@@ -202,11 +226,19 @@ bool ViewLoopState::iter_threaded() {
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
         if (frames_decoded_ > 0 && since > min_idr_interval_ms()) {
+            if (ftrace()) log::info("FTRACE", "IDR-REQ reason=frame-loss dropped=%llu "
+                                    "(reset_video_stream + request_idr)",
+                                    (unsigned long long)(drops - last_drops_));
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
             log::warn("VIEW", "Frame loss (%llu dropped) — requested IDR",
                       (unsigned long long)(drops - last_drops_));
+        } else if (ftrace()) {
+            log::info("FTRACE", "loss dropped=%llu but IDR THROTTLED (%lldms<%d) "
+                      "— decode thread keeps dropping meanwhile",
+                      (unsigned long long)(drops - last_drops_),
+                      (long long)since, min_idr_interval_ms());
         }
         last_drops_ = drops;
     }
@@ -224,6 +256,9 @@ bool ViewLoopState::iter_threaded() {
     // Hand newly assembled compressed frames to the decode thread.
     net::AssembledFrame nf;
     while (session.pop_frame(nf)) {
+        if (ftrace()) log::info("FTRACE", "recv  seq=%u kf=%d disc=%d hb=%d len=%zu",
+                                nf.seq_no, nf.keyframe ? 1 : 0, nf.discontinuity ? 1 : 0,
+                                nf.heartbeat ? 1 : 0, nf.data.size());
         CompressedFrame cf;
         cf.data      = std::move(nf.data);   // ring slot keeps capacity
         cf.timestamp = nf.timestamp;
@@ -233,6 +268,7 @@ bool ViewLoopState::iter_threaded() {
         cf.discontinuity = nf.discontinuity;  // VIV-82: broken refs → drop, no grey
         if (!q1_->try_push(cf)) {
             // Q1 full — decode thread far behind; force a clean resync.
+            if (ftrace()) log::info("FTRACE", "Q1FULL drop recv seq=%u -> IDR", cf.seq);
             decode_needs_idr_.store(true, std::memory_order_release);
         }
     }
@@ -247,6 +283,8 @@ bool ViewLoopState::iter_threaded() {
         auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
         if (since > min_idr_interval_ms()) {
+            if (ftrace()) log::info("FTRACE", "IDR-REQ reason=decode-error "
+                                    "(reset_video_stream + request_idr)");
             decode_needs_idr_.store(false, std::memory_order_release);
             session.reset_video_stream();
             session.request_idr();
@@ -276,10 +314,14 @@ bool ViewLoopState::iter_threaded() {
     if (q2_) {
         while (q2_->size() > 2) {
             FrameHandle d;
-            if (q2_->try_pop(d)) pipeline_->recycle(d);
+            if (q2_->try_pop(d)) {
+                if (ftrace()) log::info("FTRACE", "RENDER-DROP stale seq=%u (penultimate)", d.seq);
+                pipeline_->recycle(d);
+            }
         }
         FrameHandle h;
         if (q2_->try_pop(h)) {
+            if (ftrace()) log::info("FTRACE", "render seq=%u", h.seq);
             pipeline_->present(h);   // copies into the view + schedules paint
             pipeline_->recycle(h);
             rendered = 1;
