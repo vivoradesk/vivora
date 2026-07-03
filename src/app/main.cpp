@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #endif
 
+#include <cstdlib>
 #include <cstring>
 
 // Entry point: branch between headless CLI and the QML GUI shell.
@@ -50,6 +51,12 @@ int main(int argc, char* argv[]) {
         vivora::log::use_stderr();
     }
 #endif
+    // Optional file sink for diagnostics — invaluable for the Windows GUI host
+    // which otherwise has no console.  VIVORA_LOG_FILE=path routes all logs
+    // there (overrides the console sink above).
+    if (const char* lf = std::getenv("VIVORA_LOG_FILE")) {
+        vivora::log::set_file(lf);
+    }
 #ifdef VIVORA_HAVE_GUI
     return cli_mode
         ? vivora::run_legacy_cli(argc, argv)

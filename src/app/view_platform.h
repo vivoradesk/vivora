@@ -10,6 +10,8 @@
 
 namespace vivora {
 
+class IVideoPipeline;  // app/video_pipeline.h (threaded pipeline, VIV-81)
+
 // Platform-specific view (client) operations: windowing, decode, render.
 // One implementation per platform.
 // The common view loop (run_view_loop) drives session/IDR-recovery/keyframe
@@ -22,7 +24,8 @@ struct StatsView {
     float    fps        = 0.0f;   // decoded frames per second
     float    arrived_fps= 0.0f;   // network-assembled frames per second
     float    rtt_ms     = 0.0f;   // round-trip time to host
-    uint32_t bitrate_kbps = 0;    // inbound bitrate from main socket
+    uint32_t bitrate_kbps = 0;    // inbound (actual wire) bitrate from main socket
+    uint32_t encoding_kbps = 0;   // host's encoder target bitrate (HostStats)
     float    reject_pct = 0.0f;   // decoder reject rate over last 1s
     float    drop_pct   = 0.0f;   // network frame drop rate over last 1s
     uint16_t target_fps = 60;     // current adaptive framerate target
@@ -103,6 +106,11 @@ struct ViewPlatform {
     // Provide the callbacks the in-stream menu (VIV-74) invokes.  No-op on
     // platforms that don't implement the overlay menu yet (Linux/macOS).
     virtual void set_menu_actions(const MenuActions& /*actions*/) {}
+
+    // Threaded pipeline (VIV-81): the platform's decode→present split, used
+    // only when VIVORA_PIPELINE=threaded.  Returns null on the legacy path
+    // and on platforms that don't implement it yet.
+    virtual IVideoPipeline* video_pipeline() { return nullptr; }
 
     // Cleanup.
     virtual void shutdown() {}

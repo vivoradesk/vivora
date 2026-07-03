@@ -10,6 +10,7 @@ namespace vivora::net {
 using protocol::PacketHeader;
 using protocol::PacketType;
 using protocol::FLAG_FEC;
+using protocol::FLAG_FEC_RANGED;
 
 namespace {
 
@@ -241,13 +242,16 @@ constexpr size_t FEC_HEADER_FIXED = 2 + 1 + 1 + 1;  // group_id + K + M + idx
 
 void FecEncoder::set_group_size(uint8_t k) {
     if (k < 2) k = 2;
-    if (k > 128) k = 128;
+    // 200 supports whole-frame pooled groups (ranged mode, VIV-82); legacy
+    // never sets more than ~10.  GF(256) requires K + M <= 255 — the caller
+    // enforces the sum.
+    if (k > 200) k = 200;
     k_ = k;
 }
 
 void FecEncoder::set_parity_count(uint8_t m) {
     if (m < 1) m = 1;
-    if (m > 64) m = 64;
+    if (m > 200) m = 200;
     m_ = m;
 }
 
@@ -306,8 +310,13 @@ std::vector<std::vector<uint8_t>> FecEncoder::emit_parities(
     std::vector<std::vector<uint8_t>> parity;
     rs_encode_parity(data_padded, k_eff, m_eff, shard_len, parity);
 
-    const size_t fec_payload_size =
-        FEC_HEADER_FIXED + static_cast<size_t>(k_eff) * (4 + 2) + shard_len;
+    // Ranged (VIV-82): header carries only base_key (4B) — the K data packets
+    // have consecutive keys base_key .. base_key+K-1.  Legacy: full key+len
+    // list (6B per data packet), which caps K at ~16 before the parity packet
+    // exceeds the MTU.
+    const size_t hdr_var = ranged_ ? 4u
+                                   : static_cast<size_t>(k_eff) * (4 + 2);
+    const size_t fec_payload_size = FEC_HEADER_FIXED + hdr_var + shard_len;
 
     std::vector<std::vector<uint8_t>> out;
     out.reserve(m_eff);
@@ -319,7 +328,7 @@ std::vector<std::vector<uint8_t>> FecEncoder::emit_parities(
         hdr.type = PacketType::Video;
         hdr.seq_no = frame_seq;
         hdr.timestamp = timestamp;
-        hdr.flags = FLAG_FEC;
+        hdr.flags = ranged_ ? (FLAG_FEC | FLAG_FEC_RANGED) : FLAG_FEC;
         hdr.payload_len = static_cast<uint16_t>(fec_payload_size);
         hdr.serialize(wire.data());
 
@@ -335,21 +344,28 @@ std::vector<std::vector<uint8_t>> FecEncoder::emit_parities(
         *p++ = static_cast<uint8_t>(m_eff);
         *p++ = static_cast<uint8_t>(pi);
 
-        // pkt_keys
-        for (int j = 0; j < k_eff; ++j) {
-            uint32_t key = pkt_keys_[j];
-            p[0] = static_cast<uint8_t>(key);
-            p[1] = static_cast<uint8_t>(key >> 8);
-            p[2] = static_cast<uint8_t>(key >> 16);
-            p[3] = static_cast<uint8_t>(key >> 24);
+        if (ranged_) {
+            uint32_t base = pkt_keys_.empty() ? 0u : pkt_keys_[0];
+            p[0] = static_cast<uint8_t>(base);
+            p[1] = static_cast<uint8_t>(base >> 8);
+            p[2] = static_cast<uint8_t>(base >> 16);
+            p[3] = static_cast<uint8_t>(base >> 24);
             p += 4;
-        }
-        // pkt_lens
-        for (int j = 0; j < k_eff; ++j) {
-            uint16_t l = pkt_lens_[j];
-            p[0] = static_cast<uint8_t>(l & 0xFF);
-            p[1] = static_cast<uint8_t>(l >> 8);
-            p += 2;
+        } else {
+            for (int j = 0; j < k_eff; ++j) {
+                uint32_t key = pkt_keys_[j];
+                p[0] = static_cast<uint8_t>(key);
+                p[1] = static_cast<uint8_t>(key >> 8);
+                p[2] = static_cast<uint8_t>(key >> 16);
+                p[3] = static_cast<uint8_t>(key >> 24);
+                p += 4;
+            }
+            for (int j = 0; j < k_eff; ++j) {
+                uint16_t l = pkt_lens_[j];
+                p[0] = static_cast<uint8_t>(l & 0xFF);
+                p[1] = static_cast<uint8_t>(l >> 8);
+                p += 2;
+            }
         }
         // parity shard
         std::memcpy(p, parity[pi].data(), shard_len);
@@ -371,6 +387,7 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
 
     if (hdr.flags & FLAG_FEC) {
         // ---- FEC parity packet ----
+        const bool ranged = (hdr.flags & FLAG_FEC_RANGED) != 0;
         const uint8_t* p = wire + PacketHeader::WIRE_SIZE;
         const size_t payload_len = len - PacketHeader::WIRE_SIZE;
         if (payload_len < FEC_HEADER_FIXED) return;
@@ -381,35 +398,50 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
         uint8_t  parity_idx = p[4];
         p += FEC_HEADER_FIXED;
 
-        if (k < 1 || k > 128) return;
-        if (m < 1 || m > 64) return;
+        if (k < 1 || k > 200) return;
+        if (m < 1 || m > 200) return;
         if (parity_idx >= m) return;
 
-        const size_t hdr_rest = static_cast<size_t>(k) * (4 + 2);
-        if (payload_len < FEC_HEADER_FIXED + hdr_rest) return;
-        const size_t shard_len = payload_len - FEC_HEADER_FIXED - hdr_rest;
+        // Ranged header carries only base_key (4B); legacy carries the full
+        // K-long key+len list (6B per data packet).
+        const size_t hdr_var = ranged ? 4u : static_cast<size_t>(k) * (4 + 2);
+        if (payload_len < FEC_HEADER_FIXED + hdr_var) return;
+        const size_t shard_len = payload_len - FEC_HEADER_FIXED - hdr_var;
 
         auto& group = groups_[group_id];
 
         if (!group.header_received) {
             group.k = k;
             group.m = m;
+            group.ranged = ranged;
             group.header_received = true;
             group.data_shards.assign(k, {});
             group.parity_shards.assign(m, {});
             group.pkt_keys.resize(k);
-            group.pkt_lens.resize(k);
 
-            for (int j = 0; j < k; ++j) {
-                group.pkt_keys[j] = p[0]
+            if (ranged) {
+                // Consecutive keys base_key .. base_key+K-1.  Lengths come from
+                // each recovered packet's own header (PayloadLen), so no list.
+                uint32_t base = p[0]
                     | (static_cast<uint32_t>(p[1]) << 8)
                     | (static_cast<uint32_t>(p[2]) << 16)
                     | (static_cast<uint32_t>(p[3]) << 24);
+                for (int j = 0; j < k; ++j)
+                    group.pkt_keys[j] = base + static_cast<uint32_t>(j);
                 p += 4;
-            }
-            for (int j = 0; j < k; ++j) {
-                group.pkt_lens[j] = p[0] | (static_cast<uint16_t>(p[1]) << 8);
-                p += 2;
+            } else {
+                group.pkt_lens.resize(k);
+                for (int j = 0; j < k; ++j) {
+                    group.pkt_keys[j] = p[0]
+                        | (static_cast<uint32_t>(p[1]) << 8)
+                        | (static_cast<uint32_t>(p[2]) << 16)
+                        | (static_cast<uint32_t>(p[3]) << 24);
+                    p += 4;
+                }
+                for (int j = 0; j < k; ++j) {
+                    group.pkt_lens[j] = p[0] | (static_cast<uint16_t>(p[1]) << 8);
+                    p += 2;
+                }
             }
             // Pull any already-received data packets from the ring.
             populate_group_from_ring(group);
@@ -426,7 +458,7 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             // that do agree.
             if (k != group.k || m != group.m) return;
             // Skip the header we already have.
-            p += static_cast<size_t>(k) * (4 + 2);
+            p += hdr_var;
         }
 
         // Belt-and-braces: never index parity_shards past its real size,
@@ -439,7 +471,13 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             ++group.received_parity;
         }
 
-        try_recover(group, recovered, false);
+        // Recover in-line the instant we hold k shards, instead of deferring to
+        // the next tick() poll cycle — that deferral added ~16ms (one 60fps
+        // frame) of latency to every FEC recovery, enough to miss the decode
+        // deadline and stall the frame (VIV-82).  RS decode still only runs when
+        // actually recoverable (try_recover guards on k shards present).
+        try_recover(group, recovered,
+                    group.received_data + group.received_parity >= group.k);
 
     } else if (hdr.type == PacketType::Video) {
         // ---- Data packet ----
@@ -494,7 +532,10 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
                     group.data_shards[j] = clean_wire;
                     ++group.received_data;
                     if (!is_retx) ++group.fresh_received;
-                    try_recover(group, recovered, false);
+                    // Recover in-line once we hold k shards (VIV-82) — see the
+                    // parity path above for why the tick()-deferred decode hurt.
+                    try_recover(group, recovered,
+                                group.received_data + group.received_parity >= group.k);
                     break;
                 }
             }
@@ -602,8 +643,21 @@ void FecDecoder::try_recover(FecGroup& group,
     int recovered_count = 0;
     for (int j = 0; j < k; ++j) {
         if (was_present[j]) continue;
-        // Truncate back to original wire length.
-        uint16_t orig_len = group.pkt_lens[j];
+        // Truncate back to original wire length.  Ranged groups don't carry a
+        // length list — the recovered shard IS the full data wire, so read its
+        // own PacketHeader.PayloadLen (bytes 8-9) to find the real length.
+        size_t orig_len;
+        if (group.ranged) {
+            if (data_pad[j].size() >= PacketHeader::WIRE_SIZE) {
+                uint16_t pl = data_pad[j][8]
+                            | (static_cast<uint16_t>(data_pad[j][9]) << 8);
+                orig_len = PacketHeader::WIRE_SIZE + pl;
+            } else {
+                orig_len = data_pad[j].size();
+            }
+        } else {
+            orig_len = group.pkt_lens[j];
+        }
         if (data_pad[j].size() > orig_len)
             data_pad[j].resize(orig_len);
         recovered.push_back(std::move(data_pad[j]));

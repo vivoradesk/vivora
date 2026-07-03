@@ -1,3 +1,4 @@
+#include <chrono>
 #include "client/decode/ffmpeg_decoder.h"
 #include "common/utils/log.h"
 
@@ -9,10 +10,40 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <atomic>
+#include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 namespace vivora::client {
+
+namespace {
+// VIV-82: libav's HEVC decoder conceals missing references ("Could not find ref
+// with POC …") in GREY and does NOT reliably set decode_error_flags /
+// AV_EF_EXPLODE, so those frames slipped past get_frame()'s reject checks and
+// flashed grey under loss.  Intercept libav's own log stream: when it reports a
+// missing-ref / concealment during a decode call, raise a flag the decode path
+// checks so the frame is rejected (drop + IDR) instead of shown.  The callback
+// runs synchronously on the decode thread inside send_packet/receive_frame.
+std::atomic<bool> g_decode_error{false};
+
+void ffmpeg_log_cb(void* avcl, int level, const char* fmt, va_list vl) {
+    if (level <= AV_LOG_WARNING) {
+        va_list vl2;
+        va_copy(vl2, vl);
+        char line[512];
+        std::vsnprintf(line, sizeof(line), fmt, vl2);
+        va_end(vl2);
+        if (std::strstr(line, "Could not find ref") ||
+            std::strstr(line, "concealing")         ||
+            std::strstr(line, "Missing reference")) {
+            g_decode_error.store(true, std::memory_order_relaxed);
+        }
+    }
+    av_log_default_callback(avcl, level, fmt, vl);
+}
+} // namespace
 
 FfmpegDecoder::~FfmpegDecoder() {
     if (sws_)            sws_freeContext(sws_);
@@ -36,6 +67,10 @@ static AVPixelFormat get_hw_format_cb(AVCodecContext* /*ctx*/, const AVPixelForm
 }
 
 bool FfmpegDecoder::init(VideoCodec codec) {
+    // Install our log interceptor once per process (VIV-82 grey-frame catch).
+    static bool log_cb_installed = false;
+    if (!log_cb_installed) { av_log_set_callback(ffmpeg_log_cb); log_cb_installed = true; }
+
     codec_ = codec;
     AVCodecID codec_id = AV_CODEC_ID_NONE;
     switch (codec) {
@@ -80,6 +115,14 @@ bool FfmpegDecoder::init(VideoCodec codec) {
     // the encoder produces multi-slice output.  HW decode ignores both.
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
+    // No-artifact (VIV-82): make the decoder ERROR on missing references /
+    // broken bitstream ("Could not find ref with POC …") instead of silently
+    // concealing the damage in grey.  Under packet loss the SW HEVC decoder
+    // would otherwise emit grey-filled frames with decode_error_flags UNSET, so
+    // get_frame()'s reject check missed them.  With EXPLODE they surface as a
+    // decode error → get_frame drops → drop-to-keyframe + IDR (a brief freeze,
+    // never grey).
+    ctx_->err_recognition = AV_EF_EXPLODE;
 
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "avcodec_open2 failed");
@@ -148,10 +191,19 @@ bool FfmpegDecoder::decode(const uint8_t* data, size_t len, uint64_t pts,
     pkt_->pts   = static_cast<int64_t>(pts);
     pkt_->flags = keyframe ? AV_PKT_FLAG_KEY : 0;
 
+    g_decode_error.store(false, std::memory_order_relaxed);
     int rc = avcodec_send_packet(ctx_, pkt_);
     pkt_->data  = nullptr;
     pkt_->size  = 0;
     pkt_->flags = 0;
+    // libav logged a missing-ref/concealment while decoding this packet — the
+    // output would be grey.  Reject it → the upper layer drops + IDRs (VIV-82).
+    if (rc >= 0 && g_decode_error.load(std::memory_order_relaxed)) {
+        // libav concealed a missing ref this decode → the output would be grey.
+        corrupt_ = true;
+        note_hw_failure();
+        return false;
+    }
     if (rc < 0) {
         // ANY send error — including EAGAIN — taints the decoder.  EAGAIN
         // means libav's input queue is full (we're CPU-bound and the
@@ -206,6 +258,7 @@ bool FfmpegDecoder::reinit() {
     }
     ctx_->thread_count = 0;
     ctx_->thread_type  = FF_THREAD_SLICE;
+    ctx_->err_recognition = AV_EF_EXPLODE;  // reject broken frames, never grey (VIV-82)
     if (avcodec_open2(ctx_, dec, nullptr) < 0) {
         log::error("FFDec", "reinit: avcodec_open2 failed");
         avcodec_free_context(&ctx_);
@@ -265,8 +318,13 @@ bool FfmpegDecoder::get_frame(YuvFrame& out) {
     //     and render as garbage/frozen output until the next IDR.
     // Either way the picture is broken — drop it and force an IDR cycle
     // (project no-artifact rule), rather than displaying a half-decoded frame.
+    // NOTE: VIV-82 tried DISPLAYING decode_error_flags frames (to dodge VAAPI
+    // false positives that were churning IDRs) — but under real loss on a flaky
+    // VAAPI it tears badly AND it broke the HW→SW give-up streak.  So we stay
+    // strict; a genuinely flaky HW path falls back to software via the streak.
     if ((in_frame_->flags & AV_FRAME_FLAG_CORRUPT) ||
-        in_frame_->decode_error_flags != 0) {
+        in_frame_->decode_error_flags != 0 ||
+        g_decode_error.load(std::memory_order_relaxed)) {  // libav logged conceal
         av_frame_unref(in_frame_);
         corrupt_ = true;
         note_hw_failure();
@@ -370,11 +428,30 @@ void FfmpegDecoder::note_hw_failure() {
     // give up on HW so the next reinit() reopens in software (VIV-80).  Only
     // meaningful while actually on the HW path and not already fallen back.
     if (!hw_decode_ || hw_gave_up_) return;
+    // (a) solid consecutive failure — fast path.
     if (++hw_fail_streak_ >= kHwFailGiveUp) {
         hw_gave_up_ = true;
         log::warn("FFDec",
                   "hardware decode failed %d frames running — falling back to "
                   "software decode for this session", hw_fail_streak_);
+        return;
+    }
+    // (b) intermittent-but-persistent failure — windowed path.  The streak
+    // resets on every clean frame, so a flaky decoder that errors once every
+    // few seconds never hits (a); this catches it.
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - hw_win_start_ms_ > kHwFailWindowMs) {
+        hw_win_start_ms_ = now;
+        hw_win_fails_    = 0;
+    }
+    if (++hw_win_fails_ >= kHwFailWindowGiveUp) {
+        hw_gave_up_ = true;
+        log::warn("FFDec",
+                  "hardware decode failed %d times in <%llds — flaky HW, "
+                  "falling back to software decode for this session",
+                  hw_win_fails_,
+                  static_cast<long long>(kHwFailWindowMs / 1000));
     }
 }
 

@@ -1,11 +1,16 @@
 #pragma once
 
 #include "app/view_platform.h"
+#include "app/video_pipeline.h"
 #include "client/net/client_session.h"
+#include "common/utils/spsc_ring.h"
 #include "common/utils/types.h"
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace vivora {
 
@@ -69,7 +74,12 @@ public:
     client::SessionState state() const;
 
 private:
-    static constexpr int MIN_IDR_INTERVAL_MS = 600;
+    // Min interval between IDR requests.  Was a fixed 600ms — but under frequent
+    // loss that throttle IS the freeze floor: a loss shortly after an IDR can't
+    // re-request for 600ms.  Now env-tunable (VIVORA_IDR_INTERVAL_MS), default
+    // 250ms, so recovery retries ~2.5x faster (VIV-82).  The recovery keyframe
+    // is heavily FEC-boosted (kf_m up to 24) so it survives to make this pay off.
+    static int min_idr_interval_ms();
 
     // Set once in init(); read on every iter().
     ViewPlatform*     platform_ = nullptr;
@@ -113,6 +123,31 @@ private:
     TimePoint   disconnect_at_{};
     static constexpr int DISCONNECT_LINGER_MS = 1800;
     void update_status(const char* text);
+
+    // ---- Threaded pipeline (VIV-81; VIVORA_PIPELINE=threaded) -------------
+    // When on, a decode thread pulls compressed frames from q1_, runs them
+    // through the platform's IVideoPipeline, and parks decoded handles in q2_.
+    // The main loop (iter_threaded) hands compressed frames to q1_ and drains
+    // q2_ with the render-penultimate policy to present.  Legacy iter() is
+    // untouched.  pipeline_ is owned by the platform; null → fall back to
+    // legacy even if the flag is set (e.g. platforms without an impl).
+    struct CompressedFrame {
+        std::vector<uint8_t> data;   // ring slot keeps capacity across pushes
+        uint32_t timestamp = 0;
+        uint16_t seq       = 0;
+        bool     keyframe  = false;
+        bool     heartbeat = false;
+        bool     discontinuity = false;  // VIV-82: refs broken (frame dropped before)
+    };
+    bool                 threaded_ = false;
+    IVideoPipeline*      pipeline_ = nullptr;
+    std::unique_ptr<util::SpscRing<CompressedFrame, 8>> q1_;  // main → decode
+    std::unique_ptr<util::SpscRing<FrameHandle, 4>>     q2_;  // decode → main
+    std::thread          decode_thread_;
+    std::atomic<bool>    decode_running_{false};
+    std::atomic<bool>    decode_needs_idr_{false};  // decode → main: reject
+    bool                 iter_threaded();
+    void                 decode_thread_proc();
 
     void teardown();
 };

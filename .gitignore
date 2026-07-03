@@ -20,3 +20,4 @@ third_party/ff/*.exe
 
 # Cloudflare wrangler cache (stray from Pages deploys)
 .wrangler/
+.claude/worktrees/

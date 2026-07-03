@@ -41,6 +41,28 @@ static std::vector<uint8_t> make_data_wire(uint16_t seq_no, uint32_t timestamp,
     return wire;
 }
 
+// Build a synthetic FRAGMENT data wire: one frame_seq, fragment index `frag`
+// written as the first 2 payload bytes (so wire_pkt_key() = seq<<16|frag, i.e.
+// consecutive keys — required by ranged FEC).
+static std::vector<uint8_t> make_frag_wire(uint16_t seq, uint16_t frag,
+                                           uint32_t timestamp, size_t payload_len,
+                                           uint8_t seed) {
+    std::vector<uint8_t> wire(PacketHeader::WIRE_SIZE + payload_len);
+    PacketHeader hdr;
+    hdr.type = PacketType::Video;
+    hdr.seq_no = seq;
+    hdr.timestamp = timestamp;
+    hdr.flags = FLAG_FRAGMENT;
+    hdr.payload_len = static_cast<uint16_t>(payload_len);
+    hdr.serialize(wire.data());
+    uint8_t* pl = wire.data() + PacketHeader::WIRE_SIZE;
+    pl[0] = static_cast<uint8_t>(frag & 0xFF);
+    pl[1] = static_cast<uint8_t>(frag >> 8);
+    for (size_t i = 2; i < payload_len; ++i)
+        pl[i] = static_cast<uint8_t>((seed + i * 31) & 0xFF);
+    return wire;
+}
+
 // Craft an FEC parity wire packet with fully-controlled K/M/parity_idx/group_id
 // (the encoder never emits a mismatched group, so we build malformed ones by
 // hand to exercise the decoder's robustness).  Layout mirrors fec_codec.cpp:
@@ -574,6 +596,47 @@ static void test_extreme_loss_garbage_fuzz() {
     printf("    PASS\n");
 }
 
+// Ranged FEC (VIV-82): large pooled group, contiguous burst loss, variable
+// payload lengths.  Verifies (a) the ranged parity packet stays small (no
+// per-K key list) regardless of K, and (b) recovery rebuilds the exact
+// originals — including their lengths, which ranged derives from each
+// recovered packet's own header rather than a length list.
+static void test_ranged_recovery() {
+    printf("  ranged FEC, pooled K=40 M=10, contiguous burst...\n");
+    FecEncoder enc;
+    enc.set_ranged(true);
+    enc.set_group_size(40);
+    enc.set_parity_count(10);
+
+    std::vector<std::vector<uint8_t>> wires;
+    for (int i = 0; i < 40; ++i)
+        wires.push_back(make_frag_wire(500, static_cast<uint16_t>(i), 2000,
+                                       40 + (i % 7) * 17, static_cast<uint8_t>(i * 3)));
+
+    auto fec = encode_group(enc, wires, 500, 2000, false);
+    assert(fec.size() == 10);
+    // The whole point: ranged parity carries no per-K key list, so it stays
+    // well under an MTU even at large K.
+    for (const auto& f : fec) assert(f.size() < 1400);
+
+    FecDecoder dec;
+    std::vector<std::vector<uint8_t>> recovered;
+    std::vector<std::vector<uint8_t>> delivered;
+    // Drop a contiguous burst of 10 (indices 12..21) — the realistic failure.
+    for (int i = 0; i < 40; ++i) {
+        if (i >= 12 && i < 22) continue;
+        dec.feed(wires[i].data(), wires[i].size(), recovered);
+        delivered.push_back(wires[i]);
+    }
+    for (auto& f : fec) dec.feed(f.data(), f.size(), recovered);
+    dec.tick(recovered);
+
+    assert(recovered.size() == 10);
+    int hits = verify_all_present(wires, delivered, recovered);
+    assert(hits == 40);   // all originals present (delivered ∪ recovered), exact bytes
+    printf("    PASS\n");
+}
+
 int main() {
 #ifdef _MSC_VER
     // Route CRT/STL debug assertions (e.g. "vector subscript out of range")
@@ -598,6 +661,7 @@ int main() {
     test_fuzz_within_budget();
     test_group_id_km_mismatch_no_oob();
     test_extreme_loss_garbage_fuzz();
+    test_ranged_recovery();
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }

@@ -11,6 +11,8 @@
 
 namespace vivora::host {
 
+class PacedSender;  // host/session/paced_sender.h (VIV-82)
+
 // Fragments an encoded frame and sends all packets over UDP.
 // Keeps a ring buffer of recently-sent fragments so they can be retransmitted
 // on client NACK (selective repeat). Generates XOR FEC parity packets.
@@ -27,6 +29,11 @@ public:
     static constexpr int MAX_RETX_PER_POLL = 30;
 
     explicit VideoSender(net::IUdpSocket& socket) : socket_(socket) {}
+
+    // Route all wire sends through a decoupled paced sender (VIV-82) instead
+    // of bursting straight to the socket.  Null restores the direct path
+    // (used by transport_test).
+    void set_paced_sender(PacedSender* p) { paced_ = p; }
 
     void reset_retx_budget() { retx_budget_ = MAX_RETX_PER_POLL; }
 
@@ -54,6 +61,20 @@ public:
     // broadcast.  Returns number of packets sent, or -1 on error.
     int send_prepared(const net::SocketAddr& dest,
                       crypto::CipherState* send_cs = nullptr);
+
+    // Send a RANGE [begin, end) of an explicit wire vector (seal per dest,
+    // relay-wrap as needed).  Used by the keyframe send-pacer (VIV-82), which
+    // drains a copy of the prepared wires a chunk per host-loop tick.
+    int send_wire_range(const std::vector<std::vector<uint8_t>>& wires,
+                        size_t begin, size_t end,
+                        const net::SocketAddr& dest,
+                        crypto::CipherState* send_cs);
+
+    // The wires produced by the last prepare_frame() — the pacer copies these
+    // for a keyframe so the next P-frame's prepare_frame() can overwrite them.
+    const std::vector<std::vector<uint8_t>>& prepared_wires() const {
+        return prepared_wires_;
+    }
 
     // Force-emit parity for the in-progress FEC group, even if it hasn't
     // reached K data shards yet.  Replaces prepared_wires_ with parity-only
@@ -88,6 +109,33 @@ public:
     uint8_t fec_parity_count() const { return fec_encoder_.parity_count(); }
     float last_loss_rate() const { return last_loss_rate_; }
 
+    // Per-frame pooled FEC (VIV-82): one RS group per frame with parity as a
+    // PERCENTAGE of the frame (pooled, burst-resilient) instead of fixed-K=10
+    // rolling groups.  Gated; off = legacy behaviour.
+    void set_per_frame_fec(bool on) { per_frame_fec_ = on; fec_encoder_.set_ranged(on); }
+    bool per_frame_fec() const { return per_frame_fec_; }
+
+    // Legacy FEC group size.  Bigger K recovers a bigger burst at the SAME
+    // overhead % (M scales with K) — see host_session start() (VIV-82).
+    void set_fec_group_size(uint8_t k) { fec_encoder_.set_group_size(k); }
+
+    // Burst-resilient interleaving depth (VIV-82).  >1 splits each frame into D
+    // groups and transmits them round-robin, so a consecutive wire burst hits D
+    // groups by ~1/D each instead of wiping one whole group.  1 = off (legacy
+    // send order).  Env VIVORA_FEC_INTERLEAVE.
+    void set_fec_interleave(uint8_t d) { fec_interleave_ = d < 1 ? 1 : d; }
+    uint8_t fec_interleave() const { return fec_interleave_; }
+
+    // Current redundancy overhead as a percentage — used by the host-loop wire
+    // carve-out (encoder_bps = wire * 100 / (100 + pct)).  Per-frame mode: the
+    // steady percentage; legacy: 100*M/K (equivalent to the old K/(K+M) carve).
+    uint32_t fec_overhead_pct() const {
+        if (per_frame_fec_) return static_cast<uint32_t>(current_fec_pct());
+        uint8_t k = fec_encoder_.group_size();
+        uint8_t m = fec_encoder_.parity_count();
+        return k ? static_cast<uint32_t>(100u * m / k) : 0;
+    }
+
     // Feed RTT for proactive K lowering on WiFi stalls.
     void on_rtt(double rtt_ms);
 
@@ -107,6 +155,18 @@ private:
         return (static_cast<uint32_t>(seq) << 16) | frag;
     }
 
+    // Per-frame pooled FEC packetization (VIV-82): one RS group per frame
+    // (split into <=255-packet groups), parity = current_fec_pct()% of K.
+    void prepare_frame_per_frame(const uint8_t* data, size_t data_len,
+                                 uint16_t frame_seq, uint32_t timestamp,
+                                 bool keyframe, bool fec_enabled);
+
+    // Interleaved FEC packetization (VIV-82): D contiguous-key groups sent
+    // round-robin for burst resilience.  See set_fec_interleave().
+    void prepare_frame_interleaved(const uint8_t* data, size_t data_len,
+                                   uint16_t frame_seq, uint32_t timestamp,
+                                   bool keyframe);
+
     void store_retx(uint32_t key, const std::vector<uint8_t>& wire);
     // Linear-scan lookup over the ring.  RETX_BUFFER_CAPACITY (2048) element
     // comparisons are faster than an unordered_map miss chain once you
@@ -114,6 +174,7 @@ private:
     const std::vector<uint8_t>* find_retx(uint32_t key) const;
 
     net::IUdpSocket& socket_;
+    PacedSender*     paced_ = nullptr;  // VIV-82: when set, sends route here
 
     // Relay state.  When relay_active_, every dest passed to send_prepared
     // is ignored at the wire layer (peer is implied by the binding) and
@@ -159,6 +220,16 @@ private:
     uint64_t bytes_sent_ = 0;
     uint64_t retransmits_ = 0;
     float last_loss_rate_ = 0.0f;
+
+    // Per-frame FEC (VIV-82).  current_fec_pct() maps the adaptive M ladder
+    // (steady_m_) to a redundancy percentage: ~25% floor, ramping to a 75% cap
+    // as failure-driven M climbs under burst loss.
+    bool per_frame_fec_ = false;
+    uint8_t fec_interleave_ = 1;   // VIV-82 burst interleaving depth; 1 = off
+    int current_fec_pct() const {
+        int p = static_cast<int>(steady_m_) * 10;
+        return p < 25 ? 25 : (p > 75 ? 75 : p);
+    }
 
     // Prepared wire packets (data + FEC) ready for send_prepared().
     std::vector<std::vector<uint8_t>> prepared_wires_;

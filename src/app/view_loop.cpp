@@ -10,6 +10,8 @@
 #include "client/net/client_session.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 
 #include <chrono>
@@ -42,8 +44,347 @@ void ViewLoopState::update_status(const char* text) {
 void ViewLoopState::teardown() {
     if (torn_down_) return;
     torn_down_ = true;
+    // Stop the decode thread before the session/platform (and the pipeline it
+    // drives) are torn down (VIV-81).
+    if (decode_running_.exchange(false)) {
+        if (decode_thread_.joinable()) decode_thread_.join();
+    }
     session_.stop();
     if (platform_) platform_->shutdown();
+}
+
+// Per-frame lifecycle tracing (VIV-82): VIVORA_FTRACE=1 logs recv→submit→
+// decode/drop/reject→render + every IDR request, each with the frame seq, to
+// pinpoint where frames are lost under loss.  Off by default (very chatty).
+static bool ftrace() {
+    static const bool on = [] {
+        const char* e = std::getenv("VIVORA_FTRACE");
+        return e && e[0] == '1';
+    }();
+    return on;
+}
+
+int ViewLoopState::min_idr_interval_ms() {
+    // Read once.  Lower = faster recovery retries under loss (shorter freezes)
+    // at the cost of more IDRs on the wire; clamp to a sane range (VIV-82).
+    static const int v = [] {
+        const char* e = std::getenv("VIVORA_IDR_INTERVAL_MS");
+        int x = e ? std::atoi(e) : 250;
+        return x < 50 ? 50 : (x > 2000 ? 2000 : x);
+    }();
+    return v;
+}
+
+void ViewLoopState::decode_thread_proc() {
+    bool got_kf = false;
+    CompressedFrame cf;
+    // Per-second decode counters — logged only under VIVORA_FTRACE (VIV-82).
+    uint64_t d_pop=0, d_sub=0, d_prod=0, d_dropf=0, d_flag=0, d_rej=0, d_poolfull=0;
+    auto d_last = std::chrono::steady_clock::now();
+    while (decode_running_.load(std::memory_order_acquire)) {
+        auto d_now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                d_now - d_last).count() >= 1000) {
+            if (ftrace())
+                log::info("DEC", "got_kf=%d pop=%llu sub=%llu prod=%llu dropP=%llu "
+                      "flag=%llu rej=%llu poolfull=%llu",
+                      got_kf?1:0, (unsigned long long)d_pop, (unsigned long long)d_sub,
+                      (unsigned long long)d_prod, (unsigned long long)d_dropf,
+                      (unsigned long long)d_flag, (unsigned long long)d_rej,
+                      (unsigned long long)d_poolfull);
+            d_pop=d_sub=d_prod=d_dropf=d_flag=d_rej=d_poolfull=0;
+            d_last = d_now;
+        }
+        if (!q1_->try_pop(cf)) {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            continue;
+        }
+        ++d_pop;
+        // Network loss: a frame delivered right after a dropped one has a broken
+        // reference chain — decoding it (and its successors) greys/tears the
+        // picture.  The assembler tags it discontinuity; drop from here until the
+        // next keyframe (VIV-82 no-artifact).  Per-frame so there's no lag/race
+        // like the old global flag had.  A keyframe is self-contained → keep it.
+        if (cf.discontinuity && !cf.keyframe) {
+            got_kf = false; ++d_flag;
+            if (ftrace()) log::info("FTRACE", "disc  seq=%u -> drop-to-kf", cf.seq);
+        }
+        // Reinit on EVERY keyframe, not just the first after a gap.  libav 4.4
+        // HEVC leaks POC tracking across IDRs, so a SECOND keyframe decoded in
+        // the same context — common under IDR churn (loss → we request IDR → the
+        // host sends several keyframes close together) — throws "Duplicate POC" /
+        // "Could not find ref" → reject → we request IDR again → a self-
+        // sustaining churn that was the real error/freeze source under loss.  A
+        // fresh context per keyframe breaks the cycle (VIV-82).
+        if (cf.keyframe) {
+            got_kf = true;
+            pipeline_->flush_decoder();
+            if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + reinit", cf.seq);
+        } else if (!got_kf) {
+            // Keyframe gating: drop P-frames until the first keyframe of a GOP.
+            // Keep asking for an IDR while starved — otherwise, after a loss-
+            // triggered got_kf=false, the next keyframe is only the periodic GOP
+            // one (~30s away).  decode_needs_idr_ is throttled in iter_threaded.
+            if (ftrace()) log::info("FTRACE", "dropP seq=%u (no kf yet)", cf.seq);
+            decode_needs_idr_.store(true, std::memory_order_release);
+            ++d_dropf; continue;
+        }
+        ++d_sub;
+        if (ftrace()) log::info("FTRACE", "submit seq=%u kf=%d", cf.seq, cf.keyframe ? 1 : 0);
+        SubmitStatus st = pipeline_->submit(cf.data.data(), cf.data.size(),
+                                            cf.timestamp, cf.keyframe, cf.seq);
+        if (st == SubmitStatus::Rejected) {
+            if (cf.heartbeat) continue;  // harmless — next heartbeat replaces
+            ++d_rej;
+            if (ftrace()) log::info("FTRACE", "REJECT seq=%u (decode error) -> reinit + IDR", cf.seq);
+            session_.note_decoder_rejected();
+            got_kf = false;
+            pipeline_->reinit_decoder();
+            decode_needs_idr_.store(true, std::memory_order_release);
+            continue;
+        }
+        // Pull every decoded frame this submit produced into Q2.
+        for (;;) {
+            FrameHandle h;
+            PollStatus ps = pipeline_->poll_frame(h);
+            if (ps == PollStatus::PoolFull) { ++d_poolfull; break; }
+            if (ps != PollStatus::Produced) break;     // Empty
+            ++d_prod;
+            if (ftrace()) log::info("FTRACE", "decoded seq=%u", h.seq);
+            session_.note_decoder_accepted();
+            // Q2 full: re-reserve the slot (NOT recycle — recycle would make the
+            // decode thread a second SPSC free-list producer and deadlock, VIV-82).
+            if (!q2_->try_push(h)) {
+                if (ftrace()) log::info("FTRACE", "Q2FULL drop decoded seq=%u", h.seq);
+                pipeline_->unreserve(h);
+            }
+        }
+    }
+}
+
+bool ViewLoopState::iter_threaded() {
+    auto& session  = session_;
+    auto& platform = *platform_;
+    const auto& cfg = *cfg_;
+
+    if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) return false;
+    if (user_disconnect_.load(std::memory_order_relaxed)) {
+        log::info("VIEW", "Disconnect requested from in-stream menu");
+        return false;
+    }
+    if (!platform.pump_events()) return false;
+    session.poll();
+
+    // Lazy init once Connected: pipeline decoder + decode thread, audio, clock.
+    if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
+        if (pipeline_->init_decoder(session.host_codec())) {
+            decoder_ready_ = true;
+            decode_running_.store(true, std::memory_order_release);
+            decode_thread_ = std::thread(&ViewLoopState::decode_thread_proc, this);
+            log::info("VIEW", "Decode thread started");
+        }
+    }
+    if (!audio_started_ && session.state() == client::SessionState::Connected) {
+        if (session.start_audio()) log::info("VIEW", "Audio playback started");
+        audio_started_ = true;
+    }
+    if (!session_started_ && session.state() == client::SessionState::Connected) {
+        session_start_ = Clock::now();
+        session_started_ = true;
+    }
+
+    // Status overlay before the first frame (VIV-62).
+    if (frames_decoded_ == 0) {
+        const auto st = session.state();
+        if (st == client::SessionState::Connecting) update_status("Connecting…");
+        else if (st == client::SessionState::Connected) update_status("Waiting for host to accept…");
+    } else {
+        update_status("");
+    }
+
+    // Disconnect teardown / linger.
+    if (session.state() == client::SessionState::Disconnected) {
+        if (frames_decoded_ > 0) {
+            log::info("VIEW", "Disconnected from host");
+            return false;
+        }
+        if (!disconnecting_) {
+            disconnecting_ = true;
+            disconnect_at_ = Clock::now();
+            update_status("Host didn't accept the connection, or is unreachable");
+        }
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+            Clock::now() - disconnect_at_).count();
+        if (waited > DISCONNECT_LINGER_MS) return false;
+        return true;
+    }
+
+    // Network-loss → IDR (only once a frame is flowing; the decode thread owns
+    // decode-error recovery separately via decode_needs_idr_).
+    const uint64_t drops = session.frames_dropped();
+    if (drops > last_drops_) {
+        // Per-frame discontinuity (set on the frame right after the gap) now
+        // handles dropping the broken-ref frames — no global flag needed (VIV-82).
+        auto now = Clock::now();
+        auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_idr_request_).count();
+        if (frames_decoded_ > 0 && since > min_idr_interval_ms()) {
+            if (ftrace()) log::info("FTRACE", "IDR-REQ reason=frame-loss dropped=%llu "
+                                    "(reset_video_stream + request_idr)",
+                                    (unsigned long long)(drops - last_drops_));
+            session.reset_video_stream();
+            session.request_idr();
+            last_idr_request_ = now;
+            log::warn("VIEW", "Frame loss (%llu dropped) — requested IDR",
+                      (unsigned long long)(drops - last_drops_));
+        } else if (ftrace()) {
+            log::info("FTRACE", "loss dropped=%llu but IDR THROTTLED (%lldms<%d) "
+                      "— decode thread keeps dropping meanwhile",
+                      (unsigned long long)(drops - last_drops_),
+                      (long long)since, min_idr_interval_ms());
+        }
+        last_drops_ = drops;
+    }
+    // No frame yet → keep asking for an IDR (lost first keyframe).
+    if (frames_decoded_ == 0 && session.state() == client::SessionState::Connected) {
+        auto now = Clock::now();
+        auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_idr_request_).count();
+        if (since > min_idr_interval_ms()) {
+            session.request_idr();
+            last_idr_request_ = now;
+        }
+    }
+
+    // Hand newly assembled compressed frames to the decode thread.
+    net::AssembledFrame nf;
+    while (session.pop_frame(nf)) {
+        if (ftrace()) log::info("FTRACE", "recv  seq=%u kf=%d disc=%d hb=%d len=%zu",
+                                nf.seq_no, nf.keyframe ? 1 : 0, nf.discontinuity ? 1 : 0,
+                                nf.heartbeat ? 1 : 0, nf.data.size());
+        CompressedFrame cf;
+        cf.data      = std::move(nf.data);   // ring slot keeps capacity
+        cf.timestamp = nf.timestamp;
+        cf.seq       = nf.seq_no;
+        cf.keyframe  = nf.keyframe;
+        cf.heartbeat = nf.heartbeat;
+        cf.discontinuity = nf.discontinuity;  // VIV-82: broken refs → drop, no grey
+        if (!q1_->try_push(cf)) {
+            // Q1 full — decode thread far behind; force a clean resync.
+            if (ftrace()) log::info("FTRACE", "Q1FULL drop recv seq=%u -> IDR", cf.seq);
+            decode_needs_idr_.store(true, std::memory_order_release);
+        }
+    }
+
+    // Decode thread reported a decode error → no-artifact IDR recovery.
+    // STICKY: only clear the flag once we actually send the IDR.  Clearing it
+    // unconditionally (exchange) would drop the request whenever the throttle
+    // blocked it, leaving the decode thread waiting for a keyframe nobody asks
+    // for — a multi-second startup stall until the host's periodic IDR.
+    if (decode_needs_idr_.load(std::memory_order_acquire)) {
+        auto now = Clock::now();
+        auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_idr_request_).count();
+        if (since > min_idr_interval_ms()) {
+            if (ftrace()) log::info("FTRACE", "IDR-REQ reason=decode-error "
+                                    "(reset_video_stream + request_idr)");
+            decode_needs_idr_.store(false, std::memory_order_release);
+            session.reset_video_stream();
+            session.request_idr();
+            last_idr_request_ = now;
+            log::warn("VIEW", "decode-error IDR requested (threaded)");
+        }
+    }
+
+    // Cursor + stream-size sync (same as legacy).
+    if (session.state() == client::SessionState::Connected) {
+        protocol::StreamInfoMessage info;
+        if (session.take_new_stream_info(info)) {
+            platform.set_stream_size(info.width, info.height);
+        }
+        protocol::CursorShapeMessage new_shape;
+        if (session.take_new_cursor_shape(new_shape)) {
+            platform.upload_cursor_shape(new_shape);
+        }
+        if (session.has_cursor_position()) {
+            platform.update_cursor_position(session.cursor_position());
+        }
+    }
+
+    // Drain Q2 with the render-penultimate policy: drop stale, render the
+    // second-newest (1-frame cushion), keep the newest for next tick.
+    int rendered = 0;
+    if (q2_) {
+        while (q2_->size() > 2) {
+            FrameHandle d;
+            if (q2_->try_pop(d)) {
+                if (ftrace()) log::info("FTRACE", "RENDER-DROP stale seq=%u (penultimate)", d.seq);
+                pipeline_->recycle(d);
+            }
+        }
+        FrameHandle h;
+        if (q2_->try_pop(h)) {
+            if (ftrace()) log::info("FTRACE", "render seq=%u", h.seq);
+            pipeline_->present(h);   // copies into the view + schedules paint
+            pipeline_->recycle(h);
+            rendered = 1;
+        }
+    }
+    frames_decoded_ += rendered;
+
+    // Stats / HUD once per second (mirrors legacy iter()).
+    auto now_check = Clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+            now_check - last_log_time_).count() >= 1000) {
+        double window_sec = std::chrono::duration<double>(now_check - last_log_time_).count();
+        double inst_fps = window_sec > 0
+            ? (frames_decoded_ - last_log_frames_) / window_sec : 0.0;
+        last_log_time_ = now_check;
+        last_log_frames_ = frames_decoded_;
+        // Network-assembled frames/sec (arrived) — VIV-82: the threaded stats
+        // block never computed this, so the HUD's "arrived" read 0.
+        uint64_t arrived_now = session.receiver()
+                               ? session.receiver()->frames_completed() : 0;
+        last_arrived_fps_ = window_sec > 0
+            ? static_cast<float>((arrived_now - last_arrived_count_) / window_sec)
+            : 0.0f;
+        last_arrived_count_ = arrived_now;
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps (threaded)",
+                  (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
+                  session.last_bitrate_bps() / 1000);
+
+        StatsView v{};
+        v.fps          = static_cast<float>(inst_fps);
+        v.arrived_fps  = last_arrived_fps_;
+        v.rtt_ms       = static_cast<float>(session.rtt_ms());
+        v.bitrate_kbps = session.last_bitrate_bps() / 1000;
+        v.encoding_kbps = session.encoding_kbps();  // VIV-82: HostStats target
+        v.width        = session.stream_width();
+        v.height       = session.stream_height();
+        v.total_rejected = session.total_rejected();
+        v.total_dropped  = session.total_dropped();
+        if (auto* r = session.receiver()) {
+            v.fec_recovered     = r->fec_recovered();
+            v.fec_groups_failed = r->fec_failed();
+        }
+        v.target_fps = session.perf_target_fps();
+        v.reject_pct = session.last_reject_pct();
+        v.drop_pct   = session.last_drop_pct();
+        v.audio_pps  = session.last_audio_pps();
+        v.plc_pct    = session.last_plc_pct();
+        std::snprintf(v.codec, sizeof(v.codec), "%s",
+                      session.host_codec() == VideoCodec::H264 ? "H.264" : "HEVC");
+        std::snprintf(v.transport, sizeof(v.transport), "%s", session.transport_label());
+        v.session_seconds = session_started_
+            ? static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                  now_check - session_start_).count())
+            : 0;
+        std::snprintf(v.decoder, sizeof(v.decoder), "SW HEVC");
+        platform.update_stats(v);
+    }
+
+    if (rendered == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return true;
 }
 
 bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
@@ -187,11 +528,29 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     };
     platform.set_menu_actions(actions);
 
+    // Threaded pipeline (VIV-81): OPT-IN via VIVORA_PIPELINE=threaded, only if
+    // the platform provides an IVideoPipeline.  Briefly defaulted on (VIV-82) but
+    // it showed a stuck/grey picture hidden by the render-present fps counter;
+    // back to opt-in until it's visually validated.  Default = legacy serial.
+    if (const char* p = std::getenv("VIVORA_PIPELINE")) {
+        if (std::strcmp(p, "threaded") == 0) {
+            pipeline_ = platform.video_pipeline();
+            if (pipeline_) {
+                threaded_ = true;
+                q1_ = std::make_unique<util::SpscRing<CompressedFrame, 8>>();
+                q2_ = std::make_unique<util::SpscRing<FrameHandle, 4>>();
+                log::info("VIEW", "Threaded view loop enabled (decode thread + lock-free Q1/Q2)");
+            }
+        }
+    }
+
     last_log_time_ = Clock::now();
     return true;
 }
 
 bool ViewLoopState::iter() {
+    if (threaded_) return iter_threaded();
+
     auto& session  = session_;
     auto& platform = *platform_;
     const auto& cfg = *cfg_;
@@ -277,7 +636,7 @@ bool ViewLoopState::iter() {
         auto now = Clock::now();
         auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (got_keyframe_ && since_idr_req > MIN_IDR_INTERVAL_MS) {
+        if (got_keyframe_ && since_idr_req > min_idr_interval_ms()) {
             session.reset_video_stream();
             session.request_idr();
             last_idr_request_ = now;
@@ -292,12 +651,12 @@ bool ViewLoopState::iter() {
     // No-keyframe-yet retry: a completely lost keyframe (all UDP
     // fragments dropped in one WiFi burst) is invisible to the
     // assembler's gap detection.  Shares last_idr_request_ with the
-    // drop block via MIN_IDR_INTERVAL_MS.
+    // drop block via min_idr_interval_ms().
     if (!got_keyframe_ && session.state() == client::SessionState::Connected) {
         auto now = Clock::now();
         auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_idr_request_).count();
-        if (since_idr_req > MIN_IDR_INTERVAL_MS) {
+        if (since_idr_req > min_idr_interval_ms()) {
             session.request_idr();
             last_idr_request_ = now;
             log::warn("VIEW", "No keyframe yet, requesting IDR");
@@ -337,7 +696,7 @@ bool ViewLoopState::iter() {
             auto now = Clock::now();
             auto since_idr_req = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - last_idr_request_).count();
-            if (since_idr_req > MIN_IDR_INTERVAL_MS) {
+            if (since_idr_req > min_idr_interval_ms()) {
                 session.reset_video_stream();
                 session.request_idr();
                 last_idr_request_ = now;
@@ -379,8 +738,9 @@ bool ViewLoopState::iter() {
             : 0.0;
         last_log_time_ = now;
         last_log_frames_ = frames_decoded_;
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms",
-            (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms());
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps",
+            (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
+            session.last_bitrate_bps() / 1000);
 
         uint64_t arrived_now = session.receiver()
                                ? session.receiver()->frames_completed()
@@ -395,6 +755,7 @@ bool ViewLoopState::iter() {
         v.arrived_fps  = last_arrived_fps_;
         v.rtt_ms       = static_cast<float>(session.rtt_ms());
         v.bitrate_kbps   = session.last_bitrate_bps() / 1000;
+        v.encoding_kbps  = session.encoding_kbps();
         v.width          = session.stream_width();
         v.height         = session.stream_height();
         v.total_rejected = session.total_rejected();

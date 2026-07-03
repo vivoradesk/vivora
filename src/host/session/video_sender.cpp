@@ -1,4 +1,5 @@
 #include "host/session/video_sender.h"
+#include "host/session/paced_sender.h"
 #include "common/net/relay_protocol.h"
 #include <cstring>
 #include "common/crypto/packet_crypto.h"
@@ -27,6 +28,21 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
                                 bool keyframe, bool fec_enabled)
 {
     prepared_wires_.clear();
+
+    if (per_frame_fec_) {
+        prepare_frame_per_frame(data, data_len, frame_seq, timestamp,
+                                keyframe, fec_enabled);
+        return;
+    }
+
+    // Burst-resilient interleaving (VIV-82): split the frame into D groups with
+    // consecutive keys, then transmit their packets round-robin so a consecutive
+    // wire burst hits D groups by ~1/D each (recoverable) instead of wiping one
+    // group whole.  Decoder is unchanged — it matches by key, order-independent.
+    if (fec_interleave_ > 1 && fec_enabled) {
+        prepare_frame_interleaved(data, data_len, frame_seq, timestamp, keyframe);
+        return;
+    }
 
     // A keyframe spans ~40 UDP fragments; losing a single FEC group worth
     // of packets stalls the stream until the next IDR retry.  Flush the
@@ -84,6 +100,138 @@ void VideoSender::prepare_frame(const uint8_t* data, size_t data_len,
     packets_sent_ += static_cast<uint64_t>(frag_idx);
 }
 
+void VideoSender::prepare_frame_per_frame(const uint8_t* data, size_t data_len,
+                                          uint16_t frame_seq, uint32_t timestamp,
+                                          bool keyframe, bool fec_enabled)
+{
+    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp,
+                                        keyframe, /*heartbeat=*/!fec_enabled);
+    const int N = static_cast<int>(packets.size());
+    uint16_t frag_idx = 0;
+
+    if (!fec_enabled) {
+        // Heartbeat: no parity — a lost one is replaced by the next ~16ms later.
+        for (auto& pkt : packets) {
+            prepared_wires_.push_back(pkt.serialize());
+            ++frag_idx;
+        }
+        packets_sent_ += static_cast<uint64_t>(frag_idx);
+        return;
+    }
+
+    // Pool parity over the whole frame: M = pct% of K, so a contiguous burst is
+    // covered by the frame's shared redundancy instead of overflowing one small
+    // fixed-K group.  Keyframes take the max (losing one kills the whole GOP).
+    // GF(256) caps a group at K+M <= 255, so split large frames into groups.
+    int pct = current_fec_pct();
+    if (keyframe && pct < 75) pct = 75;
+    // Ranged FEC keeps the parity packet a fixed size, so K can span the whole
+    // frame (pooled parity).  Cap K so K + M stays within GF(256)'s 255 shards
+    // at this parity %: K*(1 + pct/100) <= 255.  Bigger frames split.
+    const int MAX_K = (255 * 100) / (100 + pct);
+
+    int idx = 0;
+    while (idx < N) {
+        const int K = std::min(N - idx, MAX_K);
+        int M = (K * pct + 99) / 100;          // ceil(K * pct / 100)
+        if (M < 1) M = 1;
+        if (K + M > 255) M = 255 - K;
+        fec_encoder_.set_group_size(static_cast<uint8_t>(K));
+        fec_encoder_.set_parity_count(static_cast<uint8_t>(M));
+
+        for (int j = 0; j < K; ++j) {
+            auto wire = packets[idx + j].serialize();
+            auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
+                                               frame_seq, timestamp);
+            store_retx(retx_key(frame_seq, frag_idx), wire);
+            prepared_wires_.push_back(std::move(wire));
+            for (auto& w : fec_wires) prepared_wires_.push_back(std::move(w));
+            ++frag_idx;
+        }
+        idx += K;
+    }
+    packets_sent_ += static_cast<uint64_t>(frag_idx);
+}
+
+void VideoSender::prepare_frame_interleaved(const uint8_t* data, size_t data_len,
+                                            uint16_t frame_seq, uint32_t timestamp,
+                                            bool keyframe)
+{
+    auto packets = fragmenter_.fragment(data, data_len, frame_seq, timestamp,
+                                        keyframe, /*heartbeat=*/false);
+    const int N = static_cast<int>(packets.size());
+    if (N == 0) return;
+
+    // Parity budget: same % as the non-interleaved path (keyframes take the max
+    // — losing one kills the whole GOP).  Interleaving lets a LOWER M cover the
+    // same burst, but we keep the % so overhead is unchanged (carve-out invariant).
+    int pct = current_fec_pct();
+    if (keyframe && pct < 75) pct = 75;
+
+    // Group count: at least the interleave depth, more if the frame is big enough
+    // that N/D would exceed the encoder's 128-shard group cap.
+    int G = fec_interleave_;
+    if (G > N) G = N;
+    while ((N + G - 1) / G > 128) ++G;   // keep per-group K <= 128
+
+    fec_encoder_.set_ranged(true);       // consecutive keys per group → tiny header
+
+    struct GroupWires {
+        std::vector<std::vector<uint8_t>> data;
+        std::vector<std::vector<uint8_t>> parity;
+    };
+    std::vector<GroupWires> groups;
+    groups.reserve(G);
+
+    int idx = 0;
+    for (int g = 0; g < G; ++g) {
+        // Distribute the remainder across the first groups so sizes differ by ≤1.
+        const int K = (N - idx) / (G - g);
+        int M = (K * pct + 99) / 100;    // ceil(K * pct / 100)
+        if (M < 1) M = 1;
+        if (K + M > 255) M = 255 - K;
+        fec_encoder_.set_group_size(static_cast<uint8_t>(K));
+        fec_encoder_.set_parity_count(static_cast<uint8_t>(M));
+
+        GroupWires gw;
+        gw.data.reserve(K);
+        for (int j = 0; j < K; ++j) {
+            const int fi = idx + j;
+            auto wire = packets[fi].serialize();
+            store_retx(retx_key(frame_seq, static_cast<uint16_t>(fi)), wire);
+            auto fec_wires = fec_encoder_.feed(wire.data(), wire.size(),
+                                               frame_seq, timestamp);
+            gw.data.push_back(std::move(wire));
+            for (auto& w : fec_wires) gw.parity.push_back(std::move(w));
+        }
+        // The group closes exactly at its K-th packet, so feed() already emitted
+        // the parity; flush() as a defensive no-op in case K was clamped.
+        if (gw.parity.empty()) {
+            auto fw = fec_encoder_.flush(frame_seq, timestamp);
+            for (auto& w : fw) gw.parity.push_back(std::move(w));
+        }
+        groups.push_back(std::move(gw));
+        idx += K;
+    }
+
+    // Transpose: round-robin the data packets across groups (col 0 of every
+    // group, then col 1, …), then the parity the same way.  Now consecutive wire
+    // packets belong to different groups, so a burst spreads across all of them.
+    size_t max_d = 0;
+    for (auto& g : groups) max_d = std::max(max_d, g.data.size());
+    for (size_t j = 0; j < max_d; ++j)
+        for (auto& g : groups)
+            if (j < g.data.size()) prepared_wires_.push_back(std::move(g.data[j]));
+
+    size_t max_p = 0;
+    for (auto& g : groups) max_p = std::max(max_p, g.parity.size());
+    for (size_t j = 0; j < max_p; ++j)
+        for (auto& g : groups)
+            if (j < g.parity.size()) prepared_wires_.push_back(std::move(g.parity[j]));
+
+    packets_sent_ += static_cast<uint64_t>(N);
+}
+
 bool VideoSender::flush_pending_fec(uint16_t frame_seq, uint32_t timestamp) {
     auto fec_wires = fec_encoder_.flush(frame_seq, timestamp);
     if (fec_wires.empty()) return false;
@@ -92,13 +240,16 @@ bool VideoSender::flush_pending_fec(uint16_t frame_seq, uint32_t timestamp) {
     return true;
 }
 
-int VideoSender::send_prepared(const net::SocketAddr& dest,
-                               crypto::CipherState* send_cs) {
+int VideoSender::send_wire_range(const std::vector<std::vector<uint8_t>>& wires,
+                                 size_t begin, size_t end,
+                                 const net::SocketAddr& dest,
+                                 crypto::CipherState* send_cs) {
     // Max sealed wire: ~1460B (FEC parity + 24B AEAD).  2048 is plenty and
     // lives on the stack so there's no allocation on the hot path.
     uint8_t sealed[2048];
     int sent = 0;
-    for (const auto& wire : prepared_wires_) {
+    for (size_t wi = begin; wi < end; ++wi) {
+        const auto& wire = wires[wi];
         const uint8_t* out_data;
         size_t         out_len;
         if (send_cs) {
@@ -124,9 +275,11 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            r = socket_.send_to(wrap, wn, relay_addr_);
+            r = paced_ ? paced_->send_to(wrap, wn, relay_addr_)
+                       : socket_.send_to(wrap, wn, relay_addr_);
         } else {
-            r = socket_.send_to(out_data, out_len, dest);
+            r = paced_ ? paced_->send_to(out_data, out_len, dest)
+                       : socket_.send_to(out_data, out_len, dest);
         }
         if (r < 0) {
             // Throttled — see PosixUdpSocket::send_to.  The socket layer
@@ -139,7 +292,7 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
             if (now - last_log >= std::chrono::seconds(1)) {
                 log::error("VideoSender",
                            "send_to failed at packet %d/%zu (x%llu suppressed)",
-                           sent, prepared_wires_.size(),
+                           sent, end,
                            static_cast<unsigned long long>(suppressed));
                 last_log = now;
                 suppressed = 0;
@@ -152,6 +305,12 @@ int VideoSender::send_prepared(const net::SocketAddr& dest,
         sent++;
     }
     return sent;
+}
+
+int VideoSender::send_prepared(const net::SocketAddr& dest,
+                               crypto::CipherState* send_cs) {
+    return send_wire_range(prepared_wires_, 0, prepared_wires_.size(),
+                           dest, send_cs);
 }
 
 int VideoSender::send_frame(const uint8_t* data, size_t data_len,
@@ -203,9 +362,11 @@ int VideoSender::handle_nack(uint16_t seq_no, const uint16_t* frag_indices, size
             const size_t wn = rly::encode_data(wrap, sizeof(wrap),
                                                relay_alloc_id_, out_data, out_len);
             if (wn == 0) return -1;
-            r = socket_.send_to(wrap, wn, relay_addr_);
+            r = paced_ ? paced_->send_to(wrap, wn, relay_addr_)
+                       : socket_.send_to(wrap, wn, relay_addr_);
         } else {
-            r = socket_.send_to(out_data, out_len, dest);
+            r = paced_ ? paced_->send_to(out_data, out_len, dest)
+                       : socket_.send_to(out_data, out_len, dest);
         }
         if (r < 0) continue;
         bytes_sent_ += r;
@@ -309,6 +470,29 @@ void VideoSender::update_fec_from_loss(float loss_rate, uint32_t delta_failed) {
 
     uint8_t target_m = std::max(loss_m, failure_driven_m_);
     if (target_m > FAILURE_DRIVEN_M_MAX) target_m = FAILURE_DRIVEN_M_MAX;
+
+    // Cap FEC overhead as a % of the data group.  Without this the legacy path
+    // (100*M/K, uncapped) let M ramp to 20-30 = 200-300% overhead, carving the
+    // encoder down to a third of the wire (4M video on a 12M wire) — and it
+    // STILL didn't stop the bursts.  Blanket parity past ~50% is wasteful;
+    // bigger bursts are NACK's job.  Tunable via VIVORA_FEC_MAX_PCT (VIV-82).
+    static const int max_overhead_pct = [] {
+        const char* e = std::getenv("VIVORA_FEC_MAX_PCT");
+        int v = e ? std::atoi(e) : 75;  // 75% (was 50): NACK is too slow at 60fps
+                                        // to cover bursts, so let FEC parity go
+                                        // higher.  The bitrate carve-out already
+                                        // shrinks the encoder to hold the wire
+                                        // budget constant, so this trades video
+                                        // detail (not extra wire) for burst
+                                        // coverage (VIV-82).
+        return v < 10 ? 10 : (v > 200 ? 200 : v);
+    }();
+    const uint8_t k = fec_encoder_.group_size();
+    if (k > 0) {
+        int cap = k * max_overhead_pct / 100;
+        if (cap < 1) cap = 1;
+        if (target_m > cap) target_m = static_cast<uint8_t>(cap);
+    }
 
     // Use the tracked steady-state M rather than whatever the encoder
     // currently has — keyframe boost temporarily raises the encoder's M

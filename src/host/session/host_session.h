@@ -7,6 +7,7 @@
 #include "common/protocol/stream_info.h"
 #include "host/session/host_approval_gate.h"
 #include "host/session/video_sender.h"
+#include "host/session/paced_sender.h"
 #include "host/audio/audio_sender.h"
 #include "host/input/input_injector.h"
 #include "common/utils/types.h"
@@ -158,6 +159,11 @@ public:
     // Process incoming packets (handshake, pong). Call frequently.
     void poll();
 
+    // Drain the next chunk of a keyframe being send-paced (VIV-82 option B).
+    // Call every host-loop tick; clock-gated, sends nothing until the chunk
+    // interval elapses.  No-op when no keyframe is pacing or pacing is off.
+    void drain_kf_pacer();
+
     // Send an encoded frame to ALL connected clients.
     // Returns number of packets sent (sum), or -1 if no clients.
     // fec_enabled=false bypasses FEC for this frame (used by heartbeat
@@ -204,6 +210,12 @@ public:
     // Max loss rate across all clients.
     float last_loss_rate() const;
 
+    // Effective (post-FEC/NACK) loss the client actually suffered — the worst
+    // drop/reject % across clients, as a 0..1 ratio.  This is what the bitrate
+    // controller should react to: raw channel loss that FEC fully recovers must
+    // NOT hold the bitrate down (VIV-82) — only undelivered frames should.
+    float last_effective_loss() const;
+
     // Best probe result (lowest ceiling wins for conservative adaptation).
     uint32_t probe_bw_bps() const;
     bool probe_pending() const;
@@ -225,6 +237,11 @@ public:
     // Broadcast the real (pre-padding) stream dimensions so the client can
     // trim encoder-alignment padding and scale mouse input correctly.
     void send_stream_info(uint16_t width, uint16_t height);
+
+    // Broadcast the current encoder target bitrate (kbps) so the client HUD can
+    // show "encoding (actual)" — the gently-climbing target vs the measured
+    // wire rate that fills it on content (VIV-82).
+    void send_encoder_bitrate(uint32_t kbps);
 
     // True when a new client just connected since last check.
     // Consumed (reset) on read — used by host loop for warmup arming.
@@ -262,7 +279,37 @@ private:
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<net::IUdpSocket> audio_socket_;
     std::unique_ptr<VideoSender> sender_;
+    // Decoupled paced sender (VIV-82): all sealed wire sends route through it
+    // so a frame goes out spread, not as a WiFi-dropping micro-burst.  Owns a
+    // send thread that uses socket_ — reset before socket_ in stop().
+    std::unique_ptr<PacedSender> paced_sender_;
     std::unique_ptr<AudioSender> audio_sender_;
+
+    // Keyframe send-pacer (VIV-82 option B): a big keyframe is drained a chunk
+    // at a time across host-loop ticks (clock-gated, no sleep) so it doesn't go
+    // out as one ~100-packet burst the WiFi AP drops wholesale.  P-frames send
+    // immediately.  Gated by VIVORA_KF_PACE.
+    struct KfPacer {
+        std::vector<std::vector<uint8_t>> wires;   // copy of prepared keyframe wires
+        std::vector<net::SocketAddr>      dests;   // clients at enqueue time
+        size_t            pos = 0;
+        TimePoint         last_chunk{};
+        bool              active = false;
+    };
+    KfPacer kf_pacer_;
+    bool    kf_pace_enabled_ = false;
+    // 1 packet per ~100 µs (~88 Mbps) — the rate the BW probe measured as
+    // loss-free on this WiFi.  Sending even a small chunk (8) back-to-back
+    // still overran the AP; one-at-a-time is what stays clean.  The host loop
+    // spins far faster than 100 µs during the inter-capture idle, so this is
+    // clock-gated with no sleep.
+    static constexpr size_t  KF_PACE_CHUNK  = 1;
+    static constexpr int64_t KF_PACE_GAP_US = 100;
+    // Pace any frame with more than this many packets — P-frames burst-lose on
+    // WiFi too (just smaller), which cut the bitrate to 3-5 Mbps; tiny frames
+    // skip pacing to avoid needless latency.  A frame paces in size*100µs, well
+    // under a 60fps interval.
+    static constexpr size_t  PACE_MIN_PACKETS = 4;
     std::unique_ptr<InputInjector> input_injector_;
     SessionState state_ = SessionState::WaitingForClient;
 

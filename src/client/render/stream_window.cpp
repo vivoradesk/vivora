@@ -604,8 +604,9 @@ void StreamWindow::rebuild_hud_text() {
     txt += QString::asprintf("FPS:    %5.1f decoded / %5.1f arrived / target %u\n",
                              last_stats_.fps, last_stats_.arrived_fps,
                              last_stats_.target_fps);
-    txt += QString::asprintf("RTT:    %5.1f ms   Bitrate: %u kbps\n",
-                             last_stats_.rtt_ms, last_stats_.bitrate_kbps);
+    txt += QString::asprintf("RTT:    %5.1f ms   Bitrate: %u (%u) kbps\n",
+                             last_stats_.rtt_ms, last_stats_.encoding_kbps,
+                             last_stats_.bitrate_kbps);
     txt += QString::asprintf("Reject: %5.2f%% (%llu)   Drop: %5.2f%% (%llu)\n",
                              last_stats_.reject_pct,
                              (unsigned long long)last_stats_.total_rejected,

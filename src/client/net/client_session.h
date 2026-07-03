@@ -118,6 +118,7 @@ public:
     uint32_t last_audio_pps()   const { return last_audio_pps_; }
     uint32_t last_plc_pct()     const { return last_plc_pct_; }
     uint32_t last_bitrate_bps() const { return last_bitrate_bps_; }
+    uint32_t encoding_kbps()    const { return encoding_kbps_; }
     uint16_t stream_width()     const { return stream_info_.width; }
     uint16_t stream_height()    const { return stream_info_.height; }
     // Cumulative event counts — useful in the HUD next to the
@@ -294,7 +295,11 @@ private:
     std::unordered_map<uint32_t, ShapeReassembly> shape_reassembly_;
 
     static constexpr size_t RECV_BUF_SIZE = 2048;
-    static constexpr int64_t FEC_REPORT_INTERVAL_MS = 500;
+    // 150ms (was 500): a FEC group failure detected on the client only reached
+    // the host at the next report boundary, so the host raised parity in
+    // reaction to the PREVIOUS burst while the next one hit at the old M.  Faster
+    // reporting lets adaptive FEC track bursts closer to real time (VIV-82).
+    static constexpr int64_t FEC_REPORT_INTERVAL_MS = 150;
     static constexpr int64_t PERF_REPORT_INTERVAL_MS = 1000;
     // Bounds for the auto-tuned target framerate.  120 is the wire/spec
     // max; 15 is the floor below which interactivity feels broken.
@@ -328,6 +333,7 @@ private:
     uint64_t bytes_received_     = 0;
     uint64_t bytes_baseline_     = 0;
     uint32_t last_bitrate_bps_   = 0;
+    uint32_t encoding_kbps_      = 0;  // host's encoder target (HostStats packet)
     // Cumulative — never reset between intervals, only grow.
     uint64_t total_rejected_     = 0;
     uint64_t total_dropped_      = 0;
@@ -356,7 +362,7 @@ private:
     std::thread           recv_thread_;
     // ~2 MB; heap-allocated only in threaded mode (avoids bloating the
     // by-value ClientSession on the CLI's stack).
-    std::unique_ptr<util::SpscRing<RawPacket, 1024>> recv_ring_;
+    std::unique_ptr<util::SpscRing<RawPacket, 8192>> recv_ring_;
     void recv_thread_proc();
 };
 

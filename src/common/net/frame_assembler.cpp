@@ -166,6 +166,7 @@ void FrameAssembler::try_deliver() {
             // stay invisible to drop detection and the decoder keeps
             // consuming P-frames whose reference chain is broken.
             frames_dropped_++;
+            pending_discontinuity_ = true;  // VIV-82: next frame's refs are broken
             next_deliver_seq_++;
             continue;
         }
@@ -177,6 +178,8 @@ void FrameAssembler::try_deliver() {
         frame.timestamp = pf.timestamp;
         frame.keyframe = pf.keyframe;
         frame.heartbeat = pf.heartbeat;
+        frame.discontinuity = pending_discontinuity_;
+        pending_discontinuity_ = false;
         frame.data = std::move(pf.assembled);
         completed_.push(std::move(frame));
         frames_completed_++;
@@ -240,10 +243,23 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
     return out;
 }
 
-void FrameAssembler::reset() {
+void FrameAssembler::reset(bool preserve_position) {
     pending_.clear();
     std::queue<AssembledFrame> empty;
     std::swap(completed_, empty);
+    if (preserve_position) {
+        // Keep the delivery cursor so try_deliver() SKIPS (never re-delivers)
+        // frames it already handed out; it just resyncs forward from
+        // next_deliver_seq_ to newest_seq_.  Everything delivered after a loss-
+        // recovery reset is discontinuous vs the decoder's state, so FORCE the
+        // next delivered frame to carry the flag → the decode thread drops to the
+        // next keyframe.  (Clearing it here — as the full reset does — wiped the
+        // gap's discontinuity signal that the skip had just set, so the post-gap
+        // P-frame decoded against lost refs and got rejected: VIV-82.)
+        pending_discontinuity_ = true;
+        return;
+    }
+    pending_discontinuity_ = false;
     has_seq_ = false;
     has_deliver_seq_ = false;
     newest_seq_ = 0;

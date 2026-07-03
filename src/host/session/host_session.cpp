@@ -9,6 +9,7 @@
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <chrono>
 #include <thread>
@@ -48,6 +49,47 @@ bool HostSession::start(uint16_t port) {
     socket_->set_recvbuf(1024 * 1024);
 
     sender_ = std::make_unique<VideoSender>(*socket_);
+    // Per-frame pooled FEC (VIV-82): one RS group per frame, parity as a % of
+    // the frame — burst-resilient.  Opt-in while we validate; default legacy.
+    if (const char* p = std::getenv("VIVORA_FEC_PERFRAME")) {
+        if (std::atoi(p) != 0) {
+            sender_->set_per_frame_fec(true);
+            log::info("HostSession", "Per-frame pooled FEC enabled (VIV-82)");
+        }
+    }
+    if (const char* p = std::getenv("VIVORA_KF_PACE")) {
+        if (std::atoi(p) != 0) {
+            kf_pace_enabled_ = true;
+            log::info("HostSession", "Keyframe send-pacing enabled (VIV-82)");
+        }
+    }
+    // VIV-82: enlarge the legacy FEC group.  At a fixed overhead %, a bigger
+    // group recovers a bigger burst (K=10/M=5 → 5-pkt burst; K=24/M=12 → 12-pkt
+    // burst).  A ~1ms WiFi glitch loses ~10 consecutive paced packets, which
+    // wiped a whole K=10 group → P-frame freeze.  Default 24; tunable.  Only the
+    // legacy path (per-frame computes K per frame).
+    if (!sender_->per_frame_fec()) {
+        int k = 24;
+        if (const char* p = std::getenv("VIVORA_FEC_K")) {
+            k = std::atoi(p);
+            if (k < 4) k = 4; else if (k > 64) k = 64;
+        }
+        sender_->set_fec_group_size(static_cast<uint8_t>(k));
+        log::info("HostSession", "Legacy FEC group size K=%d (VIV-82)", k);
+    }
+
+    // VIV-82 burst-resilient FEC interleaving: split each frame into D groups and
+    // transmit them round-robin so a consecutive-packet burst spreads across all
+    // D groups (recoverable) instead of wiping one whole group.  ON by default
+    // (D=6) — it made 10% bursty loss smooth in testing (~2x fps, no artifacts)
+    // and the decoder needs no change.  Set VIVORA_FEC_INTERLEAVE=1 to disable.
+    int interleave = 6;
+    if (const char* p = std::getenv("VIVORA_FEC_INTERLEAVE")) {
+        interleave = std::atoi(p);
+        if (interleave < 1) interleave = 1; else if (interleave > 16) interleave = 16;
+    }
+    sender_->set_fec_interleave(static_cast<uint8_t>(interleave));
+    log::info("HostSession", "FEC interleave depth D=%d (VIV-82)", interleave);
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();
@@ -112,10 +154,26 @@ bool HostSession::start(uint16_t port) {
         }
     }
 
+    // Paced sender (VIV-82): created last, after the synchronous STUN / relay
+    // BIND exchanges, so those keep using the socket directly while it was
+    // quiet.  From here on every sealed wire (video + control) goes out spread
+    // by the send thread instead of as a WiFi-dropping micro-burst.  Default
+    // 100 µs/packet (~88 Mbps cap, measured loss-free on WiFi); 0 = off.
+    int pace_gap_us = 0;  // default off until the pacer is validated (VIV-82)
+    if (const char* p = std::getenv("VIVORA_SEND_PACING_US")) pace_gap_us = std::atoi(p);
+    if (pace_gap_us > 0) {
+        paced_sender_ = std::make_unique<PacedSender>(*socket_, pace_gap_us);
+        sender_->set_paced_sender(paced_sender_.get());
+        log::info("HostSession", "Paced sender enabled (gap=%d us)", pace_gap_us);
+    }
+
     return true;
 }
 
 void HostSession::stop() {
+    // Stop the paced send thread (joins) before closing the socket it sends
+    // on (VIV-82).
+    paced_sender_.reset();
     if (socket_) {
         socket_->close();
         socket_.reset();
@@ -316,6 +374,44 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
     // FEC plan is shared but the on-wire bytes differ per destination.
     sender_->prepare_frame(data, data_len, frame_seq, timestamp, keyframe, fec_enabled);
 
+    // Send-pacing (VIV-82 option B): drain the frame a packet per ~100µs across
+    // host-loop ticks instead of one burst the WiFi AP drops.  Applies to every
+    // non-tiny frame — P-frames burst-lose too (smaller), which was cutting the
+    // bitrate to 3-5 Mbps.  Tiny frames and heartbeats send immediately.
+    if (kf_pace_enabled_ && fec_enabled &&
+        sender_->prepared_wires().size() > PACE_MIN_PACKETS) {
+        const auto& nw = sender_->prepared_wires();
+        // If the previous frame is STILL draining, do NOT flush its tail as a
+        // burst — that is exactly what lost the big 3440x1440 keyframe (it paces
+        // in ~17ms > one 16ms frame interval, so the next frame used to flush
+        // its tail) and drove the ~7s freeze cycle.  Instead APPEND this frame's
+        // wires so the keyframe finishes pacing and this frame paces right after
+        // it.  The pacer drains far faster than frames arrive (~10k vs ~2k
+        // pkt/s), so the queue only builds during a keyframe overrun and then
+        // drains — it never grows unbounded (VIV-82).
+        if (kf_pacer_.active && kf_pacer_.pos < kf_pacer_.wires.size()) {
+            if (kf_pacer_.pos > 0) {  // drop already-sent wires, keep bounded
+                kf_pacer_.wires.erase(kf_pacer_.wires.begin(),
+                                      kf_pacer_.wires.begin() + kf_pacer_.pos);
+                kf_pacer_.pos = 0;
+            }
+            kf_pacer_.wires.insert(kf_pacer_.wires.end(), nw.begin(), nw.end());
+            drain_kf_pacer();
+            return static_cast<int>(nw.size());
+        }
+        kf_pacer_.wires = nw;   // fresh job
+        kf_pacer_.dests.clear();
+        for (auto& [addr, client] : clients_) {
+            if (client.handshake_complete && client.approved)
+                kf_pacer_.dests.push_back(addr);
+        }
+        kf_pacer_.pos = 0;
+        kf_pacer_.last_chunk = {};   // first chunk fires immediately
+        kf_pacer_.active = true;
+        drain_kf_pacer();            // emit the first chunk now
+        return static_cast<int>(kf_pacer_.wires.size());
+    }
+
     int total = 0;
     for (auto& [addr, client] : clients_) {
         if (!client.handshake_complete) continue;
@@ -324,6 +420,31 @@ int HostSession::send_frame(const uint8_t* data, size_t data_len,
         if (n > 0) total += n;
     }
     return total;
+}
+
+void HostSession::drain_kf_pacer() {
+    if (!kf_pacer_.active || !sender_) return;
+    const auto now = Clock::now();
+    if (kf_pacer_.last_chunk.time_since_epoch().count() != 0 &&
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            now - kf_pacer_.last_chunk).count() < KF_PACE_GAP_US) {
+        return;  // chunk interval not elapsed yet
+    }
+    const size_t begin = kf_pacer_.pos;
+    const size_t end   = std::min(begin + KF_PACE_CHUNK, kf_pacer_.wires.size());
+    for (const auto& addr : kf_pacer_.dests) {
+        auto it = clients_.find(addr);
+        if (it == clients_.end() || !it->second.approved) continue;
+        sender_->send_wire_range(kf_pacer_.wires, begin, end, addr,
+                                 &it->second.send_cs);
+    }
+    kf_pacer_.pos = end;
+    kf_pacer_.last_chunk = now;
+    if (kf_pacer_.pos >= kf_pacer_.wires.size()) {
+        kf_pacer_.active = false;
+        kf_pacer_.wires.clear();
+        kf_pacer_.dests.clear();
+    }
 }
 
 int HostSession::flush_video_fec(uint16_t frame_seq, uint32_t timestamp) {
@@ -361,6 +482,15 @@ double HostSession::rtt_ms() const {
         if (client.rtt_ms > worst) worst = client.rtt_ms;
     }
     return worst;
+}
+
+float HostSession::last_effective_loss() const {
+    uint8_t worst = 0;
+    for (const auto& [addr, client] : clients_) {
+        worst = std::max(worst, std::max(client.perf_drop_pct,
+                                         client.perf_reject_pct));
+    }
+    return static_cast<float>(worst) / 100.0f;
 }
 
 float HostSession::last_loss_rate() const {
@@ -799,6 +929,26 @@ void HostSession::send_stream_info(uint16_t width, uint16_t height) {
               width, height, clients_.size());
 }
 
+void HostSession::send_encoder_bitrate(uint32_t kbps) {
+    if (!socket_ || clients_.empty()) return;
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::HostStats;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload.resize(4);
+    pkt.payload[0] = static_cast<uint8_t>(kbps & 0xFF);
+    pkt.payload[1] = static_cast<uint8_t>((kbps >> 8) & 0xFF);
+    pkt.payload[2] = static_cast<uint8_t>((kbps >> 16) & 0xFF);
+    pkt.payload[3] = static_cast<uint8_t>((kbps >> 24) & 0xFF);
+    pkt.header.payload_len = 4;
+    auto wire = pkt.serialize();
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        send_sealed(client, wire);
+    }
+}
+
 void HostSession::send_cursor_shape(const protocol::CursorShapeMessage& msg) {
     if (!socket_ || clients_.empty()) return;
 
@@ -955,9 +1105,11 @@ int HostSession::transport_send(const uint8_t* data, size_t len, const net::Sock
         uint8_t buf[rly::MAX_DATA_PACKET];
         const size_t n = rly::encode_data(buf, sizeof(buf), relay_alloc_id_, data, len);
         if (n == 0) return -1;
-        return socket_->send_to(buf, n, relay_addr_);
+        return paced_sender_ ? paced_sender_->send_to(buf, n, relay_addr_)
+                             : socket_->send_to(buf, n, relay_addr_);
     }
-    return socket_->send_to(data, len, peer);
+    return paced_sender_ ? paced_sender_->send_to(data, len, peer)
+                         : socket_->send_to(data, len, peer);
 }
 
 void HostSession::relay_send_keepalive() {

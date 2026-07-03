@@ -267,6 +267,7 @@ target_sources(vivora PRIVATE
 target_sources(vivora PRIVATE
     ${CMAKE_SOURCE_DIR}/src/host/session/host_session.cpp
     ${CMAKE_SOURCE_DIR}/src/host/session/video_sender.cpp
+    ${CMAKE_SOURCE_DIR}/src/host/session/paced_sender.cpp
     ${CMAKE_SOURCE_DIR}/src/host/audio/audio_sender.cpp
     ${CMAKE_SOURCE_DIR}/src/client/audio/audio_receiver.cpp
     # In-stream control menu (VIV-74) — pure Qt Widgets, hosted by the
@@ -318,6 +319,7 @@ if(UNIX AND NOT APPLE)
 
     target_sources(vivora PRIVATE
         linux_view_platform.cpp
+        linux_video_pipeline.cpp
         linux_host_platform.cpp
         ${CMAKE_SOURCE_DIR}/src/client/decode/ffmpeg_decoder.cpp
         ${CMAKE_SOURCE_DIR}/src/client/render/qt_gl_video_view.cpp

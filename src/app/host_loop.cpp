@@ -179,6 +179,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // applied to the encoder (not the controller's internal current), so
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
+    auto last_stats_send = std::chrono::steady_clock::now();
+    auto loss_grace_until = std::chrono::steady_clock::now();
     bool had_clients = false;
     // Phase B+: encoder lifecycle.  We track the previous tick's
     // client count to fire start_encoder() exactly once on the 0→N
@@ -213,6 +215,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     auto last_fec_flush_time     = TimePoint{};
 
     while (true) {
+        // Drain the next chunk of any keyframe being send-paced (VIV-82 B).
+        // The loop spins fast between captures, so this clock-gated call spreads
+        // a big keyframe over several ms without any sleep.
+        session.drain_kf_pacer();
+
         // GUI cooperative stop.  CLI never sets this and uses Ctrl+C.
         if (cfg.stop_flag && cfg.stop_flag->load(std::memory_order_relaxed)) {
             log::info("HOST", "Stop requested by controller");
@@ -354,10 +361,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             bitrate_ctl.set_probe_bandwidth(session.probe_bw_bps());
         }
 
-        // Feed telemetry to bitrate controller and apply if it changed.
-        // Loss signal combines:
-        //   (a) client-reported FEC loss (channel loss before recovery)
-        //   (b) host-observed retx rate (packets we had to resend)
+        // Feed telemetry to bitrate controller.  Loss signal = client FEC loss
+        // (channel loss before recovery) maxed with host retx rate.  (VIV-82
+        // tried post-FEC "effective" loss to dodge the inflated metric, but it
+        // probed up, choked, and oscillated/floored at ~6 Mbps with periodic
+        // dips — worse than stable raw-loss.  Reverted; the metric fix belongs
+        // in the FEC loss accounting, not the controller.)
         bitrate_ctl.on_rtt(session.rtt_ms());
         {
             double loss_signal = session.last_loss_rate();
@@ -374,6 +383,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                     last_pkts_sample = cur_pkts;
                 }
             }
+            // Suppress loss for a grace period after an IDR recovery: the
+            // client's FEC decoder reset on the drop reports a burst of
+            // "missing" packets that is an artifact of the reset, not real
+            // congestion.  Feeding it crashed the bitrate to the floor on every
+            // freeze, so the bitrate "stuck at 4M" (VIV-82).
+            if (std::chrono::steady_clock::now() < loss_grace_until)
+                loss_signal = 0.0;
             bitrate_ctl.on_loss_ratio(loss_signal);
 
             bool changed = false;
@@ -390,10 +406,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             // saturates WiFi and causes the loss-spirals we observed.
             uint32_t encoder_bps = br;
             if (auto* s = session.sender()) {
-                uint8_t k = s->fec_group_size();
-                uint8_t m = s->fec_parity_count();
-                if (k > 0) encoder_bps = static_cast<uint32_t>(
-                    static_cast<uint64_t>(br) * k / (k + m));
+                // Carve FEC parity out of the wire budget.  pct = overhead %
+                // (per-frame mode: the pooled %; legacy: 100*M/K) — the formula
+                // below is identical to the old k/(k+m) when pct = 100*M/K.
+                uint32_t pct = s->fec_overhead_pct();
+                encoder_bps = static_cast<uint32_t>(
+                    static_cast<uint64_t>(br) * 100 / (100 + pct));
             }
             // Floor — at FAILURE_DRIVEN_M_MAX=30 with K=10 the carve-out
             // takes the encoder to 25% of wire (e.g. 250 kbps from a
@@ -416,6 +434,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 log::info("HOST", "Encoder bitrate -> %u kbps (wire %u, FEC overhead carved)",
                           encoder_bps / 1000, br / 1000);
             }
+
+            // ~1 Hz: tell the client our encoder target so its HUD can show
+            // "encoding (actual)" — the gently-climbing target vs the measured
+            // wire that fills it on content (VIV-82).
+            auto now_stats = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now_stats - last_stats_send).count() >= 1000) {
+                session.send_encoder_bitrate(last_applied_br / 1000);
+                last_stats_send = now_stats;
+            }
         }
 
         // IDR on client (re)connect or client-requested recovery.
@@ -428,6 +456,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             platform.request_idr();
             session.clear_idr_needed();
             force_encode = true;
+            // Don't let the post-reset loss burst (FEC decoder reset on the
+            // client) crash the bitrate — ignore loss for ~1.5s (VIV-82).
+            loss_grace_until = std::chrono::steady_clock::now()
+                             + std::chrono::milliseconds(1500);
             // Trigger origin is logged at the source (HostSession logs
             // "Client requested IDR (frame loss recovery)" for the loss
             // path; "First client connected" / "New client connected"

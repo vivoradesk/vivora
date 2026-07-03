@@ -175,11 +175,17 @@ public:
             // is usually unreachable, and ramping all the way to it just
             // produces a post-warmup cascade of cuts. Cap at measured BW
             // from probe (if available), else use static ceiling.
-            const uint32_t fallback = ceiling_override_bps_ > 0
-                                    ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
-            const uint32_t ceiling = probe_ceiling_bps_ > 0
-                                   ? probe_ceiling_bps_ : fallback;
-            const uint32_t warmup_end = std::min(base, ceiling);
+            // The channel chokes on a fast warm-up jump (VIV-82: a 14→25 Mbps
+            // step in one go made the link drop it).  Ramp the warm-up gently
+            // to a MODEST ceiling only; the gradual per-cycle recovery below
+            // then climbs from there to the full probe/override ceiling in
+            // small steps the channel can actually follow.
+            const uint32_t full_ceiling = probe_ceiling_bps_ > 0
+                                        ? probe_ceiling_bps_
+                                        : (ceiling_override_bps_ > 0
+                                               ? ceiling_override_bps_
+                                               : WARMUP_CEILING_BPS);
+            const uint32_t warmup_end = std::min(base, WARMUP_CEILING_BPS);
             if (warmup_elapsed < WARMUP_MS) {
                 const double t = static_cast<double>(warmup_elapsed)
                                / static_cast<double>(WARMUP_MS);
@@ -200,9 +206,11 @@ public:
             // toward it just causes congestion oscillation.
             warmup_active_     = false;
             warmup_just_ended_ = true;
-            recovery_ceiling_bps_ = warmup_end;
-            log::info("BitrateCtl", "Warmup done, recovery ceiling = %u kbps",
-                      warmup_end / 1000);
+            // Recovery may climb to the FULL ceiling — gently, in small steps.
+            recovery_ceiling_bps_ = std::min(base, full_ceiling);
+            log::info("BitrateCtl",
+                      "Warmup done at %u kbps, recovery ceiling = %u kbps",
+                      warmup_end / 1000, recovery_ceiling_bps_ / 1000);
             const bool diff = warmup_end != current_bps_;
             current_bps_ = warmup_end;
             if (changed) *changed = diff;
@@ -249,26 +257,43 @@ public:
         uint32_t next;
         if (manual_target_ != 0) {
             next = base;
-        } else if (loss_pending_ > 0.08) {
-            // Severe loss (>8%) — aggressive cut.
-            next = static_cast<uint32_t>(current_bps_ * 0.5);
-            if (next < adapt_floor) next = adapt_floor;
-            on_cut();
-        } else if (loss_pending_ > 0.04) {
-            // Heavy loss (4-8%) — FEC overloaded, strong cut.
-            next = static_cast<uint32_t>(current_bps_ * 0.7);
-            if (next < adapt_floor) next = adapt_floor;
-            on_cut();
         } else if (loss_pending_ > 0.02) {
-            // Early loss (2-4%) — FEC still handling it, but start
-            // backing off before retx storm and cascading degradation.
-            next = static_cast<uint32_t>(current_bps_ * 0.85);
+            // Loss above the gentle floor.  A SINGLE high-loss cycle is usually
+            // a transient WiFi burst that FEC/NACK already recovered (drop stays
+            // ~0) — cratering the bitrate 15→6 on it, then slowly climbing back
+            // into the next burst, is exactly the "doesn't hold high" behaviour
+            // (VIV-82).  So the first high-loss cycle only trims gently and
+            // keeps the climb alive; the full cut + recovery penalty applies
+            // only once loss is SUSTAINED across cycles (real congestion).
+            ++high_loss_streak_;
+            double mult;
+            if (high_loss_streak_ < HIGH_LOSS_SUSTAIN) {
+                mult = 0.92;                      // transient burst — gentle trim
+            } else if (loss_pending_ > 0.08) {
+                mult = 0.5;                       // sustained severe
+            } else if (loss_pending_ > 0.04) {
+                mult = 0.7;                       // sustained heavy
+            } else {
+                mult = 0.85;                      // sustained early
+            }
+            next = static_cast<uint32_t>(current_bps_ * mult);
             if (next < adapt_floor) next = adapt_floor;
-            on_cut();
+            if (high_loss_streak_ >= HIGH_LOSS_SUSTAIN) {
+                on_cut();                         // penalize recovery: real congestion
+            } else {
+                loss_pending_  = 0.0;             // transient: consume, keep climbing
+                stable_cycles_ = 0;
+            }
         } else {
             // Loss ≤ 2% — channel healthy, hold or recover.
-            // Only count as "stable" for recovery if loss < 1.5%.
-            if (loss_pending_ < 0.015) ++stable_cycles_;
+            high_loss_streak_ = 0;
+            // Count as "stable" for recovery for any sub-cut loss.  A WiFi link
+            // with ~1.5-1.8% baseline loss that FEC fully recovers (failed=0)
+            // used to sit in a dead zone — above the old 1.5% stable threshold
+            // but below the 2% cut threshold — so recovery never accumulated
+            // and the bitrate stuck at ~6 Mbps wire (VIV-82).  Recoverable loss
+            // below the cut threshold must not block the climb.
+            if (loss_pending_ < 0.02) ++stable_cycles_;
             else stable_cycles_ = 0;
             loss_pending_ = 0.0;
 
@@ -278,6 +303,11 @@ public:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
                 // run (RECOVER_RESET_CYCLES) resets back to base.
                 uint32_t step = recover_cap / recovery_divisor_;
+                // Cap the absolute climb rate: the channel reacts badly to fast
+                // bitrate jumps, and a big step overshoots the sustainable rate
+                // and then crashes (VIV-82).  ≤MAX_RECOVER_STEP per 500ms cycle
+                // = ~0.5 Mbps/s, regardless of how high the ceiling is.
+                if (step > MAX_RECOVER_STEP) step = MAX_RECOVER_STEP;
                 if (step == 0) step = 1;
                 next = std::min(recover_cap, current_bps_ + step);
                 had_growth_ = true;
@@ -325,10 +355,13 @@ private:
     static constexpr uint32_t RECOVERY_DIVISOR_BASE = 100; // +1% of default per cycle
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
     static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
+    static constexpr int      HIGH_LOSS_SUSTAIN     = 2;     // cycles of high loss before a full cut
+    static constexpr uint32_t MAX_RECOVER_STEP      = 250'000; // ≤0.25M/cycle = ~0.5 Mbps/s climb cap
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;
     uint32_t manual_target_ = 0;       // 0 = unset
+    int      high_loss_streak_ = 0;    // consecutive >2% loss cycles (transient vs sustained)
     uint32_t current_bps_   = 0;
     uint32_t stable_cycles_ = 0;       // consecutive adapt cycles with loss < 3%
     double   loss_pending_  = 0.0;     // max loss since last adaptation; consumed after cut

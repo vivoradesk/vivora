@@ -45,6 +45,7 @@ namespace vivora {
 struct FrameHandle {
     static constexpr uint32_t kInvalid = 0xFFFFFFFFu;
     uint32_t id = kInvalid;
+    uint16_t seq = 0;   // source frame seq (via decoder pts) — for VIV-82 tracing
     bool valid() const { return id != kInvalid; }
 };
 
@@ -113,6 +114,13 @@ public:
     // both presented and policy-dropped frames; the free list is SPSC
     // (decode acquires in poll_frame, main releases here).
     virtual void recycle(FrameHandle h) = 0;
+
+    // Drop a just-produced frame from the DECODE thread WITHOUT touching the
+    // free list (which is the main thread's to produce).  Re-reserves the slot
+    // so the next poll_frame reuses it.  Used when Q2 is full — calling
+    // recycle() there made the decode thread a second free-list producer and
+    // corrupted the SPSC ring, intermittently deadlocking the pipeline (VIV-82).
+    virtual void unreserve(FrameHandle h) { (void)h; }
 
     // Schedule a render pass on the main thread (decode thread calls this
     // after publishing to Q2).  Impl posts to the main loop:

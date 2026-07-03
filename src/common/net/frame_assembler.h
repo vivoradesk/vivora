@@ -15,6 +15,9 @@ struct AssembledFrame {
     uint32_t timestamp = 0;
     bool keyframe = false;
     bool heartbeat = false;     // host marked frame as keep-alive (FLAG_HEARTBEAT)
+    bool discontinuity = false; // VIV-82: a frame was dropped right before this
+                                // one, so its reference chain is broken — the
+                                // decoder must not show it (greys) until an IDR.
 };
 
 // A batch of fragments to request retransmission of for one frame.
@@ -46,7 +49,14 @@ public:
     // after loss when we're about to request an IDR — anything still
     // pending references the missing frame and would feed corrupted
     // data to the decoder.
-    void reset();
+    //
+    // preserve_position (VIV-82): keep the in-order delivery cursor
+    // (next_deliver_seq_ / newest_seq_) so already-delivered frames are NOT
+    // re-delivered after a mid-stream loss-recovery reset.  Re-delivery fed the
+    // decoder duplicate frames → "Duplicate POC" → reject → IDR churn.  Only the
+    // in-progress buffers (pending_/completed_) are dropped in that mode.  The
+    // default (full reset) is for a fresh stream where there is no cursor yet.
+    void reset(bool preserve_position = false);
 
 private:
     struct PendingFrame {
@@ -83,6 +93,8 @@ private:
     bool has_seq_ = false;
     uint16_t next_deliver_seq_ = 0;
     bool has_deliver_seq_ = false;
+    bool pending_discontinuity_ = false;  // VIV-82: a frame was skipped; tag the
+                                          // next delivered frame as discontinuous.
 
     static constexpr int64_t FRAME_TIMEOUT_MS = 100;
     // Max total NACK fragments per collect_nacks() call to avoid flooding.
