@@ -174,6 +174,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // signal in addition to client-reported FEC loss.
     uint64_t last_retx_sample = 0;
     uint64_t last_pkts_sample = 0;
+    // Actual wire-throughput sampling (~2Hz) for the controller's
+    // utilization gate — the climb only proceeds when the wire really
+    // carries close to the current target (VIV-84).
+    uint64_t last_bytes_sample = 0;
+    auto     last_bytes_time   = std::chrono::steady_clock::now();
 
     // Deadband: compare proposed bitrate against the last one we actually
     // applied to the encoder (not the controller's internal current), so
@@ -295,6 +300,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                           last_applied_br / 1000);
                 last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
                 last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+                last_bytes_sample = session.sender() ? session.sender()->bytes_sent() : 0;
+                last_bytes_time   = std::chrono::steady_clock::now();
             } else {
                 // Additional client: cut bitrate proportionally so total
                 // wire rate doesn't spike (N clients share the link).
@@ -368,6 +375,20 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // dips — worse than stable raw-loss.  Reverted; the metric fix belongs
         // in the FEC loss accounting, not the controller.)
         bitrate_ctl.on_rtt(session.rtt_ms());
+        if (session.sender()) {
+            // Sample actual sent throughput for the utilization gate.
+            auto now_bt = std::chrono::steady_clock::now();
+            auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now_bt - last_bytes_time).count();
+            if (dt_ms >= 500) {
+                uint64_t cur_bytes = session.sender()->bytes_sent();
+                uint64_t d_bytes = cur_bytes - last_bytes_sample;
+                bitrate_ctl.on_wire_usage(static_cast<uint32_t>(
+                    d_bytes * 8000 / static_cast<uint64_t>(dt_ms)));
+                last_bytes_sample = cur_bytes;
+                last_bytes_time   = now_bt;
+            }
+        }
         {
             double loss_signal = session.last_loss_rate();
             if (session.sender()) {

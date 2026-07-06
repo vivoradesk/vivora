@@ -99,8 +99,17 @@ public:
     void set_probe_bandwidth(uint32_t bps) {
         if (bps == 0 || probe_ceiling_bps_ > 0) return;
         uint32_t ceiling = static_cast<uint32_t>(bps * 0.75);
+        // Hard cap: when the probe MEASURED real link headroom, allow the
+        // recovery climb up to the resolution default — hard-capping at
+        // WARMUP_CEILING pinned every session to 10 Mbps wire no matter the
+        // link (probe said 91 Mbps, 3440x1440 wants ~35: still capped at 10 —
+        // the last surviving piece of the VIV-79 ceiling, finished in VIV-84).
+        // The gentle warmup still ramps only to WARMUP_CEILING; only the
+        // small-step recovery climbs beyond it.  With no probe (0 bps) the
+        // ceiling stays at the conservative WARMUP_CEILING as before.
         const uint32_t hard_cap = ceiling_override_bps_ > 0
-                                ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
+                                ? ceiling_override_bps_
+                                : std::max(WARMUP_CEILING_BPS, default_bps_);
         ceiling = std::min(ceiling, hard_cap);
         probe_ceiling_bps_ = std::max(ceiling, bounds_.min_bps);
         log::info("BitrateCtl", "Probe BW %u kbps -> ceiling %u kbps",
@@ -132,6 +141,10 @@ public:
     // Network-feedback inputs.
     void on_rtt(double ms)                  { last_rtt_ms_ = ms; }
     void on_estimated_bandwidth(uint32_t bps) { estimated_bw_bps_ = bps; }
+
+    // Actual wire throughput (host-side bytes really sent per second).
+    // Gates the recovery climb — see tick().  0 = unknown (gate disabled).
+    void on_wire_usage(uint32_t bps) { last_wire_bps_ = bps; }
 
     // Feed a new loss report. Accumulates max loss since last adaptation.
     void on_loss_ratio(double ratio) {
@@ -281,8 +294,14 @@ public:
             if (high_loss_streak_ >= HIGH_LOSS_SUSTAIN) {
                 on_cut();                         // penalize recovery: real congestion
             } else {
-                loss_pending_  = 0.0;             // transient: consume, keep climbing
-                stable_cycles_ = 0;
+                // Transient: consume and KEEP the climb armed.  Zeroing
+                // stable_cycles_ here paused the climb for recover_delay
+                // (~5s) after every stray micro-burst — with bursts every
+                // ~15-30s on WiFi the bitrate sawtoothed just under the
+                // ceiling forever instead of finding the link's real rate
+                // (VIV-84).  If the loss persists, the next cycle reaches
+                // HIGH_LOSS_SUSTAIN and takes the real cut path anyway.
+                loss_pending_  = 0.0;
             }
         } else {
             // Loss ≤ 2% — channel healthy, hold or recover.
@@ -297,7 +316,21 @@ public:
             else stable_cycles_ = 0;
             loss_pending_ = 0.0;
 
-            if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap) {
+            // Utilization gate: only raise the target when the wire actually
+            // CARRIES close to the current target.  Static content uses a
+            // fraction of the target (heartbeats, tiny P-frames), so the
+            // channel is never exercised and produces no loss signal — the
+            // target then climbs on fantasy ("static grew to 30 Mbps") and
+            // the first dynamic scene slams the full target onto a radio
+            // that never proved it, bursting losses and cratering to the
+            // floor (VIV-84).  Holding until utilization ≥60% keeps the
+            // target within ~1.7× of PROVEN throughput; content transitions
+            // then start from a rate the link has actually carried.
+            const bool wire_proven = last_wire_bps_ == 0  // unknown → no gate
+                || static_cast<uint64_t>(last_wire_bps_) * 10
+                   >= static_cast<uint64_t>(current_bps_) * 6;
+            if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap
+                && wire_proven) {
                 // +1/recovery_divisor of cap per cycle.
                 // Base is 50 (+2%). After each up-then-down it doubles:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
@@ -380,6 +413,7 @@ private:
     // Network feedback.
     double   last_rtt_ms_      = 0.0;
     uint32_t estimated_bw_bps_ = 0;
+    uint32_t last_wire_bps_    = 0;   // actual sent throughput; 0 = unknown
 };
 
 } // namespace vivora::codec
