@@ -1,6 +1,7 @@
 #pragma once
 #ifdef VIVORA_MACOS
 
+#include "app/mac_video_pipeline.h"
 #include "app/view_platform.h"
 #include "client/render/mac_video_view.h"
 #include "client/render/stream_menu.h"
@@ -25,12 +26,16 @@ public:
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
+    vivora::IVideoPipeline* video_pipeline() override;
     void shutdown() override;
 
 private:
     void feed_menu_info();
 
     vivora::MacVideoView view_;
+    // Threaded pipeline (VIV-84) — created lazily by video_pipeline() when
+    // VIVORA_PIPELINE=threaded; fused over the AVSampleBufferVideoRenderer.
+    std::unique_ptr<vivora::MacVideoPipeline> pipeline_;
     // In-stream control menu (VIV-74) — a Qt overlay shown over the Cocoa
     // stream window, toggled by the Ctrl+F1 callback from the view.
     std::unique_ptr<vivora::StreamMenu> menu_;

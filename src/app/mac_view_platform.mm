@@ -118,6 +118,14 @@ void MacViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
     menu_->set_initial_state(1.0f, false, false, /*keep_aspect=*/true);
 }
 
-void MacViewPlatform::shutdown() { menu_.reset(); }
+vivora::IVideoPipeline* MacViewPlatform::video_pipeline() {
+    if (!pipeline_) pipeline_ = std::make_unique<vivora::MacVideoPipeline>(&view_);
+    return pipeline_.get();
+}
+
+void MacViewPlatform::shutdown() {
+    pipeline_.reset();   // decode thread is already joined (ViewLoop teardown)
+    menu_.reset();
+}
 
 #endif // VIVORA_MACOS
