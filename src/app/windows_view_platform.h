@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "app/view_platform.h"
+#include "app/windows_video_pipeline.h"
 #include "client/decode/video_decoder.h"
 #include "client/render/stream_window.h"
 #include <QApplication>
@@ -27,12 +28,16 @@ public:
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
+    vivora::IVideoPipeline* video_pipeline() override;
     void shutdown() override;
 
 private:
     std::unique_ptr<QApplication> app_;
     std::unique_ptr<vivora::StreamWindow> window_;
     std::unique_ptr<vivora::IVideoDecoder> decoder_;
+    // Threaded pipeline (VIV-84) — created lazily by video_pipeline() when
+    // VIVORA_PIPELINE=threaded; the serial decoder_ above stays unused then.
+    std::unique_ptr<vivora::WindowsVideoPipeline> pipeline_;
     bool renderer_ready_ = false;
     // Latest crop dims from the host — applied to the window whenever the
     // renderer becomes ready (StreamInfo may arrive before the first frame).

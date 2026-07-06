@@ -105,6 +105,19 @@ void WindowsViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     pending_stream_w_ = width;
     pending_stream_h_ = height;
     if (window_) window_->set_stream_size(width, height);
+    // The threaded pipeline applies these right after its lazy renderer init
+    // (StreamInfo may arrive before the first decoded frame) — VIV-84.
+    if (pipeline_) pipeline_->set_pending_stream_size(width, height);
+}
+
+vivora::IVideoPipeline* WindowsViewPlatform::video_pipeline() {
+    if (!window_) return nullptr;
+    if (!pipeline_) {
+        pipeline_ = std::make_unique<vivora::WindowsVideoPipeline>(window_.get());
+        if (pending_stream_w_ && pending_stream_h_)
+            pipeline_->set_pending_stream_size(pending_stream_w_, pending_stream_h_);
+    }
+    return pipeline_.get();
 }
 
 void WindowsViewPlatform::update_stats(const vivora::StatsView& stats) {
@@ -120,6 +133,7 @@ void WindowsViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
 }
 
 void WindowsViewPlatform::shutdown() {
+    pipeline_.reset();   // before window_ — it holds a StreamWindow*
     window_.reset();
     app_.reset();
 }
