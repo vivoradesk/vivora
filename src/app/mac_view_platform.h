@@ -6,6 +6,7 @@
 #include "client/render/mac_video_view.h"
 #include "client/render/stream_menu.h"
 
+#include <QApplication>
 #include <memory>
 
 class MacViewPlatform : public vivora::ViewPlatform {
@@ -32,6 +33,11 @@ public:
 private:
     void feed_menu_info();
 
+    // CLI path only: the in-stream menu is a QWidget, so a QApplication must
+    // exist before init() constructs it.  The GUI app already has one (Qt
+    // forbids two per process); the CLI crashed on --view since VIV-74 —
+    // found by the VIV-84 scripted Mac run.
+    std::unique_ptr<QApplication> app_;
     vivora::MacVideoView view_;
     // Threaded pipeline (VIV-84) — created lazily by video_pipeline() when
     // VIVORA_PIPELINE=threaded; fused over the AVSampleBufferVideoRenderer.
