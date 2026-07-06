@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include "common/utils/log.h"
 
 namespace vivora::codec {
@@ -139,12 +140,26 @@ public:
     }
 
     // Network-feedback inputs.
-    void on_rtt(double ms)                  { last_rtt_ms_ = ms; }
+    void on_rtt(double ms) {
+        last_rtt_ms_ = ms;
+        // Track the path's base RTT.  Slow upward decay (~+3%/min at 2Hz
+        // ticks) lets the floor re-learn if the route genuinely changes.
+        if (ms > 0.0) {
+            if (rtt_floor_ <= 0.0 || ms < rtt_floor_) rtt_floor_ = ms;
+            else rtt_floor_ *= 1.00025;
+        }
+    }
     void on_estimated_bandwidth(uint32_t bps) { estimated_bw_bps_ = bps; }
 
     // Actual wire throughput (host-side bytes really sent per second).
     // Gates the recovery climb — see tick().  0 = unknown (gate disabled).
     void on_wire_usage(uint32_t bps) { last_wire_bps_ = bps; }
+
+    // Share of wire spent re-sending lost packets (NACK retx EWMA, 0..1).
+    // High recovery traffic means the redundancy machinery is straining —
+    // that gates the CLIMB but is never a reason to cut (recovered loss is
+    // FEC/NACK working, not congestion — VIV-84).
+    void on_recovery_traffic(double ratio) { recovery_traffic_ = ratio; }
 
     // Feed a new loss report. Accumulates max loss since last adaptation.
     void on_loss_ratio(double ratio) {
@@ -267,6 +282,17 @@ public:
             last_cut_time_ = now;
         };
 
+        // Per-tick decision trace (VIVORA_BR_TRACE=1): every input and the
+        // branch taken, ~2Hz.  The climb stalls have been misdiagnosed twice
+        // from aggregate logs alone (VIV-84) — this shows the controller's
+        // actual view of the world.
+        static const bool trace = [] {
+            const char* e = std::getenv("VIVORA_BR_TRACE");
+            return e && e[0] == '1';
+        }();
+        const char* decision = "hold";
+        const double loss_for_trace = loss_pending_;  // consumed below
+
         uint32_t next;
         if (manual_target_ != 0) {
             next = base;
@@ -292,8 +318,10 @@ public:
             next = static_cast<uint32_t>(current_bps_ * mult);
             if (next < adapt_floor) next = adapt_floor;
             if (high_loss_streak_ >= HIGH_LOSS_SUSTAIN) {
+                decision = "CUT";
                 on_cut();                         // penalize recovery: real congestion
             } else {
+                decision = "trim";
                 // Transient: consume and KEEP the climb armed.  Zeroing
                 // stable_cycles_ here paused the climb for recover_delay
                 // (~5s) after every stray micro-burst — with bursts every
@@ -329,8 +357,22 @@ public:
             const bool wire_proven = last_wire_bps_ == 0  // unknown → no gate
                 || static_cast<uint64_t>(last_wire_bps_) * 10
                    >= static_cast<uint64_t>(current_bps_) * 6;
+            // Early-warning climb guards (never cut, only pause the climb):
+            //  * recovery traffic — the link is already leaning on NACK retx
+            //    to deliver; growing now deepens the strain (VIV-84);
+            //  * RTT inflation over the path's base — queues are building,
+            //    the classic delay signal that precedes packet damage.
+            const bool recovery_calm = recovery_traffic_ < 0.15;
+            const bool rtt_calm = rtt_floor_ <= 0.0 || last_rtt_ms_ <= 0.0
+                || last_rtt_ms_ <= rtt_floor_ + RTT_CLIMB_HEADROOM_MS;
+            if (!wire_proven)                          decision = "gated";
+            else if (!recovery_calm)                   decision = "retx-hot";
+            else if (!rtt_calm)                        decision = "rtt-hot";
+            else if (current_bps_ >= recover_cap)      decision = "at-cap";
+            else if (stable_cycles_ < recover_delay_)  decision = "warming";
             if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap
-                && wire_proven) {
+                && wire_proven && recovery_calm && rtt_calm) {
+                decision = "climb";
                 // +1/recovery_divisor of cap per cycle.
                 // Base is 50 (+2%). After each up-then-down it doubles:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
@@ -360,6 +402,21 @@ public:
                 recovery_divisor_ = RECOVERY_DIVISOR_BASE;
                 recover_delay_    = RECOVER_DELAY_BASE;
             }
+        }
+
+        if (trace) {
+            log::info("BRTRACE",
+                "%s: cur=%u -> next=%u | eff-loss=%.2f%% streak=%d retx=%.1f%% "
+                "| wire=%u (%.0f%% of cur) | stable=%u/%u div=%u | cap=%u ceil=%u "
+                "| rtt=%.1f (base %.1f)",
+                decision, current_bps_ / 1000, clamp(next) / 1000,
+                loss_for_trace * 100.0, high_loss_streak_,
+                recovery_traffic_ * 100.0,
+                last_wire_bps_ / 1000,
+                current_bps_ ? 100.0 * last_wire_bps_ / current_bps_ : 0.0,
+                stable_cycles_, recover_delay_, recovery_divisor_,
+                recover_cap / 1000, recovery_ceiling_bps_ / 1000,
+                last_rtt_ms_, rtt_floor_);
         }
 
         next = clamp(next);
@@ -394,6 +451,7 @@ private:
     // misread as "sustained" at 2 (VIV-84).
     static constexpr int      HIGH_LOSS_SUSTAIN     = 3;
     static constexpr uint32_t MAX_RECOVER_STEP      = 250'000; // ≤0.25M/cycle = ~0.5 Mbps/s climb cap
+    static constexpr double   RTT_CLIMB_HEADROOM_MS = 20.0;    // climb only while RTT ≤ base + this
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;
@@ -416,6 +474,8 @@ private:
     uint32_t client_count_               = 1;
     // Network feedback.
     double   last_rtt_ms_      = 0.0;
+    double   rtt_floor_        = 0.0;  // path base RTT (min, slow decay); 0 = unknown
+    double   recovery_traffic_ = 0.0;  // NACK retx share of wire (EWMA)
     uint32_t estimated_bw_bps_ = 0;
     uint32_t last_wire_bps_    = 0;   // actual sent throughput; 0 = unknown
 };

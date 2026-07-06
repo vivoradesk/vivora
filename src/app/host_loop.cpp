@@ -392,7 +392,18 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             }
         }
         {
-            double loss_signal = session.last_loss_rate();
+            // Cut driver = EFFECTIVE loss (post-FEC/NACK client damage:
+            // dropped/rejected frames).  This link taught us why (VIV-84):
+            // its radio steadily loses ~4-5% raw at ANY rate, FEC+NACK
+            // recover all of it (client damage 0.0%, picture perfect) — yet
+            // the raw pre-FEC signal kept the controller permanently in the
+            // cut band, pinning a 90 Mbps-probed link to the 6M floor.
+            // Recovered loss is the redundancy machinery WORKING, not
+            // congestion.  (The VIV-82 attempt at this failed because
+            // nothing then stopped the climb before real damage; now the
+            // utilization gate + recovery-traffic/RTT climb guards in the
+            // controller are that early warning.)
+            double loss_signal = session.last_effective_loss();
             if (session.sender()) {
                 // Retx ratio over a ≥500ms window, EWMA-smoothed.  It used to
                 // be computed over a mere 20-packet window and fed raw: a NACK
@@ -419,15 +430,32 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                     last_pkts_sample = cur_pkts;
                     last_retx_time   = now_rt;
                 }
-                if (retx_ewma > loss_signal) loss_signal = retx_ewma;
+                // Recovery traffic gates the CLIMB (don't grow while the
+                // redundancy machinery is straining) but never cuts.
+                bitrate_ctl.on_recovery_traffic(retx_ewma);
             }
             // Suppress loss for a grace period after an IDR recovery: the
             // client's FEC decoder reset on the drop reports a burst of
             // "missing" packets that is an artifact of the reset, not real
             // congestion.  Feeding it crashed the bitrate to the floor on every
             // freeze, so the bitrate "stuck at 4M" (VIV-82).
-            if (std::chrono::steady_clock::now() < loss_grace_until)
-                loss_signal = 0.0;
+            static const bool br_trace = [] {
+                const char* e = std::getenv("VIVORA_BR_TRACE");
+                return e && e[0] == '1';
+            }();
+            const bool graced = std::chrono::steady_clock::now() < loss_grace_until;
+            if (graced) loss_signal = 0.0;
+            if (br_trace && (loss_signal > 0.005 || retx_ewma > 0.005)) {
+                static auto last_ls_log = std::chrono::steady_clock::time_point{};
+                auto now_ls = std::chrono::steady_clock::now();
+                if (now_ls - last_ls_log >= std::chrono::milliseconds(500)) {
+                    last_ls_log = now_ls;
+                    log::info("BRTRACE",
+                              "loss-signal eff=%.2f%% (raw=%.2f%% retx_ewma=%.2f%%%s)",
+                              loss_signal * 100.0, session.last_loss_rate() * 100.0,
+                              retx_ewma * 100.0, graced ? ", graced->0" : "");
+                }
+            }
             bitrate_ctl.on_loss_ratio(loss_signal);
 
             bool changed = false;
