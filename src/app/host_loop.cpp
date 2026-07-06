@@ -174,6 +174,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // signal in addition to client-reported FEC loss.
     uint64_t last_retx_sample = 0;
     uint64_t last_pkts_sample = 0;
+    double   retx_ewma        = 0.0;
+    auto     last_retx_time   = std::chrono::steady_clock::now();
     // Actual wire-throughput sampling (~2Hz) for the controller's
     // utilization gate — the climb only proceeds when the wire really
     // carries close to the current target (VIV-84).
@@ -392,17 +394,32 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         {
             double loss_signal = session.last_loss_rate();
             if (session.sender()) {
+                // Retx ratio over a ≥500ms window, EWMA-smoothed.  It used to
+                // be computed over a mere 20-packet window and fed raw: a NACK
+                // batch recovering one keyframe burst (~30-40 retx) inside a
+                // 20-packet window read as "100% loss" → instant ×0.5, and the
+                // same event smeared across two adapt windows read as
+                // SUSTAINED congestion → full cut + recovery penalty — while
+                // the client's own loss EWMA said 0.0% (everything recovered).
+                // That trap deepens as bitrate drops (same absolute burst =
+                // larger %), which is why the bitrate could never leave the
+                // floor on dynamic content (VIV-84).
                 uint64_t cur_retx = session.sender()->retransmits();
                 uint64_t cur_pkts = session.sender()->packets_sent();
                 uint64_t d_retx = cur_retx - last_retx_sample;
                 uint64_t d_pkts = cur_pkts - last_pkts_sample;
-                if (d_pkts >= 20) {
+                auto now_rt = std::chrono::steady_clock::now();
+                auto rt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now_rt - last_retx_time).count();
+                if (rt_ms >= 500 && d_pkts >= 20) {
                     double retx_ratio = static_cast<double>(d_retx)
                                       / static_cast<double>(d_pkts);
-                    if (retx_ratio > loss_signal) loss_signal = retx_ratio;
+                    retx_ewma = retx_ewma * 0.75 + retx_ratio * 0.25;
                     last_retx_sample = cur_retx;
                     last_pkts_sample = cur_pkts;
+                    last_retx_time   = now_rt;
                 }
+                if (retx_ewma > loss_signal) loss_signal = retx_ewma;
             }
             // Suppress loss for a grace period after an IDR recovery: the
             // client's FEC decoder reset on the drop reports a burst of

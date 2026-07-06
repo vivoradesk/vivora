@@ -388,7 +388,11 @@ private:
     static constexpr uint32_t RECOVERY_DIVISOR_BASE = 100; // +1% of default per cycle
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
     static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
-    static constexpr int      HIGH_LOSS_SUSTAIN     = 2;     // cycles of high loss before a full cut
+    // 3 cycles (~1.5s) of continuous high loss before a full cut.  Real
+    // congestion easily lasts that long; a one-off keyframe burst + its NACK
+    // recovery smears across two adjacent 500ms windows and used to be
+    // misread as "sustained" at 2 (VIV-84).
+    static constexpr int      HIGH_LOSS_SUSTAIN     = 3;
     static constexpr uint32_t MAX_RECOVER_STEP      = 250'000; // ≤0.25M/cycle = ~0.5 Mbps/s climb cap
 
     BitrateBounds bounds_;
