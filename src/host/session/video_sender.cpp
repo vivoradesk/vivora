@@ -168,10 +168,20 @@ void VideoSender::prepare_frame_interleaved(const uint8_t* data, size_t data_len
     int pct = current_fec_pct();
     if (keyframe && pct < 75) pct = 75;
 
-    // Group count: at least the interleave depth, more if the frame is big enough
-    // that N/D would exceed the encoder's 128-shard group cap.
+    // Group count: the interleave depth, more if the frame is big enough that
+    // N/D would exceed the encoder's 128-shard group cap — but never so many
+    // that groups go DEGENERATE.  Without the MIN_GROUP_K floor a small frame
+    // (static desktop at low bitrate ≈ 6-12 packets) split into D=6 groups
+    // gives K=1..2 shards each, every one with its own ceil(K*pct) parity:
+    // ~100% wire overhead AND fragile groups that FAIL on a couple of stray
+    // WiFi drops → adaptive M flaps at "0%" loss → the carve-out starves the
+    // encoder at ~4 Mbps (seen Win host → Mac WiFi client, VIV-84).  Frames
+    // too small to split get one group: a burst that covers the whole frame
+    // kills it regardless of interleaving — that's frame-loss recovery's job.
+    static constexpr int MIN_GROUP_K = 8;
     int G = fec_interleave_;
-    if (G > N) G = N;
+    const int max_groups = (N / MIN_GROUP_K) > 0 ? (N / MIN_GROUP_K) : 1;
+    if (G > max_groups) G = max_groups;
     while ((N + G - 1) / G > 128) ++G;   // keep per-group K <= 128
 
     fec_encoder_.set_ranged(true);       // consecutive keys per group → tiny header
