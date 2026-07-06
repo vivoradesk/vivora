@@ -59,15 +59,31 @@ if(WIN32)
     target_include_directories(capture_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     add_test(NAME capture_test COMMAND capture_test)
 
+    # The encoder factory pulls in every Windows backend (AMF/NVENC/QSV +
+    # the fallback wrapper), so tests using IVideoEncoder::create need all of
+    # them — the source list rotted when the factory grew (VIV-84 drive-by).
+    set(WIN_ENCODER_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/nvenc_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/qsv_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/encoder_factory.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/encode/fallback_encoder.cpp
+    )
+    set(WIN_ENCODER_INCLUDES
+        ${CMAKE_SOURCE_DIR}/third_party/amf
+        ${CMAKE_SOURCE_DIR}/third_party/nvenc
+        ${CMAKE_SOURCE_DIR}/third_party/onevpl/api
+    )
+
     add_executable(encode_test
         encode_test.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp
-        ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
+        ${WIN_ENCODER_SOURCES}
     )
     target_link_libraries(encode_test PRIVATE vivora_common d3d11 dxgi)
     target_include_directories(encode_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/third_party/amf
+        ${WIN_ENCODER_INCLUDES}
     )
     add_test(NAME encode_test COMMAND encode_test)
 
@@ -84,14 +100,15 @@ if(WIN32)
     add_executable(transport_test
         transport_test.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/dxgi_capture.cpp
-        ${CMAKE_SOURCE_DIR}/src/host/encode/amf_encoder.cpp
         ${CMAKE_SOURCE_DIR}/src/host/session/video_sender.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/session/paced_sender.cpp
         ${CMAKE_SOURCE_DIR}/src/client/net/video_receiver.cpp
+        ${WIN_ENCODER_SOURCES}
     )
     target_link_libraries(transport_test PRIVATE vivora_common d3d11 dxgi)
     target_include_directories(transport_test PRIVATE
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/third_party/amf
+        ${WIN_ENCODER_INCLUDES}
     )
     add_test(NAME transport_test COMMAND transport_test)
 

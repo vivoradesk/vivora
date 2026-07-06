@@ -15,7 +15,7 @@ int main() {
     vivora::log::info("TEST", "=== Decode Test ===");
 
     auto decoder = vivora::IVideoDecoder::create();
-    if (!decoder->init()) {
+    if (!decoder->init(vivora::VideoCodec::HEVC)) {
         vivora::log::error("TEST", "Failed to init decoder");
         return 1;
     }
