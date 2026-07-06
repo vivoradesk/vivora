@@ -244,11 +244,21 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // Auto-exit on "all clients disconnected" is CLI-only behaviour:
         // headless host process is one-shot per session.  GUI host stays
         // up indefinitely, polled by AppController, so we suppress the
-        // auto-exit when stop_flag is wired.
+        // auto-exit when stop_flag is wired.  VIVORA_HOST_STAY=1 keeps the
+        // CLI host up across client churn too — a WiFi blip killing the
+        // client shouldn't take the whole test rig down (VIV-84 rig QoL).
+        static const bool host_stay = [] {
+            const char* e = std::getenv("VIVORA_HOST_STAY");
+            return e && e[0] == '1';
+        }();
         if (session.state() == host::SessionState::Disconnected
             && had_clients && !cfg.stop_flag) {
-            log::info("HOST", "All clients disconnected");
-            break;
+            if (!host_stay) {
+                log::info("HOST", "All clients disconnected");
+                break;
+            }
+            had_clients = false;  // re-arm for the next client's session
+            log::info("HOST", "All clients disconnected — staying up (VIVORA_HOST_STAY)");
         }
 
         // Publish state for the GUI poll.  Cheap atomic stores; cost is
