@@ -52,7 +52,12 @@ struct HrSleeper {
         struct timespec ts;
         ts.tv_sec  = us / 1'000'000;
         ts.tv_nsec = (us % 1'000'000) * 1000L;
+#ifdef VIVORA_MACOS
+        // macOS has no clock_nanosleep; nanosleep is the same relative sleep.
+        nanosleep(&ts, nullptr);
+#else
         clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+#endif
     }
 };
 #endif

@@ -284,6 +284,7 @@ if(APPLE)
     target_sources(vivora PRIVATE
         mac_host_platform.mm
         mac_view_platform.mm
+        mac_video_pipeline.cpp
     )
     # macOS client: Cocoa window + AVSampleBufferDisplayLayer
     target_sources(vivora PRIVATE
@@ -355,6 +356,7 @@ if(WIN32)
     target_sources(vivora PRIVATE
         windows_host_platform.cpp
         windows_view_platform.cpp
+        windows_video_pipeline.cpp
     )
     # Host-side sources (Windows DXGI/AMF/NVENC/QSV + SendInput)
     target_sources(vivora PRIVATE

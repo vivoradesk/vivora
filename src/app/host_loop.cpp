@@ -174,6 +174,13 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // signal in addition to client-reported FEC loss.
     uint64_t last_retx_sample = 0;
     uint64_t last_pkts_sample = 0;
+    double   retx_ewma        = 0.0;
+    auto     last_retx_time   = std::chrono::steady_clock::now();
+    // Actual wire-throughput sampling (~2Hz) for the controller's
+    // utilization gate — the climb only proceeds when the wire really
+    // carries close to the current target (VIV-84).
+    uint64_t last_bytes_sample = 0;
+    auto     last_bytes_time   = std::chrono::steady_clock::now();
 
     // Deadband: compare proposed bitrate against the last one we actually
     // applied to the encoder (not the controller's internal current), so
@@ -237,11 +244,21 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // Auto-exit on "all clients disconnected" is CLI-only behaviour:
         // headless host process is one-shot per session.  GUI host stays
         // up indefinitely, polled by AppController, so we suppress the
-        // auto-exit when stop_flag is wired.
+        // auto-exit when stop_flag is wired.  VIVORA_HOST_STAY=1 keeps the
+        // CLI host up across client churn too — a WiFi blip killing the
+        // client shouldn't take the whole test rig down (VIV-84 rig QoL).
+        static const bool host_stay = [] {
+            const char* e = std::getenv("VIVORA_HOST_STAY");
+            return e && e[0] == '1';
+        }();
         if (session.state() == host::SessionState::Disconnected
             && had_clients && !cfg.stop_flag) {
-            log::info("HOST", "All clients disconnected");
-            break;
+            if (!host_stay) {
+                log::info("HOST", "All clients disconnected");
+                break;
+            }
+            had_clients = false;  // re-arm for the next client's session
+            log::info("HOST", "All clients disconnected — staying up (VIVORA_HOST_STAY)");
         }
 
         // Publish state for the GUI poll.  Cheap atomic stores; cost is
@@ -295,6 +312,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                           last_applied_br / 1000);
                 last_retx_sample = session.sender() ? session.sender()->retransmits() : 0;
                 last_pkts_sample = session.sender() ? session.sender()->packets_sent() : 0;
+                last_bytes_sample = session.sender() ? session.sender()->bytes_sent() : 0;
+                last_bytes_time   = std::chrono::steady_clock::now();
             } else {
                 // Additional client: cut bitrate proportionally so total
                 // wire rate doesn't spike (N clients share the link).
@@ -368,28 +387,85 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // dips — worse than stable raw-loss.  Reverted; the metric fix belongs
         // in the FEC loss accounting, not the controller.)
         bitrate_ctl.on_rtt(session.rtt_ms());
+        if (session.sender()) {
+            // Sample actual sent throughput for the utilization gate.
+            auto now_bt = std::chrono::steady_clock::now();
+            auto dt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now_bt - last_bytes_time).count();
+            if (dt_ms >= 500) {
+                uint64_t cur_bytes = session.sender()->bytes_sent();
+                uint64_t d_bytes = cur_bytes - last_bytes_sample;
+                bitrate_ctl.on_wire_usage(static_cast<uint32_t>(
+                    d_bytes * 8000 / static_cast<uint64_t>(dt_ms)));
+                last_bytes_sample = cur_bytes;
+                last_bytes_time   = now_bt;
+            }
+        }
         {
-            double loss_signal = session.last_loss_rate();
+            // Cut driver = EFFECTIVE loss (post-FEC/NACK client damage:
+            // dropped/rejected frames).  This link taught us why (VIV-84):
+            // its radio steadily loses ~4-5% raw at ANY rate, FEC+NACK
+            // recover all of it (client damage 0.0%, picture perfect) — yet
+            // the raw pre-FEC signal kept the controller permanently in the
+            // cut band, pinning a 90 Mbps-probed link to the 6M floor.
+            // Recovered loss is the redundancy machinery WORKING, not
+            // congestion.  (The VIV-82 attempt at this failed because
+            // nothing then stopped the climb before real damage; now the
+            // utilization gate + recovery-traffic/RTT climb guards in the
+            // controller are that early warning.)
+            double loss_signal = session.last_effective_loss();
             if (session.sender()) {
+                // Retx ratio over a ≥500ms window, EWMA-smoothed.  It used to
+                // be computed over a mere 20-packet window and fed raw: a NACK
+                // batch recovering one keyframe burst (~30-40 retx) inside a
+                // 20-packet window read as "100% loss" → instant ×0.5, and the
+                // same event smeared across two adapt windows read as
+                // SUSTAINED congestion → full cut + recovery penalty — while
+                // the client's own loss EWMA said 0.0% (everything recovered).
+                // That trap deepens as bitrate drops (same absolute burst =
+                // larger %), which is why the bitrate could never leave the
+                // floor on dynamic content (VIV-84).
                 uint64_t cur_retx = session.sender()->retransmits();
                 uint64_t cur_pkts = session.sender()->packets_sent();
                 uint64_t d_retx = cur_retx - last_retx_sample;
                 uint64_t d_pkts = cur_pkts - last_pkts_sample;
-                if (d_pkts >= 20) {
+                auto now_rt = std::chrono::steady_clock::now();
+                auto rt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now_rt - last_retx_time).count();
+                if (rt_ms >= 500 && d_pkts >= 20) {
                     double retx_ratio = static_cast<double>(d_retx)
                                       / static_cast<double>(d_pkts);
-                    if (retx_ratio > loss_signal) loss_signal = retx_ratio;
+                    retx_ewma = retx_ewma * 0.75 + retx_ratio * 0.25;
                     last_retx_sample = cur_retx;
                     last_pkts_sample = cur_pkts;
+                    last_retx_time   = now_rt;
                 }
+                // Recovery traffic gates the CLIMB (don't grow while the
+                // redundancy machinery is straining) but never cuts.
+                bitrate_ctl.on_recovery_traffic(retx_ewma);
             }
             // Suppress loss for a grace period after an IDR recovery: the
             // client's FEC decoder reset on the drop reports a burst of
             // "missing" packets that is an artifact of the reset, not real
             // congestion.  Feeding it crashed the bitrate to the floor on every
             // freeze, so the bitrate "stuck at 4M" (VIV-82).
-            if (std::chrono::steady_clock::now() < loss_grace_until)
-                loss_signal = 0.0;
+            static const bool br_trace = [] {
+                const char* e = std::getenv("VIVORA_BR_TRACE");
+                return e && e[0] == '1';
+            }();
+            const bool graced = std::chrono::steady_clock::now() < loss_grace_until;
+            if (graced) loss_signal = 0.0;
+            if (br_trace && (loss_signal > 0.005 || retx_ewma > 0.005)) {
+                static auto last_ls_log = std::chrono::steady_clock::time_point{};
+                auto now_ls = std::chrono::steady_clock::now();
+                if (now_ls - last_ls_log >= std::chrono::milliseconds(500)) {
+                    last_ls_log = now_ls;
+                    log::info("BRTRACE",
+                              "loss-signal eff=%.2f%% (raw=%.2f%% retx_ewma=%.2f%%%s)",
+                              loss_signal * 100.0, session.last_loss_rate() * 100.0,
+                              retx_ewma * 100.0, graced ? ", graced->0" : "");
+                }
+            }
             bitrate_ctl.on_loss_ratio(loss_signal);
 
             bool changed = false;

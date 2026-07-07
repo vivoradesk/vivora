@@ -174,10 +174,17 @@ bool AmfEncoder::create_encoder() {
                                   (amf_int64)AMF_VIDEO_ENCODER_HEVC_OUTPUT_MODE_SLICE);
         }
 
+        // Input is captured BGRA — full-range RGB — but the OUTPUT is always
+        // studio/limited range (VIV-84).  SDR used to signal FULL range: our
+        // Windows D3D renderer was hand-matched to it, but the Linux GL shader
+        // always did the limited-range expansion, and VideoToolbox on macOS
+        // mishandles full-range HEVC even when the VUI flags it correctly —
+        // crushed/overbright "HDR-looking" picture.  Limited range is the
+        // battle-tested interop path (and what NVENC/QSV emit by default), so
+        // every client now assumes it; see d3d_renderer's matching change.
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_INPUT_FULL_RANGE_COLOR, true);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_OUTPUT_FULL_RANGE_COLOR,
-                              (amf_int64)(hdr ? AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_STUDIO
-                                              : AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_FULL));
+                              (amf_int64)AMF_VIDEO_ENCODER_HEVC_NOMINAL_RANGE_STUDIO);
     } else {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_USAGE, (amf_int64)AMF_VIDEO_ENCODER_USAGE_ULTRA_LOW_LATENCY);
         encoder_->SetProperty(AMF_VIDEO_ENCODER_QUALITY_PRESET, (amf_int64)AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
@@ -198,8 +205,10 @@ bool AmfEncoder::create_encoder() {
                                   (amf_int64)config_.num_slices);
         }
 
-        // H.264 uses single FullRangeColor bool (deprecated alias, but only one exposed).
-        encoder_->SetProperty(AMF_VIDEO_ENCODER_FULL_RANGE_COLOR, true);
+        // H.264 uses single FullRangeColor bool (deprecated alias, but only one
+        // exposed).  false = studio/limited, matching the HEVC path above and
+        // the all-clients-assume-limited policy (VIV-84).
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_FULL_RANGE_COLOR, false);
     }
 
     res = encoder_->Init(amf_fmt, config_.width, config_.height);

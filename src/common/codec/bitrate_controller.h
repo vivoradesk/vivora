@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include "common/utils/log.h"
 
 namespace vivora::codec {
@@ -99,8 +100,17 @@ public:
     void set_probe_bandwidth(uint32_t bps) {
         if (bps == 0 || probe_ceiling_bps_ > 0) return;
         uint32_t ceiling = static_cast<uint32_t>(bps * 0.75);
+        // Hard cap: when the probe MEASURED real link headroom, allow the
+        // recovery climb up to the resolution default — hard-capping at
+        // WARMUP_CEILING pinned every session to 10 Mbps wire no matter the
+        // link (probe said 91 Mbps, 3440x1440 wants ~35: still capped at 10 —
+        // the last surviving piece of the VIV-79 ceiling, finished in VIV-84).
+        // The gentle warmup still ramps only to WARMUP_CEILING; only the
+        // small-step recovery climbs beyond it.  With no probe (0 bps) the
+        // ceiling stays at the conservative WARMUP_CEILING as before.
         const uint32_t hard_cap = ceiling_override_bps_ > 0
-                                ? ceiling_override_bps_ : WARMUP_CEILING_BPS;
+                                ? ceiling_override_bps_
+                                : std::max(WARMUP_CEILING_BPS, default_bps_);
         ceiling = std::min(ceiling, hard_cap);
         probe_ceiling_bps_ = std::max(ceiling, bounds_.min_bps);
         log::info("BitrateCtl", "Probe BW %u kbps -> ceiling %u kbps",
@@ -130,8 +140,26 @@ public:
     }
 
     // Network-feedback inputs.
-    void on_rtt(double ms)                  { last_rtt_ms_ = ms; }
+    void on_rtt(double ms) {
+        last_rtt_ms_ = ms;
+        // Track the path's base RTT.  Slow upward decay (~+3%/min at 2Hz
+        // ticks) lets the floor re-learn if the route genuinely changes.
+        if (ms > 0.0) {
+            if (rtt_floor_ <= 0.0 || ms < rtt_floor_) rtt_floor_ = ms;
+            else rtt_floor_ *= 1.00025;
+        }
+    }
     void on_estimated_bandwidth(uint32_t bps) { estimated_bw_bps_ = bps; }
+
+    // Actual wire throughput (host-side bytes really sent per second).
+    // Gates the recovery climb — see tick().  0 = unknown (gate disabled).
+    void on_wire_usage(uint32_t bps) { last_wire_bps_ = bps; }
+
+    // Share of wire spent re-sending lost packets (NACK retx EWMA, 0..1).
+    // High recovery traffic means the redundancy machinery is straining —
+    // that gates the CLIMB but is never a reason to cut (recovered loss is
+    // FEC/NACK working, not congestion — VIV-84).
+    void on_recovery_traffic(double ratio) { recovery_traffic_ = ratio; }
 
     // Feed a new loss report. Accumulates max loss since last adaptation.
     void on_loss_ratio(double ratio) {
@@ -254,6 +282,17 @@ public:
             last_cut_time_ = now;
         };
 
+        // Per-tick decision trace (VIVORA_BR_TRACE=1): every input and the
+        // branch taken, ~2Hz.  The climb stalls have been misdiagnosed twice
+        // from aggregate logs alone (VIV-84) — this shows the controller's
+        // actual view of the world.
+        static const bool trace = [] {
+            const char* e = std::getenv("VIVORA_BR_TRACE");
+            return e && e[0] == '1';
+        }();
+        const char* decision = "hold";
+        const double loss_for_trace = loss_pending_;  // consumed below
+
         uint32_t next;
         if (manual_target_ != 0) {
             next = base;
@@ -279,10 +318,18 @@ public:
             next = static_cast<uint32_t>(current_bps_ * mult);
             if (next < adapt_floor) next = adapt_floor;
             if (high_loss_streak_ >= HIGH_LOSS_SUSTAIN) {
+                decision = "CUT";
                 on_cut();                         // penalize recovery: real congestion
             } else {
-                loss_pending_  = 0.0;             // transient: consume, keep climbing
-                stable_cycles_ = 0;
+                decision = "trim";
+                // Transient: consume and KEEP the climb armed.  Zeroing
+                // stable_cycles_ here paused the climb for recover_delay
+                // (~5s) after every stray micro-burst — with bursts every
+                // ~15-30s on WiFi the bitrate sawtoothed just under the
+                // ceiling forever instead of finding the link's real rate
+                // (VIV-84).  If the loss persists, the next cycle reaches
+                // HIGH_LOSS_SUSTAIN and takes the real cut path anyway.
+                loss_pending_  = 0.0;
             }
         } else {
             // Loss ≤ 2% — channel healthy, hold or recover.
@@ -297,7 +344,35 @@ public:
             else stable_cycles_ = 0;
             loss_pending_ = 0.0;
 
-            if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap) {
+            // Utilization gate: only raise the target when the wire actually
+            // CARRIES close to the current target.  Static content uses a
+            // fraction of the target (heartbeats, tiny P-frames), so the
+            // channel is never exercised and produces no loss signal — the
+            // target then climbs on fantasy ("static grew to 30 Mbps") and
+            // the first dynamic scene slams the full target onto a radio
+            // that never proved it, bursting losses and cratering to the
+            // floor (VIV-84).  Holding until utilization ≥60% keeps the
+            // target within ~1.7× of PROVEN throughput; content transitions
+            // then start from a rate the link has actually carried.
+            const bool wire_proven = last_wire_bps_ == 0  // unknown → no gate
+                || static_cast<uint64_t>(last_wire_bps_) * 10
+                   >= static_cast<uint64_t>(current_bps_) * 6;
+            // Early-warning climb guards (never cut, only pause the climb):
+            //  * recovery traffic — the link is already leaning on NACK retx
+            //    to deliver; growing now deepens the strain (VIV-84);
+            //  * RTT inflation over the path's base — queues are building,
+            //    the classic delay signal that precedes packet damage.
+            const bool recovery_calm = recovery_traffic_ < 0.15;
+            const bool rtt_calm = rtt_floor_ <= 0.0 || last_rtt_ms_ <= 0.0
+                || last_rtt_ms_ <= rtt_floor_ + RTT_CLIMB_HEADROOM_MS;
+            if (!wire_proven)                          decision = "gated";
+            else if (!recovery_calm)                   decision = "retx-hot";
+            else if (!rtt_calm)                        decision = "rtt-hot";
+            else if (current_bps_ >= recover_cap)      decision = "at-cap";
+            else if (stable_cycles_ < recover_delay_)  decision = "warming";
+            if (stable_cycles_ >= recover_delay_ && current_bps_ < recover_cap
+                && wire_proven && recovery_calm && rtt_calm) {
+                decision = "climb";
                 // +1/recovery_divisor of cap per cycle.
                 // Base is 50 (+2%). After each up-then-down it doubles:
                 // 50→100→200→400 (2% → 1% → 0.5% → 0.25%). A long stable
@@ -329,6 +404,21 @@ public:
             }
         }
 
+        if (trace) {
+            log::info("BRTRACE",
+                "%s: cur=%u -> next=%u | eff-loss=%.2f%% streak=%d retx=%.1f%% "
+                "| wire=%u (%.0f%% of cur) | stable=%u/%u div=%u | cap=%u ceil=%u "
+                "| rtt=%.1f (base %.1f)",
+                decision, current_bps_ / 1000, clamp(next) / 1000,
+                loss_for_trace * 100.0, high_loss_streak_,
+                recovery_traffic_ * 100.0,
+                last_wire_bps_ / 1000,
+                current_bps_ ? 100.0 * last_wire_bps_ / current_bps_ : 0.0,
+                stable_cycles_, recover_delay_, recovery_divisor_,
+                recover_cap / 1000, recovery_ceiling_bps_ / 1000,
+                last_rtt_ms_, rtt_floor_);
+        }
+
         next = clamp(next);
         const bool diff = next != current_bps_;
         current_bps_ = next;
@@ -355,8 +445,13 @@ private:
     static constexpr uint32_t RECOVERY_DIVISOR_BASE = 100; // +1% of default per cycle
     static constexpr uint32_t RECOVERY_DIVISOR_MAX  = 400; // floor at +0.25%
     static constexpr int64_t  CUT_COOLDOWN_MS       = 60000; // 60s quarantine before resetting recovery step
-    static constexpr int      HIGH_LOSS_SUSTAIN     = 2;     // cycles of high loss before a full cut
+    // 3 cycles (~1.5s) of continuous high loss before a full cut.  Real
+    // congestion easily lasts that long; a one-off keyframe burst + its NACK
+    // recovery smears across two adjacent 500ms windows and used to be
+    // misread as "sustained" at 2 (VIV-84).
+    static constexpr int      HIGH_LOSS_SUSTAIN     = 3;
     static constexpr uint32_t MAX_RECOVER_STEP      = 250'000; // ≤0.25M/cycle = ~0.5 Mbps/s climb cap
+    static constexpr double   RTT_CLIMB_HEADROOM_MS = 20.0;    // climb only while RTT ≤ base + this
 
     BitrateBounds bounds_;
     uint32_t default_bps_   = 0;
@@ -379,7 +474,10 @@ private:
     uint32_t client_count_               = 1;
     // Network feedback.
     double   last_rtt_ms_      = 0.0;
+    double   rtt_floor_        = 0.0;  // path base RTT (min, slow decay); 0 = unknown
+    double   recovery_traffic_ = 0.0;  // NACK retx share of wire (EWMA)
     uint32_t estimated_bw_bps_ = 0;
+    uint32_t last_wire_bps_    = 0;   // actual sent throughput; 0 = unknown
 };
 
 } // namespace vivora::codec

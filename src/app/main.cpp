@@ -35,6 +35,14 @@ int main(int argc, char* argv[]) {
         }
     }
 #ifdef VIVORA_WINDOWS
+    // Per-monitor DPI awareness, process-wide, BEFORE any DXGI/Qt init.
+    // Without it IDXGIOutput5::DuplicateOutput1 rejects the FP16 format
+    // with DXGI_ERROR_UNSUPPORTED (documented quirk), silently degrading
+    // an HDR desktop to the washed-out BGRA-SDR fallback in CLI --host
+    // mode.  The GUI host never hit this only because QApplication sets
+    // PerMonitorV2 itself; setting it here first is what Qt6 defaults to
+    // anyway, so the GUI path is unchanged (VIV-84).
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     // The Windows build is a /SUBSYSTEM:WINDOWS exe (so the GUI doesn't
     // spawn an empty console).  In CLI mode we still want logs to land
     // in the PowerShell / cmd that launched us — attach to that parent

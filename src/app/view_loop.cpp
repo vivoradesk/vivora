@@ -76,6 +76,7 @@ int ViewLoopState::min_idr_interval_ms() {
 }
 
 void ViewLoopState::decode_thread_proc() {
+    pipeline_->on_decode_thread_start();
     bool got_kf = false;
     CompressedFrame cf;
     // Per-second decode counters — logged only under VIVORA_FTRACE (VIV-82).
@@ -109,17 +110,28 @@ void ViewLoopState::decode_thread_proc() {
             got_kf = false; ++d_flag;
             if (ftrace()) log::info("FTRACE", "disc  seq=%u -> drop-to-kf", cf.seq);
         }
-        // Reinit on EVERY keyframe, not just the first after a gap.  libav 4.4
-        // HEVC leaks POC tracking across IDRs, so a SECOND keyframe decoded in
-        // the same context — common under IDR churn (loss → we request IDR → the
-        // host sends several keyframes close together) — throws "Duplicate POC" /
-        // "Could not find ref" → reject → we request IDR again → a self-
-        // sustaining churn that was the real error/freeze source under loss.  A
-        // fresh context per keyframe breaks the cycle (VIV-82).
+        // Flush policy on keyframes (VIV-82/VIV-84):
+        //  * RECOVERY keyframes (first after a gap / reject / startup) are
+        //    always flushed — drops the stale DPB + any pre-loss output still
+        //    buffered in the decoder, matching the serial path's flush on the
+        //    got_keyframe transition.
+        //  * EVERY keyframe additionally, only where reinit_on_keyframe()
+        //    says so (Linux/libav 4.4): HEVC leaks POC tracking across IDRs,
+        //    so a SECOND keyframe decoded in the same context — common under
+        //    IDR churn — throws "Duplicate POC" / "Could not find ref" →
+        //    reject → IDR → a self-sustaining churn.  A fresh context per
+        //    keyframe breaks the cycle.  MF/VTB don't have the leak, and for
+        //    them a per-keyframe flush would pointlessly drop in-flight frames.
         if (cf.keyframe) {
+            const bool recovery = !got_kf;
             got_kf = true;
-            pipeline_->flush_decoder();
-            if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + reinit", cf.seq);
+            if (recovery || pipeline_->reinit_on_keyframe()) {
+                pipeline_->flush_decoder();
+                if (ftrace()) log::info("FTRACE", "KEYFRAME seq=%u -> got_kf + flush%s",
+                                        cf.seq, recovery ? " (recovery)" : "");
+            } else if (ftrace()) {
+                log::info("FTRACE", "KEYFRAME seq=%u (no flush)", cf.seq);
+            }
         } else if (!got_kf) {
             // Keyframe gating: drop P-frames until the first keyframe of a GOP.
             // Keep asking for an IDR while starved — otherwise, after a loss-
@@ -143,6 +155,15 @@ void ViewLoopState::decode_thread_proc() {
             decode_needs_idr_.store(true, std::memory_order_release);
             continue;
         }
+        // An accepted keyframe SATISFIES any pending keyframe request — clear
+        // the sticky flag.  Leaving it set let the main loop fire a stale
+        // IDR request whose reset_video_stream() marked a discontinuity →
+        // drop-to-keyframe → the dropP branch re-armed the flag → a
+        // self-sustaining IDR/reset cycle at the throttle cadence that cost
+        // ~20% fps and permanent keyframe churn (VIV-84, seen on the Windows
+        // loopback rig; the same loop ran on Linux).  A genuinely new error
+        // after this point simply sets the flag again.
+        if (cf.keyframe) decode_needs_idr_.store(false, std::memory_order_release);
         // Pull every decoded frame this submit produced into Q2.
         for (;;) {
             FrameHandle h;
@@ -160,6 +181,7 @@ void ViewLoopState::decode_thread_proc() {
             }
         }
     }
+    pipeline_->on_decode_thread_stop();
 }
 
 bool ViewLoopState::iter_threaded() {
@@ -379,7 +401,17 @@ bool ViewLoopState::iter_threaded() {
             ? static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(
                   now_check - session_start_).count())
             : 0;
-        std::snprintf(v.decoder, sizeof(v.decoder), "SW HEVC");
+        std::snprintf(v.decoder, sizeof(v.decoder), "%s",
+#if defined(VIVORA_LINUX)
+                      "SW HEVC"
+#elif defined(VIVORA_WINDOWS)
+                      "MF HW"
+#elif defined(VIVORA_MACOS)
+                      "VTB HW"
+#else
+                      "?"
+#endif
+        );
         platform.update_stats(v);
     }
 

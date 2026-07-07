@@ -237,12 +237,16 @@ bool D3dRenderer::create_video_processor() {
                 log::info("RENDER", "Color space: HDR->SDR tone-map (BT.2020/PQ -> BT.709)");
             }
         } else {
-            // SDR: full range BT.709 straight through
+            // SDR: studio/limited-range BT.709 in, full-range RGB out.
+            // Hosts now uniformly emit limited-range SDR (VIV-84): AMF is set
+            // to studio explicitly, NVENC/QSV/VAAPI/VTB emit it by default.
+            // This input used to say FULL — hand-matched to AMF's old
+            // full-range output but silently wrong for every other encoder.
             vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0,
-                DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709);
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
             vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(),
                 DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
-            log::info("RENDER", "Color space: SDR BT.709 full range");
+            log::info("RENDER", "Color space: SDR BT.709 studio range");
         }
     } else {
         // Fallback: legacy D3D11_VIDEO_PROCESSOR_COLOR_SPACE (SDR only)
@@ -251,9 +255,8 @@ bool D3dRenderer::create_video_processor() {
         input_cs.RGB_Range = 0;
         input_cs.YCbCr_Matrix = 1;    // BT.709
         input_cs.YCbCr_xvYCC = 0;
-        input_cs.Nominal_Range = is_hdr_
-            ? D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235
-            : D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
+        // Limited range for SDR too — hosts emit studio-range SDR (VIV-84).
+        input_cs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
         video_context_->VideoProcessorSetStreamColorSpace(vp_.Get(), 0, &input_cs);
 
         D3D11_VIDEO_PROCESSOR_COLOR_SPACE output_cs = {};

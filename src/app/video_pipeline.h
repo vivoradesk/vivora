@@ -102,6 +102,20 @@ public:
     // hook for HW→SW auto-fallback after repeated HW failures (VIV-80).
     virtual bool reinit_decoder() = 0;
 
+    // Whether the generic decode loop must flush_decoder() on EVERY keyframe,
+    // not just recovery keyframes.  That per-keyframe reinit is a libav-4.4
+    // POC-leak workaround (Duplicate POC under IDR churn) — Linux needs it;
+    // MF/VTB don't, and for them a flush per keyframe would pointlessly drop
+    // in-flight output (VIV-84).  Recovery keyframes (first after a gap /
+    // reject) are flushed regardless of this flag.
+    virtual bool reinit_on_keyframe() const { return false; }
+
+    // Called by the generic pipeline on the decode thread right after it
+    // starts / right before it exits — for per-thread runtime setup the impl's
+    // API needs (Windows: CoInitializeEx for Media Foundation).  Default no-op.
+    virtual void on_decode_thread_start() {}
+    virtual void on_decode_thread_stop() {}
+
     // ---- main / GL thread ------------------------------------------------
 
     // Draw the decoded frame referenced by `h`.  Runs on the thread that

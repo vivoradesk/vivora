@@ -39,6 +39,9 @@ public:
     void recycle(FrameHandle h) override;                   // main thread
     void unreserve(FrameHandle h) override;                 // decode thread (q2-full)
     void wake_render() override {}                          // poll-in-iter model
+    // libav 4.4 leaks POC tracking across IDRs — a fresh context per keyframe
+    // is the workaround (VIV-82); see decode_thread_proc for the full story.
+    bool reinit_on_keyframe() const override { return true; }
 
 private:
     // Pool must comfortably cover: Q2 capacity (4) + reserved (1) + presenting

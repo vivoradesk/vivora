@@ -1074,6 +1074,25 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
             log::info(TAG, "%s format description ready: %dx%d%s",
                       is_hevc ? "HEVC" : "H264", dims.width, dims.height,
                       impl->is_hdr ? " HDR" : "");
+            // Colour diagnostics (VIV-84): what CoreMedia extracted from the
+            // SPS VUI.  The host encodes SDR as FULL-range (AMF
+            // OUTPUT_FULL_RANGE_COLOR) — if the range flag doesn't survive to
+            // here, the layer decodes as video-range → crushed/overbright
+            // "HDR-looking" picture.
+            {
+                CFBooleanRef fr = (CFBooleanRef)CMFormatDescriptionGetExtension(
+                    impl->format_desc, kCMFormatDescriptionExtension_FullRangeVideo);
+                CFStringRef pri = (CFStringRef)CMFormatDescriptionGetExtension(
+                    impl->format_desc, kCMFormatDescriptionExtension_ColorPrimaries);
+                CFStringRef mat = (CFStringRef)CMFormatDescriptionGetExtension(
+                    impl->format_desc, kCMFormatDescriptionExtension_YCbCrMatrix);
+                char pri_s[64] = "unset", mat_s[64] = "unset";
+                if (pri) CFStringGetCString(pri, pri_s, sizeof(pri_s), kCFStringEncodingUTF8);
+                if (mat) CFStringGetCString(mat, mat_s, sizeof(mat_s), kCFStringEncodingUTF8);
+                log::info(TAG, "colour: full_range=%s primaries=%s matrix=%s tfn=%s",
+                          fr ? (CFBooleanGetValue(fr) ? "yes" : "no") : "unset",
+                          pri_s, mat_s, impl->is_hdr ? "PQ/HLG" : "sdr/unset");
+            }
         }
     }
 

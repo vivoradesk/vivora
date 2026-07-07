@@ -5,6 +5,15 @@
 #include <utility>
 
 bool MacViewPlatform::init(const char* host_ip, uint16_t port) {
+    // CLI --view lands here with no QApplication; the StreamMenu below is a
+    // QWidget and aborts without one.  Construct it BEFORE the Cocoa window
+    // so NSApp initialization order matches the (working) GUI connect path.
+    if (!QApplication::instance()) {
+        static int qt_argc = 1;
+        static char app_name[] = "vivora";
+        static char* qt_argv[] = { app_name, nullptr };
+        app_ = std::make_unique<QApplication>(qt_argc, qt_argv);
+    }
     if (!view_.create_window("Vivora", 1280, 720)) {
         vivora::log::error("VIEW", "Failed to create window");
         return false;
@@ -65,6 +74,9 @@ void MacViewPlatform::set_input_callback(InputCallback cb) {
 
 bool MacViewPlatform::pump_events() {
     view_.pump_events();
+    // CLI path: the Qt overlay (StreamMenu) gets no events from the Cocoa
+    // pump — drive its queue here, like the Windows platform does.
+    if (app_) app_->processEvents();
     return !view_.should_close();
 }
 
@@ -118,6 +130,14 @@ void MacViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
     menu_->set_initial_state(1.0f, false, false, /*keep_aspect=*/true);
 }
 
-void MacViewPlatform::shutdown() { menu_.reset(); }
+vivora::IVideoPipeline* MacViewPlatform::video_pipeline() {
+    if (!pipeline_) pipeline_ = std::make_unique<vivora::MacVideoPipeline>(&view_);
+    return pipeline_.get();
+}
+
+void MacViewPlatform::shutdown() {
+    pipeline_.reset();   // decode thread is already joined (ViewLoop teardown)
+    menu_.reset();
+}
 
 #endif // VIVORA_MACOS
