@@ -331,6 +331,13 @@ bool ViewLoopState::iter_threaded() {
         if (session.has_cursor_position()) {
             platform.update_cursor_position(session.cursor_position());
         }
+        // VIV-50: host display list → monitor panel.  The original wiring
+        // only covered the legacy iter(); without this the panel silently
+        // never populates on the threaded path.
+        std::vector<protocol::MonitorDesc> monitors;
+        if (session.take_new_monitor_list(monitors)) {
+            platform.set_monitor_list(monitors);
+        }
     }
 
     // Drain Q2 with the render-penultimate policy: drop stale, render the
