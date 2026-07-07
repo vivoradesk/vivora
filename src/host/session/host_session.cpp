@@ -113,6 +113,7 @@ bool HostSession::start(uint16_t port) {
     input_injector_ = InputInjector::create();
     if (input_injector_ && pending_screen_w_ && pending_screen_h_) {
         input_injector_->set_screen_resolution(pending_screen_w_, pending_screen_h_);
+        input_injector_->set_screen_origin(pending_origin_x_, pending_origin_y_);
     }
     state_ = SessionState::WaitingForClient;
     clients_.clear();

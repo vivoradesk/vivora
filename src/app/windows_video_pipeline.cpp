@@ -144,9 +144,19 @@ void WindowsVideoPipeline::present(FrameHandle h) {
     if (h.id >= static_cast<uint32_t>(kSlots) || !window_) return;
     Slot& s = slots_[h.id];
     if (!s.tex) return;
+    // A monitor switch (VIV-50) changes the decoded frame size mid-session —
+    // the renderer must be rebuilt for the new geometry or it keeps blitting
+    // with the old dimensions (squashed/cropped picture).
+    if (renderer_ready_ && (s.w != renderer_w_ || s.h != renderer_h_
+                            || s.fmt != renderer_fmt_)) {
+        log::info("VIEW", "Decoded size changed %ux%u -> %ux%u — reinit renderer",
+                  renderer_w_, renderer_h_, s.w, s.h);
+        renderer_ready_ = false;
+    }
     if (!renderer_ready_) {
         renderer_ready_ = window_->init_renderer(device_.Get(), s.w, s.h, s.fmt);
         if (renderer_ready_) {
+            renderer_w_ = s.w; renderer_h_ = s.h; renderer_fmt_ = s.fmt;
             // Mirror the serial path: apply the real crop dims if StreamInfo
             // beat the first frame, else fall back to the (possibly padded)
             // decoded dims so mouse mapping works until StreamInfo lands.

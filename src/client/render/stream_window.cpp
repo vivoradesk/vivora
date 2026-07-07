@@ -497,6 +497,15 @@ bool StreamWindow::nativeEvent(const QByteArray& eventType, void* message, qintp
 }
 
 void StreamWindow::send_event(const protocol::InputEvent& ev) {
+    // While an overlay (in-stream menu / monitor panel) is up, the user is
+    // interacting with the UI, not the host — forwarding input would drive
+    // the remote cursor underneath the overlay (and on a loopback session it
+    // teleports the LOCAL cursor away, making the overlay unclickable).  The
+    // Mac view has suppressed input while its menu is open since VIV-74; the
+    // Windows window never did (VIV-50).
+    if ((menu_ && menu_->isVisible())
+        || (monitor_panel_ && monitor_panel_->isVisible()))
+        return;
     if (input_cb_) input_cb_(ev);
 }
 

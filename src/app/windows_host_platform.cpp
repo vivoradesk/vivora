@@ -141,6 +141,13 @@ std::vector<vivora::protocol::MonitorDesc> WindowsHostPlatform::list_monitors() 
     return out;
 }
 
+int32_t WindowsHostPlatform::input_origin_x() const {
+    return dxgi_ ? dxgi_->origin_x() : 0;
+}
+int32_t WindowsHostPlatform::input_origin_y() const {
+    return dxgi_ ? dxgi_->origin_y() : 0;
+}
+
 bool WindowsHostPlatform::select_monitor(uint32_t index) {
     if (!dxgi_) return false;
     if (index == dxgi_->current_monitor_index()) return true;  // already there

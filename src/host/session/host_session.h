@@ -187,6 +187,15 @@ public:
         if (input_injector_) input_injector_->set_screen_resolution(w, h);
     }
 
+    // Virtual-desktop origin of the captured display (VIV-50) — non-zero when
+    // the host streams a non-primary monitor.  Same pending pattern as the
+    // resolution: applied when the injector is created.
+    void set_screen_origin(int32_t x, int32_t y) {
+        pending_origin_x_ = x;
+        pending_origin_y_ = y;
+        if (input_injector_) input_injector_->set_screen_origin(x, y);
+    }
+
     // Aggregate state across all clients.
     SessionState state() const { return state_; }
     size_t client_count() const { return clients_.size(); }
@@ -349,6 +358,8 @@ private:
 
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;
+    int32_t  pending_origin_x_ = 0;   // captured display origin (VIV-50)
+    int32_t  pending_origin_y_ = 0;
 
     // VIV-50 monitor selection request state (consumed by host_loop).
     bool     monitor_list_requested_ = false;

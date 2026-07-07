@@ -86,11 +86,16 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
         return false;
     }
 
-    // Get output description for resolution
+    // Get output description for resolution + desktop origin.  The origin
+    // matters for input injection on multi-monitor hosts (VIV-50): SendInput
+    // absolute coords span the virtual desktop, so a non-primary display's
+    // offset must be added to the normalized client coordinates.
     DXGI_OUTPUT_DESC desc;
     output->GetDesc(&desc);
     resolution_.width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
     resolution_.height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+    origin_x_ = desc.DesktopCoordinates.left;
+    origin_y_ = desc.DesktopCoordinates.top;
 
     // Try IDXGIOutput5::DuplicateOutput1 for FP16 HDR capture
     hr = output.As(&output5_);

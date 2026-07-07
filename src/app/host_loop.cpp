@@ -55,6 +55,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // Start session.
     host::HostSession session;
     session.set_screen_resolution(platform.input_width(), platform.input_height());
+    session.set_screen_origin(platform.input_origin_x(), platform.input_origin_y());
     session.set_codec(platform.actual_codec());
     if (cfg.approval_gate) session.set_approval_gate(cfg.approval_gate);
     if (cfg.stun_server && *cfg.stun_server) {
@@ -564,6 +565,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 cap_h = platform.capture_height();
                 session.set_screen_resolution(platform.input_width(),
                                               platform.input_height());
+                session.set_screen_origin(platform.input_origin_x(),
+                                          platform.input_origin_y());
                 session.send_stream_info(static_cast<uint16_t>(cap_w),
                                          static_cast<uint16_t>(cap_h));
                 platform.request_idr();

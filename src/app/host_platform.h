@@ -23,6 +23,11 @@ struct HostPlatform {
     // e.g. macOS Retina points vs backing pixels).  Default = capture res.
     virtual uint32_t input_width()  const { return capture_width(); }
     virtual uint32_t input_height() const { return capture_height(); }
+    // Virtual-desktop origin of the captured display (VIV-50).  Non-zero on
+    // multi-monitor hosts streaming a non-primary display; input injection
+    // adds it so absolute mouse coords land on the display being watched.
+    virtual int32_t  input_origin_x() const { return 0; }
+    virtual int32_t  input_origin_y() const { return 0; }
 
     // Encoder control.
     virtual void set_bitrate(uint32_t bps) = 0;

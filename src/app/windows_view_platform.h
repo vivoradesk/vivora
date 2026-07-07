@@ -40,6 +40,10 @@ private:
     // VIVORA_PIPELINE=threaded; the serial decoder_ above stays unused then.
     std::unique_ptr<vivora::WindowsVideoPipeline> pipeline_;
     bool renderer_ready_ = false;
+    // Geometry the renderer was built for — a monitor switch (VIV-50) changes
+    // the decoded size mid-session and forces a renderer rebuild.
+    uint32_t renderer_w_ = 0;
+    uint32_t renderer_h_ = 0;
     // Latest crop dims from the host — applied to the window whenever the
     // renderer becomes ready (StreamInfo may arrive before the first frame).
     uint32_t pending_stream_w_ = 0;
