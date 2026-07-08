@@ -22,6 +22,10 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     }
     window_ = std::make_unique<vivora::StreamWindow>();
     window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
+    // Loopback session (viewing this same machine): relative-cursor mode
+    // would hide/clip the user's own pointer — disable it (VIV-50).
+    const QString hip = QString::fromUtf8(host_ip ? host_ip : "");
+    window_->set_loopback(hip.startsWith("127.") || hip == "localhost");
     // Header subtitle for the in-stream menu (VIV-74).  Friendly device
     // names aren't plumbed to the view layer yet, so show the endpoint.
     window_->set_peer_label(QString("%1:%2").arg(host_ip).arg(port));

@@ -312,6 +312,12 @@ void StreamWindow::apply_pending_visibility() {
 
 void StreamWindow::enter_relative_mode() {
     if (relative_mode_) return;
+    // Loopback session: the "host cursor" IS the user's physical mouse.
+    // Hiding + clipping it here trapped the real pointer invisibly inside
+    // the window whenever the host cursor was elsewhere (e.g. on another
+    // display after a monitor switch, VIV-50).  Relative mode exists for
+    // remote games that hide the pointer — meaningless against yourself.
+    if (loopback_) return;
     relative_mode_ = true;
     saved_global_pos_ = QCursor::pos();
 

@@ -40,7 +40,10 @@ struct HostPlatform {
     // single-display host that can't switch — platforms wire these as the
     // capability lands (Windows/DXGI first).
     virtual std::vector<protocol::MonitorDesc> list_monitors() { return {}; }
-    virtual bool select_monitor(uint32_t /*index*/) { return false; }
+    // seed_cursor: move the host pointer onto the new display so it stays
+    // visible in the stream.  Pass false for loopback-only sessions — there
+    // the pointer IS the user's physical mouse (VIV-50).
+    virtual bool select_monitor(uint32_t /*index*/, bool /*seed_cursor*/ = true) { return false; }
 
     // The codec the encoder actually produces.  May differ from what the
     // caller requested if the backend had to fall back (e.g. NVENC refusing

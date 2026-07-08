@@ -61,6 +61,11 @@ public:
     // Peer/device subtitle for the menu header (VIV-74).
     void set_peer_label(const QString& peer);
 
+    // Mark this session as loopback (viewing this same machine) — disables
+    // relative (hidden-cursor) mode, which would hide/clip the user's own
+    // physical pointer (VIV-50).
+    void set_loopback(bool lb) { loopback_ = lb; }
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -113,6 +118,7 @@ private:
     bool have_active_shape_ = false;
 
     bool  relative_mode_ = false;
+    bool  loopback_      = false;   // session views this same machine (VIV-50)
     bool  raw_input_registered_ = false;
     QPoint saved_global_pos_;
 

@@ -148,7 +148,7 @@ int32_t WindowsHostPlatform::input_origin_y() const {
     return dxgi_ ? dxgi_->origin_y() : 0;
 }
 
-bool WindowsHostPlatform::select_monitor(uint32_t index) {
+bool WindowsHostPlatform::select_monitor(uint32_t index, bool seed_cursor) {
     if (!dxgi_) return false;
     if (index == dxgi_->current_monitor_index()) return true;  // already there
 
@@ -180,7 +180,7 @@ bool WindowsHostPlatform::select_monitor(uint32_t index) {
     // cursor) mode — the "mouse disappeared after switching" report (VIV-50).
     // Client absolute moves then land correctly via the virtual-desktop
     // mapping, but only once the cursor is visible again — so seed it here.
-    {
+    if (seed_cursor) {
         POINT p{};
         const LONG nx = dxgi_->origin_x(), ny = dxgi_->origin_y();
         const LONG nw = static_cast<LONG>(dxgi_->get_resolution().width);

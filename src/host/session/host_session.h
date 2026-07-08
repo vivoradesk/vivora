@@ -277,6 +277,15 @@ public:
     void send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
 
     // True when a new client just connected since last check.
+    // True when at least one connected client is NOT on this machine.  A
+    // loopback-only session must not have its cursor teleported by the
+    // monitor-switch seeding — that IS the user's physical mouse (VIV-50).
+    bool has_remote_clients() const {
+        for (const auto& [addr, info] : clients_)
+            if (!addr.is_loopback()) return true;
+        return false;
+    }
+
     // Consumed (reset) on read — used by host loop for warmup arming.
     bool consume_new_client_flag() {
         bool v = new_client_flag_;

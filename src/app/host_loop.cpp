@@ -557,7 +557,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         uint32_t want_monitor = 0;
         if (session.consume_monitor_select(want_monitor)) {
             log::info("HOST", "Client requested switch to display %u", want_monitor);
-            if (platform.select_monitor(want_monitor)) {
+            if (platform.select_monitor(want_monitor,
+                                        /*seed_cursor=*/session.has_remote_clients())) {
                 // Capture now targets a (possibly) different-resolution display:
                 // refresh dims, re-arm input mapping, tell clients the new size,
                 // and force a keyframe so the decoder re-inits cleanly.
