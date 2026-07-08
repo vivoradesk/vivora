@@ -4,7 +4,9 @@
 #include "common/protocol/cursor_message.h"
 
 #include "app/view_platform.h"
+#include "client/render/monitor_panel.h"
 #include "client/render/stream_menu.h"
+#include "common/protocol/monitor_info.h"
 
 #include <QCursor>
 #include <QLabel>
@@ -18,6 +20,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <vector>
 #include <unordered_map>
 
 namespace vivora::client {
@@ -44,6 +47,9 @@ public:
     // In-stream menu (VIV-74): supply callbacks + header subtitle.
     void set_menu_actions(const vivora::MenuActions& actions);
     void set_peer_label(const QString& peer);
+
+    // Deliver the host's display list to the in-stream monitor panel (VIV-50).
+    void set_monitor_list(const std::vector<vivora::protocol::MonitorDesc>& monitors);
 
     // Pre-encoder stream dimensions — used to map widget-local mouse
     // coords to the host's input coord space.  Updated when the host's
@@ -154,6 +160,10 @@ private:
 
     // In-stream control menu (VIV-74).  Top-level overlay, toggled by Ctrl+F1.
     vivora::StreamMenu* menu_ = nullptr;
+    // "Switch monitor…" panel (VIV-50) — same top-level overlay pattern.
+    vivora::MonitorPanel* monitor_panel_ = nullptr;
+    std::vector<vivora::protocol::MonitorDesc> last_monitors_;
+    vivora::MenuActions menu_actions_;
     bool keep_aspect_ = true;   // letterbox vs stretch-to-fill
     void toggle_menu();
     void toggle_fullscreen();

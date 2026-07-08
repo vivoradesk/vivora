@@ -217,6 +217,22 @@ QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
         activateWindow();
         setFocus(Qt::OtherFocusReason);
     });
+
+    // "Switch monitor…" panel (VIV-50) — same top-level overlay pattern as the
+    // menu.  Wired for Windows/Mac already; Linux was the last client missing
+    // it (the shared menu button would otherwise do nothing here).
+    monitor_panel_ = new vivora::MonitorPanel(nullptr);
+    monitor_panel_->hide();
+    connect(monitor_panel_, &vivora::MonitorPanel::closed, this, [this]() {
+        activateWindow();
+        setFocus(Qt::OtherFocusReason);
+    });
+    connect(menu_, &vivora::StreamMenu::monitorClicked, this, [this]() {
+        if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        menu_->close_menu();
+        monitor_panel_->set_monitors(last_monitors_);
+        monitor_panel_->open_over(this);
+    });
 }
 
 void QtGlVideoView::set_status(const QString& text) {
@@ -239,6 +255,7 @@ void QtGlVideoView::position_status() {
 
 QtGlVideoView::~QtGlVideoView() {
     if (menu_) { menu_->hide(); menu_->deleteLater(); menu_ = nullptr; }
+    if (monitor_panel_) { monitor_panel_->hide(); monitor_panel_->deleteLater(); monitor_panel_ = nullptr; }
     if (context()) {
         makeCurrent();
         if (y_tex_) glDeleteTextures(1, &y_tex_);
@@ -640,9 +657,25 @@ void QtGlVideoView::update_stats(const StatsView& stats) {
 }
 
 void QtGlVideoView::set_menu_actions(const vivora::MenuActions& actions) {
+    menu_actions_ = actions;
     if (!menu_) return;
     menu_->set_actions(actions);
     menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+    // Wire the panel's switch/refresh to the same session callbacks (VIV-50).
+    if (monitor_panel_) {
+        monitor_panel_->set_select_callback([this](uint32_t idx) {
+            if (menu_actions_.select_monitor) menu_actions_.select_monitor(idx);
+        });
+        monitor_panel_->set_refresh_callback([this]() {
+            if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        });
+    }
+}
+
+void QtGlVideoView::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    last_monitors_ = monitors;
+    if (monitor_panel_) monitor_panel_->set_monitors(monitors);
 }
 
 void QtGlVideoView::set_peer_label(const QString& peer) {
