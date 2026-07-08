@@ -270,18 +270,22 @@ void MonitorPanel::rebuild_thumbs() {
         strip_layout_->addStretch(1);
     }
 
+    const QSize before = size();
     adjustSize();
-    if (isVisible()) {
-        // Keep centred as the size changes between list updates.
+    if (isVisible() && size() != before) {
+        // Resizing a visible translucent frameless window leaves a DWM ghost
+        // of the old geometry on Windows (repaint alone doesn't clear it).
+        // Cycle the window: hide → recenter → show gives the layered surface
+        // a clean start at the new size.  Rare in practice — the list is
+        // pre-fetched on connect, so the panel normally opens full-sized.
+        hide();
         if (auto* scr = screen()) {
             const QRect g = scr->geometry();
             move(g.center().x() - width() / 2, g.center().y() - height() / 2);
         }
-        // The first open happens before the host's list arrives (the request
-        // is async), so the visible panel grows when it lands — a translucent
-        // frameless window resize can leave a stale ghost of the previous
-        // geometry on Windows until the next paint.  Repaint synchronously.
-        repaint();
+        show();
+        raise();
+        activateWindow();
     }
 }
 

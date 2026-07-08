@@ -213,6 +213,11 @@ bool ViewLoopState::iter_threaded() {
     if (!session_started_ && session.state() == client::SessionState::Connected) {
         session_start_ = Clock::now();
         session_started_ = true;
+        // Pre-fetch the host display list (VIV-50) so the monitor panel's
+        // first open renders full-sized immediately instead of growing when
+        // the async reply lands (a visible translucent-window resize ghosts
+        // on Windows).  The panel still re-requests on open for freshness.
+        session.request_monitor_list();
     }
 
     // Status overlay before the first frame (VIV-62).
@@ -635,6 +640,9 @@ bool ViewLoopState::iter() {
     if (!session_started_ && session.state() == client::SessionState::Connected) {
         session_start_ = Clock::now();
         session_started_ = true;
+        // Pre-fetch the host display list for the monitor panel (VIV-50) —
+        // see the identical call in iter_threaded().
+        session.request_monitor_list();
     }
 
     // Status overlay (VIV-62): before the first frame, tell the user what's
