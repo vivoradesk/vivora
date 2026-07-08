@@ -308,15 +308,20 @@ void MonitorPanel::open_over(QWidget* /*anchor*/) {
     // the size hint current; resize() applies it synchronously.
     ensurePolished();
     if (auto* l = layout()) { l->invalidate(); l->activate(); }
-    resize(sizeHint());
-    // Centre on the screen the cursor / primary screen is on — the stream
-    // window may be a native (non-Qt-anchored) surface.
-    QScreen* scr = QGuiApplication::primaryScreen();
-    if (scr) {
-        const QRect g = scr->geometry();
-        move(g.center().x() - width() / 2, g.center().y() - height() / 2);
-    }
+    const QSize hint = sizeHint();
+    // show() FIRST, then apply geometry.  A frameless translucent window's
+    // native (DWM layered) surface is created at show time from the geometry
+    // then current; a resize() issued BEFORE the first show was not picked
+    // up, so the surface latched a clipped width even though the Qt widget
+    // measured the correct 397px (VIV-50 — confirmed by logging sizeHint vs
+    // the on-screen clip).  Sizing the live window after show fixes it.
     show();
+    const QRect g = QGuiApplication::primaryScreen()
+                        ? QGuiApplication::primaryScreen()->geometry()
+                        : QRect(0, 0, 1920, 1080);
+    setGeometry(g.center().x() - hint.width() / 2,
+                g.center().y() - hint.height() / 2,
+                hint.width(), hint.height());
     raise();
     activateWindow();
     setFocus(Qt::OtherFocusReason);

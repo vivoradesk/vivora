@@ -54,10 +54,13 @@ bool MacViewPlatform::init(const char* host_ip, uint16_t port) {
                      monitor_panel_.get(), [this]() {
         view_.set_menu_open(false);
     });
-    // Click on the stream (outside the menu) dismisses it — the Qt overlay
-    // doesn't get a reliable deactivation under Cocoa, so the view tells us.
+    // Click on the stream (outside the menu / panel) dismisses whichever is
+    // open — the Qt overlay doesn't get a reliable deactivation under Cocoa,
+    // so the view tells us.  The monitor panel (VIV-50) needs this too; it
+    // was only wired for the menu, so on macOS it closed only via Esc.
     view_.set_menu_dismiss_callback([this]() {
-        if (menu_ && menu_->isVisible()) menu_->close_menu();
+        if (monitor_panel_ && monitor_panel_->isVisible()) monitor_panel_->close_panel();
+        else if (menu_ && menu_->isVisible()) menu_->close_menu();
     });
     // Cmd/Ctrl+F1 over the stream → toggle the menu (called on the main
     // thread from the Cocoa view's keyDown).
