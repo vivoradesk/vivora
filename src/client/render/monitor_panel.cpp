@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLayout>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPen>
@@ -299,7 +300,15 @@ void MonitorPanel::choose(uint32_t index) {
 }
 
 void MonitorPanel::open_over(QWidget* /*anchor*/) {
-    adjustSize();
+    // Force the layout to compute the real content size BEFORE the first
+    // show.  adjustSize() alone read a stale (too-narrow) size hint on the
+    // first open — the thumbnails had just been added and the strip's hint
+    // wasn't recomputed yet — so the frameless window latched a clipped
+    // width until the next resize (VIV-50).  ensurePolished + activate makes
+    // the size hint current; resize() applies it synchronously.
+    ensurePolished();
+    if (auto* l = layout()) { l->invalidate(); l->activate(); }
+    resize(sizeHint());
     // Centre on the screen the cursor / primary screen is on — the stream
     // window may be a native (non-Qt-anchored) surface.
     QScreen* scr = QGuiApplication::primaryScreen();
