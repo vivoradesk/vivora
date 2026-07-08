@@ -277,6 +277,11 @@ void MonitorPanel::rebuild_thumbs() {
             const QRect g = scr->geometry();
             move(g.center().x() - width() / 2, g.center().y() - height() / 2);
         }
+        // The first open happens before the host's list arrives (the request
+        // is async), so the visible panel grows when it lands — a translucent
+        // frameless window resize can leave a stale ghost of the previous
+        // geometry on Windows until the next paint.  Repaint synchronously.
+        repaint();
     }
 }
 
