@@ -234,10 +234,19 @@ void MonitorPanel::set_monitors(const std::vector<protocol::MonitorDesc>& monito
 }
 
 void MonitorPanel::rebuild_thumbs() {
-    // Clear the existing thumbnails.
+    // Clear the existing thumbnails.  Hide + detach NOW: deleteLater alone
+    // is not enough — the CLI view loop pumps QApplication::processEvents(),
+    // which does not deliver DeferredDelete, so "deleted" thumbs stayed
+    // alive and painted UNDER the new generation (doubled labels, stale
+    // green highlights — VIV-50 live testing).  Immediate delete is unsafe
+    // here: rebuild is reached from the clicked thumb's own mousePressEvent.
     QLayoutItem* item;
     while ((item = strip_layout_->takeAt(0)) != nullptr) {
-        if (item->widget()) item->widget()->deleteLater();
+        if (auto* w = item->widget()) {
+            w->hide();
+            w->setParent(nullptr);
+            w->deleteLater();
+        }
         delete item;
     }
 
