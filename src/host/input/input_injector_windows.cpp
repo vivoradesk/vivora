@@ -67,10 +67,21 @@ public:
                 const double vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
                 const double vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
                 const double vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
-                const double px = static_cast<double>(origin_x_)
-                                + static_cast<double>(xn) * screen_w_;
-                const double py = static_cast<double>(origin_y_)
-                                + static_cast<double>(yn) * screen_h_;
+                // Clamp to the captured display's LAST pixel, not one past it.
+                // xn/yn arrive clamped to [0,1]; at 1.0 the naive origin+size
+                // is the first pixel of the ADJACENT monitor, so a cursor at
+                // the stream's right/bottom edge bled onto the host's next
+                // display (VIV-50, reported on multi-monitor hosts).
+                double px = static_cast<double>(origin_x_)
+                          + static_cast<double>(xn) * screen_w_;
+                double py = static_cast<double>(origin_y_)
+                          + static_cast<double>(yn) * screen_h_;
+                const double max_x = static_cast<double>(origin_x_) + screen_w_ - 1;
+                const double max_y = static_cast<double>(origin_y_) + screen_h_ - 1;
+                if (px > max_x) px = max_x;
+                if (py > max_y) py = max_y;
+                if (px < origin_x_) px = origin_x_;
+                if (py < origin_y_) py = origin_y_;
                 input.mi.dx = static_cast<LONG>((px - vx) * 65535.0 / vw);
                 input.mi.dy = static_cast<LONG>((py - vy) * 65535.0 / vh);
                 SendInput(1, &input, sizeof(INPUT));

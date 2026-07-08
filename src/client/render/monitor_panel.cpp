@@ -309,12 +309,16 @@ void MonitorPanel::open_over(QWidget* /*anchor*/) {
     ensurePolished();
     if (auto* l = layout()) { l->invalidate(); l->activate(); }
     const QSize hint = sizeHint();
-    // show() FIRST, then apply geometry.  A frameless translucent window's
-    // native (DWM layered) surface is created at show time from the geometry
-    // then current; a resize() issued BEFORE the first show was not picked
-    // up, so the surface latched a clipped width even though the Qt widget
-    // measured the correct 397px (VIV-50 — confirmed by logging sizeHint vs
-    // the on-screen clip).  Sizing the live window after show fixes it.
+    // Size the window on BOTH sides of show(), because the two window systems
+    // latch geometry at opposite moments for a frameless translucent surface
+    // (VIV-50, confirmed by logging sizeHint=397 vs the on-screen clip):
+    //   * Wayland/XWayland applies the size at the first show/commit and
+    //     ignores a later setGeometry → resize() must come BEFORE show().
+    //   * Windows DWM creates the layered surface from the geometry current
+    //     at show and ignored a resize issued before it → setGeometry() must
+    //     come AFTER show().
+    // Doing both is harmless on each (the no-op side is simply ignored).
+    resize(hint);
     show();
     const QRect g = QGuiApplication::primaryScreen()
                         ? QGuiApplication::primaryScreen()->geometry()
