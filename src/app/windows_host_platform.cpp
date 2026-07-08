@@ -173,6 +173,23 @@ bool WindowsHostPlatform::select_monitor(uint32_t index) {
         vivora::log::error("HOST", "select_monitor: encoder rebuild failed after switch to %u", index);
         return false;
     }
+
+    // Bring the host cursor onto the newly captured display.  If it stays on
+    // the old one, DXGI reports "pointer not visible" for the captured output,
+    // the client hides its local cursor and drops into relative (hidden-
+    // cursor) mode — the "mouse disappeared after switching" report (VIV-50).
+    // Client absolute moves then land correctly via the virtual-desktop
+    // mapping, but only once the cursor is visible again — so seed it here.
+    {
+        POINT p{};
+        const LONG nx = dxgi_->origin_x(), ny = dxgi_->origin_y();
+        const LONG nw = static_cast<LONG>(dxgi_->get_resolution().width);
+        const LONG nh = static_cast<LONG>(dxgi_->get_resolution().height);
+        if (GetCursorPos(&p) && (p.x < nx || p.x >= nx + nw ||
+                                 p.y < ny || p.y >= ny + nh)) {
+            SetCursorPos(nx + nw / 2, ny + nh / 2);
+        }
+    }
     return true;
 }
 

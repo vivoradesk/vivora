@@ -123,7 +123,11 @@ MonitorPanel::MonitorPanel(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_TranslucentBackground);
     setFocusPolicy(Qt::StrongFocus);
     setWindowTitle("Vivora — Monitors");
-    setFixedWidth(380);
+    // Width follows content: two wide thumbnails (up to 176px each) plus
+    // margins exceed any sensible fixed width — a hard 380 clipped the
+    // rightmost thumbnail (VIV-50 live testing).  The layout constraint
+    // keeps the popup exactly sized to its contents as the list changes.
+    setMinimumWidth(380);
 
     setStyleSheet(
         "QWidget { color: #e6e8ec;"
