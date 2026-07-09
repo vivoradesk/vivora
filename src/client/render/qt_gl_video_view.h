@@ -19,6 +19,7 @@
 #include <QTimer>
 
 #include <cstdint>
+#include <set>
 #include <functional>
 #include <vector>
 #include <unordered_map>
@@ -101,6 +102,10 @@ private:
     void emit_mouse_button(int qt_button, bool down);
     void emit_mouse_pos();
     void emit_key(int qt_key, bool down);
+    // Flush KeyUp for every key the host currently believes is held — called
+    // on focus loss and when the menu/panel steals focus so a modifier used
+    // in a hotkey (Ctrl+F1) doesn't stick down on the host (VIV-50).
+    void release_all_keys();
 
     QOpenGLShaderProgram      program_;
     QOpenGLVertexArrayObject  vao_;
@@ -170,6 +175,8 @@ private:
     void feed_menu_info();
 
     InputCallback input_cb_;
+    // VK codes the host currently believes are held — for release_all_keys().
+    std::set<uint16_t> pressed_vks_;
 
     // Cursor shape cache keyed by host's shape_id; the widget's QCursor
     // is updated when active_shape_id_ changes.

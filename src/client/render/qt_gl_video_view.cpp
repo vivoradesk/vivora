@@ -554,12 +554,31 @@ void QtGlVideoView::emit_key(int qt_key, bool down) {
     if (!input_cb_) return;
     uint16_t vk = qt_key_to_vk(qt_key);
     if (vk == 0) return;  // unmapped — drop rather than confuse host
+    if (down) pressed_vks_.insert(vk);
+    else      pressed_vks_.erase(vk);
     protocol::InputEvent ev{};
     ev.type      = down ? protocol::InputEventType::KeyDown
                         : protocol::InputEventType::KeyUp;
     ev.vk_code   = vk;
     ev.scan_code = 0;  // host derives scancode from VK on Windows
     input_cb_(ev);
+}
+
+void QtGlVideoView::release_all_keys() {
+    // Synthesize a KeyUp for every key the host currently thinks is held.
+    // Needed when focus leaves the stream view (the menu/panel hotkey steals
+    // it, or an alt-tab): the matching KeyUp is then delivered to the OTHER
+    // window, so without this the host keeps the modifier stuck down — the
+    // "Ctrl held after opening the menu with Ctrl+F1" report (VIV-50).
+    if (!input_cb_) return;
+    for (uint16_t vk : pressed_vks_) {
+        protocol::InputEvent ev{};
+        ev.type      = protocol::InputEventType::KeyUp;
+        ev.vk_code   = vk;
+        ev.scan_code = 0;
+        input_cb_(ev);
+    }
+    pressed_vks_.clear();
 }
 
 void QtGlVideoView::mouseMoveEvent(QMouseEvent* e) {
@@ -595,6 +614,9 @@ void QtGlVideoView::focusOutEvent(QFocusEvent* e) {
     // remember the prior state so re-focus restores it.
     was_relative_on_focus_loss_ = relative_mode_;
     if (relative_mode_) exit_relative_mode();
+    // Release any keys the host thinks are held — their KeyUp will go to
+    // whatever took focus (menu/panel), not here, so flush them now.
+    release_all_keys();
     QOpenGLWidget::focusOutEvent(e);
 }
 
@@ -687,6 +709,10 @@ void QtGlVideoView::toggle_menu() {
     if (menu_->isVisible()) {
         menu_->close_menu();
     } else {
+        // The hotkey that opened this (Ctrl+F1) left Ctrl held on the host;
+        // the menu is about to steal focus so the Ctrl KeyUp would never
+        // reach us.  Release everything now (VIV-50).
+        release_all_keys();
         feed_menu_info();
         menu_->open_over(this);
     }

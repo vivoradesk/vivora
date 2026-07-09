@@ -1,6 +1,7 @@
 #include "client/render/monitor_panel.h"
 
 #include <QApplication>
+#include <QEventLoop>
 #include <QCheckBox>
 #include <QColor>
 #include <QEvent>
@@ -49,9 +50,13 @@ public:
         w = std::clamp(w, 84, 176);
         setFixedSize(w, h);
 
+        // Present displays 1-based so the labels match the "1 · 2 to switch"
+        // key hints and the number-key select — the wire index stays 0-based
+        // (VIV-50).  disp = index + 1.
+        const uint32_t disp = desc_.index + 1;
         QString res = QString("%1 × %2").arg(desc_.width).arg(desc_.height);
-        setToolTip(desc_.viewing ? QString("Display %1 — currently viewing").arg(desc_.index)
-                                 : QString("Switch to display %1  (%2)").arg(desc_.index).arg(res));
+        setToolTip(desc_.viewing ? QString("Display %1 — currently viewing").arg(disp)
+                                 : QString("Switch to display %1  (%2)").arg(disp).arg(res));
     }
 
 protected:
@@ -91,8 +96,8 @@ protected:
         p.setFont(f);
         p.setPen(idCol);
         const QString head = desc_.viewing
-            ? QString("%1 · viewing").arg(desc_.index)
-            : QString::number(desc_.index);
+            ? QString("%1 · viewing").arg(desc_.index + 1)
+            : QString::number(desc_.index + 1);
         p.drawText(r.adjusted(11, 8, -8, 0), Qt::AlignLeft | Qt::AlignTop, head);
 
         // Resolution, bottom-left.
@@ -274,19 +279,17 @@ void MonitorPanel::rebuild_thumbs() {
     const QSize before = size();
     adjustSize();
     if (isVisible() && size() != before) {
-        // Resizing a visible translucent frameless window leaves a DWM ghost
-        // of the old geometry on Windows (repaint alone doesn't clear it).
-        // Cycle the window: hide → recenter → show gives the layered surface
-        // a clean start at the new size.  Rare in practice — the list is
-        // pre-fetched on connect, so the panel normally opens full-sized.
-        hide();
-        if (auto* scr = screen()) {
-            const QRect g = scr->geometry();
-            move(g.center().x() - width() / 2, g.center().y() - height() / 2);
-        }
-        show();
-        raise();
-        activateWindow();
+        // Re-centre + resize the LIVE window in place.  Do NOT hide/show here:
+        // a hide→show cycle on a frameless Tool window is not remapped
+        // reliably by Wayland compositors, which left the panel invisible but
+        // still clickable after picking a display (the "panel disappears but
+        // the switch still works" report, VIV-50).  setGeometry on the shown
+        // window works on both Windows (post-prefetch there's no async grow,
+        // so no DWM ghost) and Wayland.
+        const QRect g = screen() ? screen()->geometry() : QRect(0, 0, 1920, 1080);
+        setGeometry(g.center().x() - size().width() / 2,
+                    g.center().y() - size().height() / 2,
+                    size().width(), size().height());
     }
 }
 
@@ -326,6 +329,13 @@ void MonitorPanel::open_over(QWidget* /*anchor*/) {
     setGeometry(g.center().x() - hint.width() / 2,
                 g.center().y() - hint.height() / 2,
                 hint.width(), hint.height());
+    // Pump the event loop once so the just-applied geometry is flushed to the
+    // window surface before the user sees it.  On Wayland the Qt widget
+    // reports the correct size but the compositor commits the surface at its
+    // previous (clipped) buffer size until a paint cycle runs — without this
+    // pump the first open renders clipped even though width()==full (VIV-50,
+    // confirmed by logging: frame=397 while the on-screen surface was narrower).
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     raise();
     activateWindow();
     setFocus(Qt::OtherFocusReason);
