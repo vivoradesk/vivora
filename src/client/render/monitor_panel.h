@@ -59,12 +59,19 @@ private:
     std::function<void(uint32_t)>      on_select_;
     std::function<void()>              on_refresh_;
 
+    // Rebuild the "N · to switch" number-key hint for the current display
+    // count (dynamic — 1, 2, 3… displays), hidden when there's nothing to
+    // switch between.
+    void rebuild_key_hint();
+
     QLabel*       title_label_  = nullptr;
     QLabel*       count_label_  = nullptr;
     QWidget*      strip_        = nullptr;   // container for thumbnails
     QHBoxLayout*  strip_layout_ = nullptr;
-    QLabel*       empty_label_  = nullptr;   // shown when no switchable displays
     QPushButton*  refresh_btn_  = nullptr;
+    QWidget*      keycap_row_    = nullptr;  // holds the number keycaps + label
+    QHBoxLayout*  keycap_layout_ = nullptr;
+    QLabel*       switch_hint_   = nullptr;  // "to switch" (hidden for 1 display)
 };
 
 } // namespace vivora

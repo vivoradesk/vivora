@@ -141,7 +141,6 @@ MonitorPanel::MonitorPanel(QWidget* parent) : QWidget(parent) {
         "QLabel#title { font-size: 15px; font-weight: 700; }"
         "QLabel#count { color: #888e98; font-size: 12px; }"
         "QLabel#hint  { color: #6f757f; }"
-        "QLabel#empty { color: #888e98; }"
         "QLabel#soon  { color: #6f757f; font-size: 10px; font-weight: 700;"
         "  letter-spacing: 1px; }"
         "QLabel#keycap { color: #aeb3bc; background: rgba(255,255,255,0.07);"
@@ -178,11 +177,6 @@ MonitorPanel::MonitorPanel(QWidget* parent) : QWidget(parent) {
     strip_layout_->setSpacing(10);
     root->addWidget(strip_);
 
-    empty_label_ = new QLabel("Host exposes a single display.", this);
-    empty_label_->setObjectName("empty");
-    empty_label_->hide();
-    root->addWidget(empty_label_);
-
     root->addSpacing(16);
 
     // ---- Future options (from the design mock) ------------------------
@@ -209,17 +203,17 @@ MonitorPanel::MonitorPanel(QWidget* parent) : QWidget(parent) {
 
     root->addSpacing(16);
 
-    // ---- Footer: number-key hint + Refresh ----------------------------
+    // ---- Footer: number-key hint (rebuilt per display count) + Refresh ---
     auto* footer = new QHBoxLayout();
     footer->setSpacing(7);
-    footer->addWidget(make_keycap("1", this));
-    auto* dot = new QLabel("·", this);
-    dot->setObjectName("hint");
-    footer->addWidget(dot);
-    footer->addWidget(make_keycap("2", this));
-    auto* sw = new QLabel("to switch", this);
-    sw->setObjectName("hint");
-    footer->addWidget(sw);
+    keycap_row_ = new QWidget(this);
+    keycap_layout_ = new QHBoxLayout(keycap_row_);
+    keycap_layout_->setContentsMargins(0, 0, 0, 0);
+    keycap_layout_->setSpacing(7);
+    footer->addWidget(keycap_row_);
+    switch_hint_ = new QLabel("to switch", this);
+    switch_hint_->setObjectName("hint");
+    footer->addWidget(switch_hint_);
     footer->addStretch(1);
     refresh_btn_ = new QPushButton("Refresh", this);
     refresh_btn_->setObjectName("refresh");
@@ -261,20 +255,20 @@ void MonitorPanel::rebuild_thumbs() {
         : QString("%1 display%2").arg(monitors_.size())
               .arg(monitors_.size() == 1 ? "" : "s"));
 
-    // With 0 or 1 displays there's nothing to switch between — show a hint
-    // instead of a lone non-interactive thumbnail.
-    const bool switchable = monitors_.size() > 1;
-    strip_->setVisible(switchable);
-    empty_label_->setVisible(!switchable);
+    // Always show a thumbnail per display — even a single one, so the user
+    // sees what they're viewing rather than a bare text line (VIV-50 UX).
+    // A lone display renders as a non-interactive "1 · viewing" tile.
+    strip_->setVisible(!monitors_.empty());
     refresh_btn_->setEnabled(true);
 
-    if (switchable) {
-        for (const auto& d : monitors_) {
-            auto* thumb = new MonitorThumb(d, [this](uint32_t idx) { choose(idx); }, strip_);
-            strip_layout_->addWidget(thumb);
-        }
-        strip_layout_->addStretch(1);
+    for (const auto& d : monitors_) {
+        auto* thumb = new MonitorThumb(d, [this](uint32_t idx) { choose(idx); }, strip_);
+        strip_layout_->addWidget(thumb);
     }
+    strip_layout_->addStretch(1);
+
+    // Number-key hint reflects the real display count (may be 1, 2, 3…).
+    rebuild_key_hint();
 
     const QSize before = size();
     adjustSize();
@@ -290,6 +284,29 @@ void MonitorPanel::rebuild_thumbs() {
         setGeometry(g.center().x() - size().width() / 2,
                     g.center().y() - size().height() / 2,
                     size().width(), size().height());
+    }
+}
+
+void MonitorPanel::rebuild_key_hint() {
+    // Clear old keycaps.
+    QLayoutItem* it;
+    while ((it = keycap_layout_->takeAt(0)) != nullptr) {
+        if (auto* w = it->widget()) { w->hide(); w->setParent(nullptr); w->deleteLater(); }
+        delete it;
+    }
+    // Nothing to switch between with a single display — hide the whole hint.
+    const bool has_switch = monitors_.size() > 1;
+    keycap_row_->setVisible(has_switch);
+    switch_hint_->setVisible(has_switch);
+    if (!has_switch) return;
+    // One keycap per display (1..N), separated by dots: "1 · 2 · 3".
+    for (size_t i = 0; i < monitors_.size(); ++i) {
+        if (i > 0) {
+            auto* dot = new QLabel("·", keycap_row_);
+            dot->setObjectName("hint");
+            keycap_layout_->addWidget(dot);
+        }
+        keycap_layout_->addWidget(make_keycap(QString::number(i + 1), keycap_row_));
     }
 }
 
