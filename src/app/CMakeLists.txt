@@ -319,6 +319,10 @@ if(UNIX AND NOT APPLE)
         libavcodec libavutil libswscale)
     pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
     pkg_check_modules(DBUS     REQUIRED IMPORTED_TARGET dbus-1)
+    # wl_output enumeration for the VIV-50 monitor list (the portal doesn't
+    # expose displays programmatically).  Optional: on a non-Wayland/X11 host
+    # the helper simply returns an empty list and we advertise one display.
+    pkg_check_modules(WAYLAND_CLIENT IMPORTED_TARGET wayland-client)
 
     target_sources(vivora PRIVATE
         linux_view_platform.cpp
@@ -331,6 +335,7 @@ if(UNIX AND NOT APPLE)
         # via PulseAudio monitor is pending (L3 sub-task).
         ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/x11_cursor.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/capture/wayland_outputs.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
         # Native NVENC for NVIDIA hosts (VIV-8): CUDA-session encoder behind
         # the ILinuxEncoder interface, selected over VAAPI by the factory.
@@ -351,6 +356,10 @@ if(UNIX AND NOT APPLE)
         PkgConfig::DBUS
         ${CMAKE_DL_LIBS}
     )
+    if(WAYLAND_CLIENT_FOUND)
+        target_link_libraries(vivora PRIVATE PkgConfig::WAYLAND_CLIENT)
+        target_compile_definitions(vivora PRIVATE VIVORA_HAVE_WAYLAND_CLIENT)
+    endif()
 endif()
 
 if(WIN32)

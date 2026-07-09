@@ -21,6 +21,13 @@ public:
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
 
+    // Monitor selection (VIV-50).  ScreenCaptureKit enumerates displays
+    // directly (unlike the Linux portal), so this mirrors the Windows path:
+    // stop capture+encoder, re-init capture on the new SCDisplay, rebuild the
+    // encoder at the new resolution.
+    std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
+    bool select_monitor(uint32_t index, bool seed_cursor) override;
+
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;
@@ -36,6 +43,11 @@ private:
     vivora::host::MacScreenCapture capture_;
     vivora::host::MacVideoToolboxEncoder encoder_;
     std::vector<uint8_t> pkt_buf_;
+    uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
+    uint32_t manual_bitrate_bps_    = 0;     // remembered for encoder rebuild
+    // (Re)build capture+encoder for `display_index`.  Shared by init() and
+    // select_monitor().  Returns false leaving the object unusable on failure.
+    bool start_pipeline(uint32_t display_index);
 
     // Cursor tracking state.
     uint64_t  last_shape_hash_ = 0;

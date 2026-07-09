@@ -35,6 +35,13 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
+    manual_bitrate_bps_ = manual_bitrate_bps;
+    return start_pipeline(display_index);
+}
+
+// (Re)build capture + encoder for the given display.  Shared by init() and
+// the VIV-50 monitor switch.  Caller has already validated display_index.
+bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
     ccfg.fps = 60;
@@ -51,7 +58,7 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
-    uint32_t bitrate = manual_bitrate_bps;
+    uint32_t bitrate = manual_bitrate_bps_;
     if (bitrate == 0)
         bitrate = vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
 
@@ -68,7 +75,43 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
+    current_display_index_ = display_index;
     return true;
+}
+
+std::vector<vivora::protocol::MonitorDesc> MacHostPlatform::list_monitors() {
+    std::vector<vivora::protocol::MonitorDesc> out;
+    for (const auto& d : vivora::host::MacScreenCapture::enumerate_displays()) {
+        vivora::protocol::MonitorDesc md;
+        md.index   = static_cast<uint8_t>(d.index);
+        md.width   = static_cast<uint16_t>(d.width_px);
+        md.height  = static_cast<uint16_t>(d.height_px);
+        md.primary = (d.index == 0);  // SCShareableContent lists the main display first
+        md.viewing = (d.index == current_display_index_);
+        out.push_back(md);
+    }
+    return out;
+}
+
+bool MacHostPlatform::select_monitor(uint32_t index, bool /*seed_cursor*/) {
+    if (index == current_display_index_) return true;
+    auto displays = vivora::host::MacScreenCapture::enumerate_displays();
+    if (index >= displays.size()) {
+        vivora::log::warn("HOST", "select_monitor: display %u out of range", index);
+        return false;
+    }
+    const uint32_t prev = current_display_index_;
+    // Tear the pipeline down and rebuild on the new display.  VideoToolbox is
+    // bound to the old resolution, so a full encoder shutdown/init is needed.
+    capture_.stop();
+    encoder_.shutdown();
+    if (start_pipeline(index)) return true;
+    // Roll back to the previous display so the session keeps streaming.
+    vivora::log::error("HOST", "select_monitor: rebuild on display %u failed, restoring %u",
+                       index, prev);
+    capture_.stop();
+    encoder_.shutdown();
+    return start_pipeline(prev);
 }
 
 uint32_t MacHostPlatform::capture_width()  const { return capture_.width(); }
