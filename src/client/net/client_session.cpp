@@ -2,6 +2,7 @@
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
 #include "common/crypto/peer_pin.h"
+#include "common/crypto/random.h"
 #include "common/net/relay_protocol.h"
 #include "common/net/rendezvous_protocol.h"
 #include "common/net/stun_client.h"
@@ -1294,11 +1295,24 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
     if (!peer_pubkey_set_ && peer_code_.empty())  return false;
     namespace rdv = net::rdv;
 
+    // Per-lookup anti-spoofing nonce (VIV-92): the server echoes it verbatim
+    // and we only accept a response that carries it back, so an attacker who
+    // can't observe our outbound packet can't pre-forge a LookupResponse to
+    // poison the TOFU pin.  CSPRNG — a predictable nonce would defeat the
+    // whole point.
+    uint8_t nonce[rdv::LOOKUP_NONCE_LEN];
+    if (!crypto::random_bytes(nonce, sizeof(nonce))) {
+        log::error("ClientSession", "CSPRNG failed for rendezvous nonce");
+        return false;
+    }
+
     uint8_t txbuf[rdv::MAX_PACKET];
     size_t  txlen = 0;
     if (peer_pubkey_set_) {
         rdv::LookupPayload q{};
         std::memcpy(q.pubkey, peer_pubkey_, 32);
+        std::memcpy(q.nonce, nonce, sizeof(nonce));
+        q.has_nonce = true;
         txlen = rdv::encode_lookup(txbuf, sizeof(txbuf), q);
         log::info("ClientSession",
             "Rendezvous lookup (by pubkey) at %u.%u.%u.%u:%u",
@@ -1309,6 +1323,8 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
         rdv::LookupByCodePayload q{};
         std::memset(q.code, 0, sizeof(q.code));
         std::strncpy(q.code, peer_code_.c_str(), sizeof(q.code) - 1);
+        std::memcpy(q.nonce, nonce, sizeof(nonce));
+        q.has_nonce = true;
         txlen = rdv::encode_lookup_code(txbuf, sizeof(txbuf), q);
         log::info("ClientSession",
             "Rendezvous lookup (by code '%s') at %u.%u.%u.%u:%u",
@@ -1338,14 +1354,26 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
             // server.  Without this, any host that can spray UDP at our
             // ephemeral source port could race a forged LookupResponse and get
             // its own pubkey silently TOFU-pinned as the trusted peer (MITM).
-            // A per-lookup nonce echoed by the server (VIV-92) will close the
-            // on-path case too; this check closes the off-path spray.
+            // The sender check closes the off-path spray; the per-lookup nonce
+            // below closes the on-path case (an attacker who can't observe our
+            // outbound packet can't echo the right nonce) (VIV-92).
             rdv::MsgType type;
             size_t poff = 0, plen = 0;
             if (rdv::parse_header(rxbuf, static_cast<size_t>(n), type, poff, plen)
                 && type == rdv::MsgType::LookupResponse) {
                 rdv::LookupResponsePayload p{};
                 if (rdv::decode_lookup_resp(rxbuf + poff, plen, p)) {
+                    // Reject any response that doesn't echo our nonce — this
+                    // includes a legacy (nonce-less) server, so the rendezvous
+                    // must be redeployed with nonce support before clients that
+                    // require it can connect.
+                    if (!p.has_nonce
+                        || std::memcmp(p.nonce, nonce, sizeof(nonce)) != 0) {
+                        log::warn("ClientSession",
+                            "Rendezvous response nonce mismatch — ignoring");
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        continue;
+                    }
                     if (p.found) {
                         out.ip   = p.host_ip;
                         out.port = p.host_port;

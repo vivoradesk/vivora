@@ -296,6 +296,10 @@ int main(int argc, char** argv) {
             // Filter early: malformed / unknown words → respond not-found
             // with a zeroed pubkey so the client doesn't keep retrying.
             rdv::LookupResponsePayload resp{};
+            // Echo the client's anti-spoofing nonce (VIV-92) so it can bind
+            // this response to its own request.  Legacy clients send no nonce.
+            resp.has_nonce = q.has_nonce;
+            std::memcpy(resp.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN);
             if (!peer_code::is_well_formed(q.code)) {
                 resp.found = 0;
                 log::info(TAG, "lookup-by-code '%s': malformed", q.code);
@@ -364,6 +368,9 @@ int main(int argc, char** argv) {
             auto it = registry.find(key);
             rdv::LookupResponsePayload resp{};
             std::memcpy(resp.pubkey, q.pubkey, 32);
+            // Echo the client's anti-spoofing nonce (VIV-92).
+            resp.has_nonce = q.has_nonce;
+            std::memcpy(resp.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN);
             if (it != registry.end() && it->second.expires_at > now) {
                 resp.host_ip   = it->second.endpoint.ip;
                 resp.host_port = it->second.endpoint.port;
