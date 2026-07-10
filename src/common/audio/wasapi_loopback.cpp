@@ -137,6 +137,16 @@ void WasapiLoopbackCapture::stop() {
 }
 
 void WasapiLoopbackCapture::thread_proc() {
+    // COM must be initialised on THIS thread: the device-invalidation recovery
+    // path below calls open_endpoint() -> CoCreateInstance() on the worker, and
+    // a thread that never called CoInitializeEx gets CO_E_NOTINITIALIZED,
+    // permanently breaking reopen after a device change (VIV-94).  The
+    // CoInitializeEx in start() only covered the caller thread's initial open.
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // Every successful call — including S_FALSE — must be balanced with
+    // CoUninitialize at thread exit.
+    const bool com_owned = SUCCEEDED(com);
+
     // Raise thread priority for audio work.
     DWORD task_index = 0;
     HANDLE mm = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_index);
@@ -256,6 +266,7 @@ void WasapiLoopbackCapture::thread_proc() {
 
 done:
     if (mm) AvRevertMmThreadCharacteristics(mm);
+    if (com_owned) CoUninitialize();
 }
 
 std::unique_ptr<AudioCapture> create_default_loopback_capture() {

@@ -164,6 +164,14 @@ uint32_t WasapiOutput::write(const float* samples, uint32_t frames) {
 }
 
 void WasapiOutput::thread_proc() {
+    // COM must be initialised on THIS thread: try_reopen()/open_endpoint() call
+    // CoCreateInstance() on the worker during device-invalidation recovery, and
+    // without a per-thread CoInitializeEx that fails with CO_E_NOTINITIALIZED,
+    // permanently breaking playback after a device change (VIV-94).
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    // Every successful call — including S_FALSE — must be balanced at exit.
+    const bool com_owned = SUCCEEDED(com);
+
     DWORD task_index = 0;
     HANDLE mm = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_index);
 
@@ -233,6 +241,7 @@ void WasapiOutput::thread_proc() {
     }
 
     if (mm) AvRevertMmThreadCharacteristics(mm);
+    if (com_owned) CoUninitialize();
 }
 
 std::unique_ptr<AudioOutput> create_default_audio_output() {
