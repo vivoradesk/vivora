@@ -1242,6 +1242,14 @@ void HostSession::send_rendezvous_register() {
 void HostSession::handle_rendezvous_packet(const uint8_t* data, size_t len,
                                            const net::SocketAddr& sender) {
     namespace rdv = net::rdv;
+    // Only the rendezvous server may drive this path.  Without this check any
+    // remote peer that can reach our UDP port could forge a PunchHint (turning
+    // us into a traffic reflector via punch_to()) or a RegisterAck that latches
+    // relay_session_set_ onto an attacker-chosen session_id and blocks the
+    // host loop inside relay_bind_blocking().  Mirrors the sender==relay_addr_
+    // guard on the relay-forwarded path in handle_packet().
+    if (rendezvous_addr_.ip == 0 || sender != rendezvous_addr_) return;
+
     rdv::MsgType type;
     size_t poff = 0, plen = 0;
     if (!rdv::parse_header(data, len, type, poff, plen)) return;

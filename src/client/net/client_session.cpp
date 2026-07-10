@@ -336,10 +336,12 @@ bool ClientSession::start_audio() {
         return false;
     }
     audio_receiver_ = std::make_unique<AudioReceiver>();
-    // 60ms = 6 frames of prebuffer. Wide enough to absorb typical WiFi
-    // bursts of 3–5 dropped packets without dropping to PLC, while still
-    // cheap in end-to-end audio latency terms.
-    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/120)) {
+    // 40ms = 2 frames of prebuffer. CLAUDE.md budgets 20–40ms for the audio
+    // jitter buffer; we sit at the top of that band so a typical WiFi burst of
+    // 1–2 dropped packets rides through, and lean on Opus in-band FEC + the PLC
+    // path for anything larger rather than paying fixed prebuffer latency
+    // (VIV-94: was 120ms, ~3× the spec and out of sync with video).
+    if (!audio_receiver_->start(std::move(output), /*jitter_target_ms=*/40)) {
         audio_receiver_.reset();
         return false;
     }
@@ -1331,9 +1333,13 @@ bool ClientSession::lookup_via_rendezvous(net::SocketAddr& out, uint8_t out_pk[3
         }
         net::SocketAddr sender;
         int n = socket_->recv_from(rxbuf, sizeof(rxbuf), sender);
-        if (n > 0) {
-            // Only accept DBRV packets here; everything else is unexpected
-            // pre-handshake noise and is silently dropped.
+        if (n > 0 && sender == rendezvous_addr_) {
+            // Only accept DBRV packets that actually came from the rendezvous
+            // server.  Without this, any host that can spray UDP at our
+            // ephemeral source port could race a forged LookupResponse and get
+            // its own pubkey silently TOFU-pinned as the trusted peer (MITM).
+            // A per-lookup nonce echoed by the server (VIV-92) will close the
+            // on-path case too; this check closes the off-path spray.
             rdv::MsgType type;
             size_t poff = 0, plen = 0;
             if (rdv::parse_header(rxbuf, static_cast<size_t>(n), type, poff, plen)
