@@ -261,6 +261,8 @@ void MonitorPanel::rebuild_thumbs() {
     strip_->setVisible(!monitors_.empty());
     refresh_btn_->setEnabled(true);
 
+    // Centre a lone display; left-align the strip when there are several.
+    if (monitors_.size() == 1) strip_layout_->addStretch(1);
     for (const auto& d : monitors_) {
         auto* thumb = new MonitorThumb(d, [this](uint32_t idx) { choose(idx); }, strip_);
         strip_layout_->addWidget(thumb);
