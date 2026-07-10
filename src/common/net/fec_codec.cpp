@@ -243,15 +243,22 @@ constexpr size_t FEC_HEADER_FIXED = 2 + 1 + 1 + 1;  // group_id + K + M + idx
 void FecEncoder::set_group_size(uint8_t k) {
     if (k < 2) k = 2;
     // 200 supports whole-frame pooled groups (ranged mode, VIV-82); legacy
-    // never sets more than ~10.  GF(256) requires K + M <= 255 — the caller
-    // enforces the sum.
+    // never sets more than ~10.
     if (k > 200) k = 200;
+    // GF(256) Reed-Solomon requires K + M <= 255.  All current callers keep the
+    // sum in range, but enforce it here so a future caller (e.g. a VIVORA_FEC_*
+    // override) can't drive an out-of-field encode (VIV-96).  Shrink parity, not
+    // data: dropping data shards would silently truncate the frame.
     k_ = k;
+    if (static_cast<int>(k_) + static_cast<int>(m_) > 255)
+        m_ = static_cast<uint8_t>(255 - k_);
 }
 
 void FecEncoder::set_parity_count(uint8_t m) {
     if (m < 1) m = 1;
     if (m > 200) m = 200;
+    if (static_cast<int>(k_) + static_cast<int>(m) > 255)
+        m = static_cast<uint8_t>(255 - k_);
     m_ = m;
 }
 
@@ -456,7 +463,13 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             // (VIV-11, reproducible on Linux under netem loss 50%).  Drop
             // the mismatching packet; the group still recovers from shards
             // that do agree.
-            if (k != group.k || m != group.m) return;
+            // `ranged` must also match: it selects the variable-header layout
+            // (hdr_var above was computed from THIS packet's flag), and it
+            // governs how the recovered shard bytes map back to packet
+            // keys/lengths.  A mismatch feeds garbage into rs_decode(), which
+            // would emit silently-corrupted "recovered" packets — a no-artifact
+            // violation, same class as the VIV-11 K/M mismatch (VIV-96).
+            if (k != group.k || m != group.m || ranged != group.ranged) return;
             // Skip the header we already have.
             p += hdr_var;
         }

@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <cstring>
 #include <chrono>
+#include <atomic>
 
 namespace vivora::net {
 
@@ -159,18 +160,25 @@ int PosixUdpSocket::send_to(const uint8_t* data, size_t len, const SocketAddr& d
         // Throttle: a WiFi drop fires sendto failures at packet rate
         // (~100/s) which can fill a log file in seconds.  One line
         // per second with a rolled-up count is enough to surface the
-        // condition without drowning out everything else.
-        static auto last_log = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-        static uint64_t suppressed = 0;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - last_log >= std::chrono::seconds(1)) {
+        // condition without drowning out everything else.  Atomic because
+        // the PacedSender thread and the host main thread (relay keepalive/
+        // bind bypass the pacer) can both reach here at once — plain statics
+        // would be a data race / UB (VIV-96).
+        static std::atomic<int64_t>  last_log_ns{0};
+        static std::atomic<uint64_t> suppressed{0};
+        using namespace std::chrono;
+        const int64_t now_ns =
+            duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+        int64_t prev = last_log_ns.load(std::memory_order_relaxed);
+        if (now_ns - prev >= 1'000'000'000
+            && last_log_ns.compare_exchange_strong(prev, now_ns,
+                                                   std::memory_order_relaxed)) {
+            const uint64_t n = suppressed.exchange(0, std::memory_order_relaxed);
             log::error(TAG, "sendto failed: %s (x%llu suppressed)",
                        std::strerror(errno),
-                       static_cast<unsigned long long>(suppressed));
-            last_log = now;
-            suppressed = 0;
+                       static_cast<unsigned long long>(n));
         } else {
-            ++suppressed;
+            suppressed.fetch_add(1, std::memory_order_relaxed);
         }
         return -1;
     }
