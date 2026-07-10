@@ -275,11 +275,17 @@ bool MacHostPlatform::get_cursor_state(CursorState& out) {
 
         out.x_norm   = (float)x_norm;
         out.y_norm   = (float)y_norm;
-        // CGCursorIsVisible is imperfect (Apple flags it "with known issues"
-        // on 10.9+) but catches the primary target — fullscreen games that
-        // call CGDisplayHideCursor. Client-side 50ms debouncer absorbs brief
-        // flicker. Private CGSIsCursorVisible is a future upgrade if needed.
-        out.visible  = CGCursorIsVisible() ? true : false;
+        // The captured desktop cursor is effectively always visible.
+        // CGCursorIsVisible was the old signal for a host-hidden cursor
+        // (fullscreen games calling CGDisplayHideCursor), but Apple retired
+        // it — on macOS 13+/26 it's a deprecated stub that returns false, so
+        // it reported the cursor as HIDDEN every tick.  The client took that
+        // as "enter relative mode" and hid + clipped the viewer's pointer
+        // inside the window even though the Mac cursor was plainly visible
+        // (VIV-50).  Report visible; hidden-cursor / relative-input detection
+        // for Mac hosts needs a working API (private CGSIsCursorVisible) and
+        // is deferred — it only matters for fullscreen 3D apps.
+        out.visible  = true;
         out.shape_id = current_shape_id_;
 
         // Pointer-identity fast-path: if neither the NSCursor instance nor
