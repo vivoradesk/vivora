@@ -29,18 +29,48 @@ bool MacViewPlatform::init(const char* host_ip, uint16_t port) {
     QObject::connect(menu_.get(), &vivora::StreamMenu::keepAspectToggled,
                      menu_.get(), [this](bool keep) { view_.set_keep_aspect(keep); });
     // When the menu closes (Esc / click-away / Disconnect), let the stream
-    // view resume input and re-take the cursor.
+    // view resume input and re-take the cursor — unless the monitor panel
+    // took over (menu → panel hand-off keeps input suppressed, VIV-50).
     QObject::connect(menu_.get(), &vivora::StreamMenu::closed,
-                     menu_.get(), [this]() { view_.set_menu_open(false); });
-    // Click on the stream (outside the menu) dismisses it — the Qt overlay
-    // doesn't get a reliable deactivation under Cocoa, so the view tells us.
+                     menu_.get(), [this]() {
+        if (!(monitor_panel_ && monitor_panel_->isVisible()))
+            view_.set_menu_open(false);
+    });
+
+    // "Switch monitor…" panel (VIV-50) — same top-level overlay pattern as
+    // the menu.  The original VIV-50 commit wired it only into the Windows
+    // StreamWindow; on the Mac the menu button silently did nothing.
+    monitor_panel_ = std::make_unique<vivora::MonitorPanel>(nullptr);
+    monitor_panel_->hide();
+    QObject::connect(menu_.get(), &vivora::StreamMenu::monitorClicked,
+                     menu_.get(), [this]() {
+        if (actions_.request_monitors) actions_.request_monitors();
+        menu_->close_menu();
+        monitor_panel_->set_monitors(last_monitors_);
+        monitor_panel_->open_over(nullptr);
+        view_.set_menu_open(true);   // keep input suppressed under the panel
+    });
+    QObject::connect(monitor_panel_.get(), &vivora::MonitorPanel::closed,
+                     monitor_panel_.get(), [this]() {
+        view_.set_menu_open(false);
+    });
+    // Click on the stream (outside the menu / panel) dismisses whichever is
+    // open — the Qt overlay doesn't get a reliable deactivation under Cocoa,
+    // so the view tells us.  The monitor panel (VIV-50) needs this too; it
+    // was only wired for the menu, so on macOS it closed only via Esc.
     view_.set_menu_dismiss_callback([this]() {
-        if (menu_ && menu_->isVisible()) menu_->close_menu();
+        if (monitor_panel_ && monitor_panel_->isVisible()) monitor_panel_->close_panel();
+        else if (menu_ && menu_->isVisible()) menu_->close_menu();
     });
     // Cmd/Ctrl+F1 over the stream → toggle the menu (called on the main
     // thread from the Cocoa view's keyDown).
     view_.set_menu_hotkey_callback([this]() {
         if (!menu_) return;
+        // Hotkey also dismisses the monitor panel (VIV-50), like Esc does.
+        if (monitor_panel_ && monitor_panel_->isVisible()) {
+            monitor_panel_->close_panel();   // closed() restores input
+            return;
+        }
         if (menu_->isVisible()) {
             menu_->close_menu();
             view_.set_menu_open(false);
@@ -125,9 +155,26 @@ void MacViewPlatform::set_status(const char* text) {
 }
 
 void MacViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
+    actions_ = actions;
     if (!menu_) return;
     menu_->set_actions(actions);
     menu_->set_initial_state(1.0f, false, false, /*keep_aspect=*/true);
+    // Wire the panel's switch/refresh to the same session callbacks (VIV-50),
+    // mirroring the Windows StreamWindow wiring.
+    if (monitor_panel_) {
+        monitor_panel_->set_select_callback([this](uint32_t idx) {
+            if (actions_.select_monitor) actions_.select_monitor(idx);
+        });
+        monitor_panel_->set_refresh_callback([this]() {
+            if (actions_.request_monitors) actions_.request_monitors();
+        });
+    }
+}
+
+void MacViewPlatform::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    last_monitors_ = monitors;
+    if (monitor_panel_) monitor_panel_->set_monitors(monitors);
 }
 
 vivora::IVideoPipeline* MacViewPlatform::video_pipeline() {
@@ -137,6 +184,7 @@ vivora::IVideoPipeline* MacViewPlatform::video_pipeline() {
 
 void MacViewPlatform::shutdown() {
     pipeline_.reset();   // decode thread is already joined (ViewLoop teardown)
+    monitor_panel_.reset();
     menu_.reset();
 }
 

@@ -213,6 +213,11 @@ bool ViewLoopState::iter_threaded() {
     if (!session_started_ && session.state() == client::SessionState::Connected) {
         session_start_ = Clock::now();
         session_started_ = true;
+        // Pre-fetch the host display list (VIV-50) so the monitor panel's
+        // first open renders full-sized immediately instead of growing when
+        // the async reply lands (a visible translucent-window resize ghosts
+        // on Windows).  The panel still re-requests on open for freshness.
+        session.request_monitor_list();
     }
 
     // Status overlay before the first frame (VIV-62).
@@ -330,6 +335,13 @@ bool ViewLoopState::iter_threaded() {
         }
         if (session.has_cursor_position()) {
             platform.update_cursor_position(session.cursor_position());
+        }
+        // VIV-50: host display list → monitor panel.  The original wiring
+        // only covered the legacy iter(); without this the panel silently
+        // never populates on the threaded path.
+        std::vector<protocol::MonitorDesc> monitors;
+        if (session.take_new_monitor_list(monitors)) {
+            platform.set_monitor_list(monitors);
         }
     }
 
@@ -558,6 +570,13 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     actions.disconnect    = [this]() {
         user_disconnect_.store(true, std::memory_order_relaxed);
     };
+    // VIV-50 monitor selection: panel open → ask host for its display list;
+    // thumbnail/number-key → switch.  Both run on this loop thread (the menu
+    // callbacks fire from Qt's event pump inside pump_events()).
+    actions.request_monitors = [this]() { session_.request_monitor_list(); };
+    actions.select_monitor   = [this](uint32_t idx) {
+        session_.select_monitor(static_cast<uint8_t>(idx));
+    };
     platform.set_menu_actions(actions);
 
     // Threaded pipeline (VIV-81): OPT-IN via VIVORA_PIPELINE=threaded, only if
@@ -621,6 +640,9 @@ bool ViewLoopState::iter() {
     if (!session_started_ && session.state() == client::SessionState::Connected) {
         session_start_ = Clock::now();
         session_started_ = true;
+        // Pre-fetch the host display list for the monitor panel (VIV-50) —
+        // see the identical call in iter_threaded().
+        session.request_monitor_list();
     }
 
     // Status overlay (VIV-62): before the first frame, tell the user what's
@@ -746,6 +768,11 @@ bool ViewLoopState::iter() {
         if (session.take_new_stream_info(info)) {
             platform.set_stream_size(info.width, info.height);
             log::info("VIEW", "Stream size: %ux%u (crop)", info.width, info.height);
+        }
+        // VIV-50: push a freshly-arrived host display list into the monitor panel.
+        std::vector<protocol::MonitorDesc> monitors;
+        if (session.take_new_monitor_list(monitors)) {
+            platform.set_monitor_list(monitors);
         }
         protocol::CursorShapeMessage new_shape;
         if (session.take_new_cursor_shape(new_shape)) {

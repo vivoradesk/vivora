@@ -675,6 +675,9 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
         case protocol::PacketType::StreamInfo:
             handle_stream_info(payload, payload_len);
             break;
+        case protocol::PacketType::MonitorList:
+            handle_monitor_list(payload, payload_len);
+            break;
         case protocol::PacketType::HostStats:
             // Host's current encoder target bitrate (kbps, u32 LE) — for the
             // "encoding (actual)" HUD readout (VIV-82).
@@ -837,6 +840,24 @@ bool ClientSession::take_new_stream_info(protocol::StreamInfoMessage& out) {
     return true;
 }
 
+void ClientSession::handle_monitor_list(const uint8_t* payload, size_t len) {
+    protocol::MonitorListMessage msg;
+    if (!protocol::MonitorListMessage::deserialize(payload, len, msg)) {
+        log::warn("ClientSession", "MonitorList deserialize failed (len=%zu)", len);
+        return;
+    }
+    monitor_list_     = std::move(msg.monitors);
+    new_monitor_list_ = true;
+    log::info("ClientSession", "Got MonitorList (%zu display(s))", monitor_list_.size());
+}
+
+bool ClientSession::take_new_monitor_list(std::vector<protocol::MonitorDesc>& out) {
+    if (!new_monitor_list_) return false;
+    out = monitor_list_;
+    new_monitor_list_ = false;
+    return true;
+}
+
 bool ClientSession::take_new_cursor_shape(protocol::CursorShapeMessage& out) {
     if (!pending_shape_valid_) return false;
     out = std::move(pending_shape_);
@@ -960,6 +981,39 @@ void ClientSession::request_idr() {
 
     auto wire = pkt.serialize();
     send_sealed(wire);
+}
+
+void ClientSession::request_monitor_list() {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::MonitorListRequest;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.header.payload_len = 0;
+
+    auto wire = pkt.serialize();
+    send_sealed(wire);
+}
+
+void ClientSession::select_monitor(uint8_t index) {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    protocol::SelectMonitorMessage msg;
+    msg.index = index;
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::SelectMonitor;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.payload = msg.serialize();
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+
+    auto wire = pkt.serialize();
+    send_sealed(wire);
+    log::info("ClientSession", "Requested host display switch -> %u", index);
 }
 
 void ClientSession::reset_video_stream() {

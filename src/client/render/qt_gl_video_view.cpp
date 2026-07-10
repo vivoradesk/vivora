@@ -217,6 +217,22 @@ QtGlVideoView::QtGlVideoView(QWidget* parent) : QOpenGLWidget(parent) {
         activateWindow();
         setFocus(Qt::OtherFocusReason);
     });
+
+    // "Switch monitor…" panel (VIV-50) — same top-level overlay pattern as the
+    // menu.  Wired for Windows/Mac already; Linux was the last client missing
+    // it (the shared menu button would otherwise do nothing here).
+    monitor_panel_ = new vivora::MonitorPanel(nullptr);
+    monitor_panel_->hide();
+    connect(monitor_panel_, &vivora::MonitorPanel::closed, this, [this]() {
+        activateWindow();
+        setFocus(Qt::OtherFocusReason);
+    });
+    connect(menu_, &vivora::StreamMenu::monitorClicked, this, [this]() {
+        if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        menu_->close_menu();
+        monitor_panel_->set_monitors(last_monitors_);
+        monitor_panel_->open_over(this);
+    });
 }
 
 void QtGlVideoView::set_status(const QString& text) {
@@ -239,6 +255,7 @@ void QtGlVideoView::position_status() {
 
 QtGlVideoView::~QtGlVideoView() {
     if (menu_) { menu_->hide(); menu_->deleteLater(); menu_ = nullptr; }
+    if (monitor_panel_) { monitor_panel_->hide(); monitor_panel_->deleteLater(); monitor_panel_ = nullptr; }
     if (context()) {
         makeCurrent();
         if (y_tex_) glDeleteTextures(1, &y_tex_);
@@ -537,12 +554,31 @@ void QtGlVideoView::emit_key(int qt_key, bool down) {
     if (!input_cb_) return;
     uint16_t vk = qt_key_to_vk(qt_key);
     if (vk == 0) return;  // unmapped — drop rather than confuse host
+    if (down) pressed_vks_.insert(vk);
+    else      pressed_vks_.erase(vk);
     protocol::InputEvent ev{};
     ev.type      = down ? protocol::InputEventType::KeyDown
                         : protocol::InputEventType::KeyUp;
     ev.vk_code   = vk;
     ev.scan_code = 0;  // host derives scancode from VK on Windows
     input_cb_(ev);
+}
+
+void QtGlVideoView::release_all_keys() {
+    // Synthesize a KeyUp for every key the host currently thinks is held.
+    // Needed when focus leaves the stream view (the menu/panel hotkey steals
+    // it, or an alt-tab): the matching KeyUp is then delivered to the OTHER
+    // window, so without this the host keeps the modifier stuck down — the
+    // "Ctrl held after opening the menu with Ctrl+F1" report (VIV-50).
+    if (!input_cb_) return;
+    for (uint16_t vk : pressed_vks_) {
+        protocol::InputEvent ev{};
+        ev.type      = protocol::InputEventType::KeyUp;
+        ev.vk_code   = vk;
+        ev.scan_code = 0;
+        input_cb_(ev);
+    }
+    pressed_vks_.clear();
 }
 
 void QtGlVideoView::mouseMoveEvent(QMouseEvent* e) {
@@ -578,6 +614,9 @@ void QtGlVideoView::focusOutEvent(QFocusEvent* e) {
     // remember the prior state so re-focus restores it.
     was_relative_on_focus_loss_ = relative_mode_;
     if (relative_mode_) exit_relative_mode();
+    // Release any keys the host thinks are held — their KeyUp will go to
+    // whatever took focus (menu/panel), not here, so flush them now.
+    release_all_keys();
     QOpenGLWidget::focusOutEvent(e);
 }
 
@@ -640,9 +679,25 @@ void QtGlVideoView::update_stats(const StatsView& stats) {
 }
 
 void QtGlVideoView::set_menu_actions(const vivora::MenuActions& actions) {
+    menu_actions_ = actions;
     if (!menu_) return;
     menu_->set_actions(actions);
     menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+    // Wire the panel's switch/refresh to the same session callbacks (VIV-50).
+    if (monitor_panel_) {
+        monitor_panel_->set_select_callback([this](uint32_t idx) {
+            if (menu_actions_.select_monitor) menu_actions_.select_monitor(idx);
+        });
+        monitor_panel_->set_refresh_callback([this]() {
+            if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        });
+    }
+}
+
+void QtGlVideoView::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    last_monitors_ = monitors;
+    if (monitor_panel_) monitor_panel_->set_monitors(monitors);
 }
 
 void QtGlVideoView::set_peer_label(const QString& peer) {
@@ -654,6 +709,10 @@ void QtGlVideoView::toggle_menu() {
     if (menu_->isVisible()) {
         menu_->close_menu();
     } else {
+        // The hotkey that opened this (Ctrl+F1) left Ctrl held on the host;
+        // the menu is about to steal focus so the Ctrl KeyUp would never
+        // reach us.  Release everything now (VIV-50).
+        release_all_keys();
         feed_menu_info();
         menu_->open_over(this);
     }

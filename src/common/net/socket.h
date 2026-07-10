@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -12,6 +13,14 @@ struct SocketAddr {
     uint16_t port = 0;    // host byte order
 
     bool operator==(const SocketAddr& o) const { return ip == o.ip && port == o.port; }
+
+    // 127.0.0.0/8.  Network byte order puts the first wire octet in the first
+    // memory byte regardless of host endianness.
+    bool is_loopback() const {
+        uint8_t first = 0;
+        std::memcpy(&first, &ip, 1);
+        return first == 127;
+    }
     bool operator!=(const SocketAddr& o) const { return !(*this == o); }
     bool operator<(const SocketAddr& o) const {
         return ip < o.ip || (ip == o.ip && port < o.port);

@@ -35,6 +35,13 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
+    manual_bitrate_bps_ = manual_bitrate_bps;
+    return start_pipeline(display_index);
+}
+
+// (Re)build capture + encoder for the given display.  Shared by init() and
+// the VIV-50 monitor switch.  Caller has already validated display_index.
+bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
     ccfg.fps = 60;
@@ -51,7 +58,7 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
-    uint32_t bitrate = manual_bitrate_bps;
+    uint32_t bitrate = manual_bitrate_bps_;
     if (bitrate == 0)
         bitrate = vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
 
@@ -68,7 +75,43 @@ bool MacHostPlatform::init(uint32_t display_index,
         return false;
     }
 
+    current_display_index_ = display_index;
     return true;
+}
+
+std::vector<vivora::protocol::MonitorDesc> MacHostPlatform::list_monitors() {
+    std::vector<vivora::protocol::MonitorDesc> out;
+    for (const auto& d : vivora::host::MacScreenCapture::enumerate_displays()) {
+        vivora::protocol::MonitorDesc md;
+        md.index   = static_cast<uint8_t>(d.index);
+        md.width   = static_cast<uint16_t>(d.width_px);
+        md.height  = static_cast<uint16_t>(d.height_px);
+        md.primary = (d.index == 0);  // SCShareableContent lists the main display first
+        md.viewing = (d.index == current_display_index_);
+        out.push_back(md);
+    }
+    return out;
+}
+
+bool MacHostPlatform::select_monitor(uint32_t index, bool /*seed_cursor*/) {
+    if (index == current_display_index_) return true;
+    auto displays = vivora::host::MacScreenCapture::enumerate_displays();
+    if (index >= displays.size()) {
+        vivora::log::warn("HOST", "select_monitor: display %u out of range", index);
+        return false;
+    }
+    const uint32_t prev = current_display_index_;
+    // Tear the pipeline down and rebuild on the new display.  VideoToolbox is
+    // bound to the old resolution, so a full encoder shutdown/init is needed.
+    capture_.stop();
+    encoder_.shutdown();
+    if (start_pipeline(index)) return true;
+    // Roll back to the previous display so the session keeps streaming.
+    vivora::log::error("HOST", "select_monitor: rebuild on display %u failed, restoring %u",
+                       index, prev);
+    capture_.stop();
+    encoder_.shutdown();
+    return start_pipeline(prev);
 }
 
 uint32_t MacHostPlatform::capture_width()  const { return capture_.width(); }
@@ -232,11 +275,17 @@ bool MacHostPlatform::get_cursor_state(CursorState& out) {
 
         out.x_norm   = (float)x_norm;
         out.y_norm   = (float)y_norm;
-        // CGCursorIsVisible is imperfect (Apple flags it "with known issues"
-        // on 10.9+) but catches the primary target — fullscreen games that
-        // call CGDisplayHideCursor. Client-side 50ms debouncer absorbs brief
-        // flicker. Private CGSIsCursorVisible is a future upgrade if needed.
-        out.visible  = CGCursorIsVisible() ? true : false;
+        // The captured desktop cursor is effectively always visible.
+        // CGCursorIsVisible was the old signal for a host-hidden cursor
+        // (fullscreen games calling CGDisplayHideCursor), but Apple retired
+        // it — on macOS 13+/26 it's a deprecated stub that returns false, so
+        // it reported the cursor as HIDDEN every tick.  The client took that
+        // as "enter relative mode" and hid + clipped the viewer's pointer
+        // inside the window even though the Mac cursor was plainly visible
+        // (VIV-50).  Report visible; hidden-cursor / relative-input detection
+        // for Mac hosts needs a working API (private CGSIsCursorVisible) and
+        // is deferred — it only matters for fullscreen 3D apps.
+        out.visible  = true;
         out.shape_id = current_shape_id_;
 
         // Pointer-identity fast-path: if neither the NSCursor instance nor

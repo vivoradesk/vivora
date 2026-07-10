@@ -18,6 +18,12 @@ target_link_libraries(fec_test PRIVATE vivora_common)
 target_include_directories(fec_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME fec_test COMMAND fec_test)
 
+# Monitor-selection wire messages (VIV-50) — header-only protocol structs.
+add_executable(monitor_info_test monitor_info_test.cpp)
+target_link_libraries(monitor_info_test PRIVATE vivora_common)
+target_include_directories(monitor_info_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME monitor_info_test COMMAND monitor_info_test)
+
 add_executable(audio_test audio_test.cpp)
 target_link_libraries(audio_test PRIVATE vivora_common)
 target_include_directories(audio_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

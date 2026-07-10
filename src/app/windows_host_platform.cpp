@@ -125,6 +125,74 @@ vivora::VideoCodec WindowsHostPlatform::actual_codec() const {
     return encoder_ ? encoder_->get_config().codec : saved_codec_;
 }
 
+std::vector<vivora::protocol::MonitorDesc> WindowsHostPlatform::list_monitors() {
+    std::vector<vivora::protocol::MonitorDesc> out;
+    if (!capture_) return out;
+    const uint32_t cur = dxgi_ ? dxgi_->current_monitor_index() : 0;
+    for (const auto& m : capture_->enumerate_monitors()) {
+        vivora::protocol::MonitorDesc d;
+        d.index   = static_cast<uint8_t>(m.index);
+        d.width   = static_cast<uint16_t>(m.resolution.width);
+        d.height  = static_cast<uint16_t>(m.resolution.height);
+        d.primary = m.primary;
+        d.viewing = (m.index == cur);
+        out.push_back(d);
+    }
+    return out;
+}
+
+int32_t WindowsHostPlatform::input_origin_x() const {
+    return dxgi_ ? dxgi_->origin_x() : 0;
+}
+int32_t WindowsHostPlatform::input_origin_y() const {
+    return dxgi_ ? dxgi_->origin_y() : 0;
+}
+
+bool WindowsHostPlatform::select_monitor(uint32_t index, bool seed_cursor) {
+    if (!dxgi_) return false;
+    if (index == dxgi_->current_monitor_index()) return true;  // already there
+
+    const bool had_encoder = (encoder_ != nullptr);
+    // The encoder is bound to the old display's resolution — tear it down,
+    // move the capture, then rebuild it at the new resolution.  The DXGI
+    // device is preserved across the switch (switch_monitor re-duplicates on
+    // the same device), so the rebuilt encoder shares the same GPU surfaces.
+    if (had_encoder) stop_encoder();
+    // The heartbeat staging mirror was sized for the old display — drop it so
+    // capture_and_encode() reallocates at the new resolution.
+    staging_tex_.Reset();
+    staging_valid_ = false;
+
+    if (!dxgi_->switch_monitor(index)) {
+        // Bad index / un-duplicatable output: restore the previous encoder so
+        // the session keeps streaming the old display instead of dying.
+        if (had_encoder) start_encoder();
+        return false;
+    }
+    if (had_encoder && !start_encoder()) {
+        vivora::log::error("HOST", "select_monitor: encoder rebuild failed after switch to %u", index);
+        return false;
+    }
+
+    // Bring the host cursor onto the newly captured display.  If it stays on
+    // the old one, DXGI reports "pointer not visible" for the captured output,
+    // the client hides its local cursor and drops into relative (hidden-
+    // cursor) mode — the "mouse disappeared after switching" report (VIV-50).
+    // Client absolute moves then land correctly via the virtual-desktop
+    // mapping, but only once the cursor is visible again — so seed it here.
+    if (seed_cursor) {
+        POINT p{};
+        const LONG nx = dxgi_->origin_x(), ny = dxgi_->origin_y();
+        const LONG nw = static_cast<LONG>(dxgi_->get_resolution().width);
+        const LONG nh = static_cast<LONG>(dxgi_->get_resolution().height);
+        if (GetCursorPos(&p) && (p.x < nx || p.x >= nx + nw ||
+                                 p.y < ny || p.y >= ny + nh)) {
+            SetCursorPos(nx + nw / 2, ny + nh / 2);
+        }
+    }
+    return true;
+}
+
 bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                                               bool& content_changed,
                                               bool force) {

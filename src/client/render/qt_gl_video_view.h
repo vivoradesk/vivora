@@ -4,7 +4,9 @@
 #include "common/protocol/cursor_message.h"
 
 #include "app/view_platform.h"
+#include "client/render/monitor_panel.h"
 #include "client/render/stream_menu.h"
+#include "common/protocol/monitor_info.h"
 
 #include <QCursor>
 #include <QLabel>
@@ -17,7 +19,9 @@
 #include <QTimer>
 
 #include <cstdint>
+#include <set>
 #include <functional>
+#include <vector>
 #include <unordered_map>
 
 namespace vivora::client {
@@ -44,6 +48,9 @@ public:
     // In-stream menu (VIV-74): supply callbacks + header subtitle.
     void set_menu_actions(const vivora::MenuActions& actions);
     void set_peer_label(const QString& peer);
+
+    // Deliver the host's display list to the in-stream monitor panel (VIV-50).
+    void set_monitor_list(const std::vector<vivora::protocol::MonitorDesc>& monitors);
 
     // Pre-encoder stream dimensions — used to map widget-local mouse
     // coords to the host's input coord space.  Updated when the host's
@@ -95,6 +102,10 @@ private:
     void emit_mouse_button(int qt_button, bool down);
     void emit_mouse_pos();
     void emit_key(int qt_key, bool down);
+    // Flush KeyUp for every key the host currently believes is held — called
+    // on focus loss and when the menu/panel steals focus so a modifier used
+    // in a hotkey (Ctrl+F1) doesn't stick down on the host (VIV-50).
+    void release_all_keys();
 
     QOpenGLShaderProgram      program_;
     QOpenGLVertexArrayObject  vao_;
@@ -154,12 +165,18 @@ private:
 
     // In-stream control menu (VIV-74).  Top-level overlay, toggled by Ctrl+F1.
     vivora::StreamMenu* menu_ = nullptr;
+    // "Switch monitor…" panel (VIV-50) — same top-level overlay pattern.
+    vivora::MonitorPanel* monitor_panel_ = nullptr;
+    std::vector<vivora::protocol::MonitorDesc> last_monitors_;
+    vivora::MenuActions menu_actions_;
     bool keep_aspect_ = true;   // letterbox vs stretch-to-fill
     void toggle_menu();
     void toggle_fullscreen();
     void feed_menu_info();
 
     InputCallback input_cb_;
+    // VK codes the host currently believes are held — for release_all_keys().
+    std::set<uint16_t> pressed_vks_;
 
     // Cursor shape cache keyed by host's shape_id; the widget's QCursor
     // is updated when active_shape_id_ changes.

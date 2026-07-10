@@ -156,6 +156,11 @@ void LinuxViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
     if (view_) view_->set_menu_actions(actions);
 }
 
+void LinuxViewPlatform::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    if (view_) view_->set_monitor_list(monitors);
+}
+
 void LinuxViewPlatform::set_stream_size(uint32_t width, uint32_t height) {
     if (view_) view_->set_stream_size(width, height);
     else {

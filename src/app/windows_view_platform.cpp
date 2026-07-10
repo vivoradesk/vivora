@@ -22,6 +22,10 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
     }
     window_ = std::make_unique<vivora::StreamWindow>();
     window_->setWindowTitle(QString("Vivora — %1:%2").arg(host_ip).arg(port));
+    // Loopback session (viewing this same machine): relative-cursor mode
+    // would hide/clip the user's own pointer — disable it (VIV-50).
+    const QString hip = QString::fromUtf8(host_ip ? host_ip : "");
+    window_->set_loopback(hip.startsWith("127.") || hip == "localhost");
     // Header subtitle for the in-stream menu (VIV-74).  Friendly device
     // names aren't plumbed to the view layer yet, so show the endpoint.
     window_->set_peer_label(QString("%1:%2").arg(host_ip).arg(port));
@@ -63,12 +67,22 @@ int WindowsViewPlatform::render() {
     int count = 0;
     vivora::DecodedFrame decoded;
     while (decoder_->get_frame(decoded)) {
+        // Monitor switch (VIV-50): decoded size changed mid-session → rebuild
+        // the renderer for the new geometry (mirrors the threaded pipeline).
+        if (renderer_ready_ && decoded.width > 0 && decoded.height > 0
+            && (decoded.width != renderer_w_ || decoded.height != renderer_h_)) {
+            vivora::log::info("VIEW", "Decoded size changed %ux%u -> %ux%u — reinit renderer",
+                              renderer_w_, renderer_h_, decoded.width, decoded.height);
+            renderer_ready_ = false;
+        }
         if (!renderer_ready_ && decoded.width > 0 && decoded.height > 0 && decoded.texture) {
             D3D11_TEXTURE2D_DESC tex_desc = {};
             decoded.texture->GetDesc(&tex_desc);
             renderer_ready_ = window_->init_renderer(
                 decoder_->get_device(), decoded.width, decoded.height, tex_desc.Format);
             if (renderer_ready_) {
+                renderer_w_ = decoded.width;
+                renderer_h_ = decoded.height;
                 // If StreamInfo arrived before the first frame, apply the
                 // real crop dims now that the renderer exists.  Otherwise
                 // fall back to the decoded (possibly padded) dims so mouse
@@ -130,6 +144,11 @@ void WindowsViewPlatform::set_status(const char* text) {
 
 void WindowsViewPlatform::set_menu_actions(const vivora::MenuActions& actions) {
     if (window_) window_->set_menu_actions(actions);
+}
+
+void WindowsViewPlatform::set_monitor_list(
+        const std::vector<vivora::protocol::MonitorDesc>& monitors) {
+    if (window_) window_->set_monitor_list(monitors);
 }
 
 void WindowsViewPlatform::shutdown() {

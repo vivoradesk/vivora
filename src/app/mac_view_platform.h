@@ -4,10 +4,12 @@
 #include "app/mac_video_pipeline.h"
 #include "app/view_platform.h"
 #include "client/render/mac_video_view.h"
+#include "client/render/monitor_panel.h"
 #include "client/render/stream_menu.h"
 
 #include <QApplication>
 #include <memory>
+#include <vector>
 
 class MacViewPlatform : public vivora::ViewPlatform {
 public:
@@ -27,6 +29,7 @@ public:
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
+    void set_monitor_list(const std::vector<vivora::protocol::MonitorDesc>& monitors) override;
     vivora::IVideoPipeline* video_pipeline() override;
     void shutdown() override;
 
@@ -45,6 +48,10 @@ private:
     // In-stream control menu (VIV-74) — a Qt overlay shown over the Cocoa
     // stream window, toggled by the Ctrl+F1 callback from the view.
     std::unique_ptr<vivora::StreamMenu> menu_;
+    // "Switch monitor…" panel (VIV-50) — same top-level Qt overlay pattern.
+    std::unique_ptr<vivora::MonitorPanel> monitor_panel_;
+    std::vector<vivora::protocol::MonitorDesc> last_monitors_;
+    vivora::MenuActions actions_;
     vivora::StatsView last_stats_{};
 };
 

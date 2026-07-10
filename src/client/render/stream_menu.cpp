@@ -272,11 +272,8 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         return btn;
     };
 
-    monitor_btn_ = make_button(0, "Switch monitor…", kIconDim, kIconDim,
-                               nullptr, /*with_soon=*/true);
-    monitor_btn_->setEnabled(false);
-    monitor_btn_->setCursor(Qt::ArrowCursor);
-    monitor_btn_->setToolTip("Host monitor selection — coming with VIV-50");
+    monitor_btn_ = make_button(0, "Switch monitor…", kIconLight,
+                               QColor("#e6e8ec"), nullptr, /*with_soon=*/false);
     root->addWidget(monitor_btn_);
 
     root->addSpacing(10);
@@ -332,6 +329,8 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         if (suppress_signals_) return;
         emit keepAspectToggled(on);
     });
+    connect(monitor_btn_, &QPushButton::clicked, this,
+            [this]() { emit monitorClicked(); });
     connect(fullscreen_btn_, &QPushButton::clicked, this,
             [this]() { emit fullscreenToggled(); });
     connect(disconnect_btn_, &QPushButton::clicked, this, [this]() {

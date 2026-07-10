@@ -2,6 +2,8 @@
 
 #include "host/input/input_injector.h"
 
+#include <algorithm>
+
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -15,6 +17,11 @@ public:
     void set_screen_resolution(uint32_t width, uint32_t height) override {
         screen_w_ = width;
         screen_h_ = height;
+    }
+
+    void set_screen_origin(int32_t x, int32_t y) override {
+        origin_x_ = x;
+        origin_y_ = y;
     }
 
     void inject(const protocol::InputEvent& event) override {
@@ -47,12 +54,36 @@ public:
                 }
             } else {
                 input.type = INPUT_MOUSE;
-                input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-                // SendInput absolute coords: 0..65535
-                // TODO(multi-monitor): MOUSEEVENTF_VIRTUALDESK required for
-                // multi-monitor capture; today host pins monitor 0.
-                input.mi.dx = static_cast<LONG>(xn * 65535.0f);
-                input.mi.dy = static_cast<LONG>(yn * 65535.0f);
+                // Map through the VIRTUAL DESKTOP so the position lands on
+                // the captured display even when it's not the primary
+                // (VIV-50 monitor switch).  Plain ABSOLUTE spans only the
+                // primary display: after switching to a secondary monitor
+                // the injected cursor kept moving on the primary — invisible
+                // in the stream, which also trapped the client in relative
+                // (hidden-cursor) mode.
+                input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                                 | MOUSEEVENTF_VIRTUALDESK;
+                const double vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                const double vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                const double vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+                const double vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+                // Clamp to the captured display's LAST pixel, not one past it.
+                // xn/yn arrive clamped to [0,1]; at 1.0 the naive origin+size
+                // is the first pixel of the ADJACENT monitor, so a cursor at
+                // the stream's right/bottom edge bled onto the host's next
+                // display (VIV-50, reported on multi-monitor hosts).
+                double px = static_cast<double>(origin_x_)
+                          + static_cast<double>(xn) * screen_w_;
+                double py = static_cast<double>(origin_y_)
+                          + static_cast<double>(yn) * screen_h_;
+                const double max_x = static_cast<double>(origin_x_) + screen_w_ - 1;
+                const double max_y = static_cast<double>(origin_y_) + screen_h_ - 1;
+                if (px > max_x) px = max_x;
+                if (py > max_y) py = max_y;
+                if (px < origin_x_) px = origin_x_;
+                if (py < origin_y_) py = origin_y_;
+                input.mi.dx = static_cast<LONG>((px - vx) * 65535.0 / vw);
+                input.mi.dy = static_cast<LONG>((py - vy) * 65535.0 / vh);
                 SendInput(1, &input, sizeof(INPUT));
             }
 
@@ -161,6 +192,8 @@ private:
 
     uint32_t screen_w_ = 1920;
     uint32_t screen_h_ = 1080;
+    int32_t  origin_x_ = 0;   // captured display's virtual-desktop origin (VIV-50)
+    int32_t  origin_y_ = 0;
     float    last_xn_       = 0.0f;
     float    last_yn_       = 0.0f;
     bool     last_xn_valid_ = false;

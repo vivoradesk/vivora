@@ -33,6 +33,21 @@ public:
     std::vector<MonitorInfo> enumerate_monitors() override;
     Resolution get_resolution() const override;
 
+    // Runtime monitor switch (VIV-50).  Tears down the current output
+    // duplication and re-creates it for |monitor_index| on the SAME D3D11
+    // device, so an encoder built on get_device() stays valid (provided both
+    // displays hang off the same adapter — multi-GPU switching would need a
+    // device rebuild, not supported here).  Updates get_resolution() and the
+    // capture format.  Returns false if the new output can't be duplicated.
+    bool switch_monitor(uint32_t monitor_index);
+    uint32_t current_monitor_index() const { return monitor_index_; }
+
+    // Desktop origin of the captured display (top-left corner in virtual
+    // desktop coordinates).  (0,0) for the primary; non-primary displays
+    // sit at an offset that input injection must add (VIV-50).
+    int32_t origin_x() const { return origin_x_; }
+    int32_t origin_y() const { return origin_y_; }
+
     // Access to D3D11 device (needed by encoder for zero-copy)
     ID3D11Device* get_device() const { return device_.Get(); }
     ID3D11DeviceContext* get_context() const { return context_.Get(); }
@@ -58,6 +73,8 @@ private:
     DXGI_FORMAT capture_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
 
     Resolution resolution_;
+    int32_t origin_x_ = 0;   // captured display's virtual-desktop origin (VIV-50)
+    int32_t origin_y_ = 0;
     uint64_t frame_count_ = 0;
     bool frame_acquired_ = false;
     // Saved so capture_frame() can silently re-run init_output_duplication()

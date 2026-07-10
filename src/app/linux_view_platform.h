@@ -27,6 +27,7 @@ public:
     void update_stats(const vivora::StatsView& stats) override;
     void set_status(const char* text) override;
     void set_menu_actions(const vivora::MenuActions& actions) override;
+    void set_monitor_list(const std::vector<vivora::protocol::MonitorDesc>& monitors) override;
     vivora::IVideoPipeline* video_pipeline() override { return pipeline_.get(); }
     void upload_cursor_shape(const vivora::protocol::CursorShapeMessage& shape) override;
     void update_cursor_position(const vivora::protocol::CursorPositionMessage& pos) override;

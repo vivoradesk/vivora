@@ -83,6 +83,9 @@ private:
     uint32_t                                reserved_idx_ = FrameHandle::kInvalid;
 
     bool renderer_ready_   = false;   // main thread (present)
+    uint32_t    renderer_w_   = 0;    // geometry the renderer was built for;
+    uint32_t    renderer_h_   = 0;    // a mismatch (monitor switch, VIV-50)
+    DXGI_FORMAT renderer_fmt_ = DXGI_FORMAT_UNKNOWN;  // forces a re-init
     bool com_initialized_  = false;   // decode thread
     uint32_t pending_stream_w_ = 0;   // main thread
     uint32_t pending_stream_h_ = 0;

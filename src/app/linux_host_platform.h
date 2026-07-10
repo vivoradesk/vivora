@@ -26,6 +26,14 @@ public:
     void request_idr() override;
     vivora::VideoCodec actual_codec() const override { return codec_; }
 
+    // Monitor list (VIV-50).  xdg-desktop-portal does NOT expose the displays
+    // programmatically, so the list comes from wl_output; the captured source
+    // is whatever the portal picker chose, so `viewing` is best-effort (the
+    // output whose logical size matches the capture).  select_monitor is
+    // deliberately not overridden yet — a portal re-pick (system dialog) is
+    // the only way to change the source and is tracked as a follow-up.
+    std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
+
     // PipeWire is event-driven — capture happens on its own thread and
     // encoded packets land in queued_pkts_.  capture_and_encode() returns
     // true if any new packets accumulated since the last call (so the

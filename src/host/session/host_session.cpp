@@ -113,6 +113,7 @@ bool HostSession::start(uint16_t port) {
     input_injector_ = InputInjector::create();
     if (input_injector_ && pending_screen_w_ && pending_screen_h_) {
         input_injector_->set_screen_resolution(pending_screen_w_, pending_screen_h_);
+        input_injector_->set_screen_origin(pending_origin_x_, pending_origin_y_);
     }
     state_ = SessionState::WaitingForClient;
     clients_.clear();
@@ -623,6 +624,20 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             client->idr_needed = true;
             log::info("HostSession", "Client requested IDR (frame loss recovery)");
             break;
+        case protocol::PacketType::MonitorListRequest:
+            // host_loop owns the capture platform — flag the request and let
+            // it enumerate + reply on its next tick (VIV-50).
+            monitor_list_requested_ = true;
+            break;
+        case protocol::PacketType::SelectMonitor: {
+            protocol::SelectMonitorMessage m;
+            if (protocol::SelectMonitorMessage::deserialize(payload, payload_len, m)) {
+                monitor_select_pending_ = true;
+                monitor_select_index_   = m.index;
+                log::info("HostSession", "Client requested display switch -> %u", m.index);
+            }
+            break;
+        }
         case protocol::PacketType::NackRequest:
             if (sender_ && payload_len >= 3) {
                 uint16_t seq = payload[0] | (payload[1] << 8);
@@ -927,6 +942,27 @@ void HostSession::send_stream_info(uint16_t width, uint16_t height) {
     }
     log::info("HostSession", "Sent StreamInfo %ux%u to %zu client(s)",
               width, height, clients_.size());
+}
+
+void HostSession::send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors) {
+    if (!socket_ || clients_.empty()) return;
+    protocol::MonitorListMessage msg;
+    msg.monitors = monitors;
+
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::MonitorList;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload            = msg.serialize();
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+    auto wire = pkt.serialize();
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        send_sealed(client, wire);
+    }
+    log::info("HostSession", "Sent MonitorList (%zu display(s)) to %zu client(s)",
+              monitors.size(), clients_.size());
 }
 
 void HostSession::send_encoder_bitrate(uint32_t kbps) {

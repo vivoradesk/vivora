@@ -1,6 +1,7 @@
 #ifdef VIVORA_LINUX
 
 #include "app/linux_host_platform.h"
+#include "host/capture/wayland_outputs.h"
 #include "common/utils/log.h"
 #include <chrono>
 
@@ -45,6 +46,26 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
     }
     vivora::log::info("HOST", "Capture is %ux%u — host loop can start", cap_w_, cap_h_);
     return true;
+}
+
+std::vector<vivora::protocol::MonitorDesc> LinuxHostPlatform::list_monitors() {
+    std::vector<vivora::protocol::MonitorDesc> out;
+    auto outputs = vivora::host::enumerate_wayland_outputs();
+    uint8_t idx = 0;
+    for (const auto& o : outputs) {
+        vivora::protocol::MonitorDesc md;
+        md.index   = idx++;
+        md.width   = static_cast<uint16_t>(o.width);
+        md.height  = static_cast<uint16_t>(o.height);
+        md.primary = o.primary;
+        // Best-effort "currently viewing": the portal picked the source, so we
+        // can't map node→output reliably; flag the output whose logical size
+        // matches the active capture.  Ties just highlight the first match.
+        md.viewing = (static_cast<uint32_t>(o.width) == cap_w_
+                   && static_cast<uint32_t>(o.height) == cap_h_);
+        out.push_back(md);
+    }
+    return out;
 }
 
 void LinuxHostPlatform::shutdown() {

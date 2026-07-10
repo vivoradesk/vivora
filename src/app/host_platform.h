@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/protocol/monitor_info.h"
 #include <cstdint>
 #include <cstddef>
 #include <vector>
@@ -22,10 +23,27 @@ struct HostPlatform {
     // e.g. macOS Retina points vs backing pixels).  Default = capture res.
     virtual uint32_t input_width()  const { return capture_width(); }
     virtual uint32_t input_height() const { return capture_height(); }
+    // Virtual-desktop origin of the captured display (VIV-50).  Non-zero on
+    // multi-monitor hosts streaming a non-primary display; input injection
+    // adds it so absolute mouse coords land on the display being watched.
+    virtual int32_t  input_origin_x() const { return 0; }
+    virtual int32_t  input_origin_y() const { return 0; }
 
     // Encoder control.
     virtual void set_bitrate(uint32_t bps) = 0;
     virtual void request_idr() = 0;
+
+    // Monitor selection (VIV-50).  list_monitors() enumerates the displays
+    // this host can capture (with the currently-streamed one flagged
+    // `viewing`); select_monitor() retargets capture to the given index,
+    // rebuilding the encoder for the new resolution.  Defaults model a
+    // single-display host that can't switch — platforms wire these as the
+    // capability lands (Windows/DXGI first).
+    virtual std::vector<protocol::MonitorDesc> list_monitors() { return {}; }
+    // seed_cursor: move the host pointer onto the new display so it stays
+    // visible in the stream.  Pass false for loopback-only sessions — there
+    // the pointer IS the user's physical mouse (VIV-50).
+    virtual bool select_monitor(uint32_t /*index*/, bool /*seed_cursor*/ = true) { return false; }
 
     // The codec the encoder actually produces.  May differ from what the
     // caller requested if the backend had to fall back (e.g. NVENC refusing

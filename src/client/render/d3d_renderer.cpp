@@ -51,8 +51,27 @@ bool D3dRenderer::init(ID3D11Device* device, HWND hwnd,
                        uint32_t frame_width, uint32_t frame_height,
                        uint32_t window_width, uint32_t window_height,
                        DXGI_FORMAT frame_format) {
+    // Re-init support (VIV-50 monitor switch changes the frame geometry
+    // mid-session): release everything from a previous init FIRST.  An HWND
+    // can host only one swapchain — creating the new one while the old still
+    // lives fails with E_ACCESSDENIED, which froze the picture after a
+    // switch.  Flush the context after the releases so the old swapchain's
+    // deferred destruction completes before the new CreateSwapChainForHwnd.
+    if (swapchain_) {
+        intermediate_srv_.Reset();
+        intermediate_vpov_.Reset();
+        intermediate_.Reset();
+        vp_.Reset();
+        vp_enum_.Reset();
+        video_context_.Reset();
+        video_device_.Reset();
+        vs_.Reset(); ps_.Reset(); sampler_.Reset(); cbuffer_.Reset();
+        swapchain_.Reset();
+        if (context_) context_->Flush();
+        has_frame_ = false;
+    }
     device_ = device;
-    device_->GetImmediateContext(context_.GetAddressOf());
+    device_->GetImmediateContext(context_.ReleaseAndGetAddressOf());
     frame_width_ = frame_width;
     frame_height_ = frame_height;
     crop_width_  = frame_width;   // default: no crop until host sends StreamInfo

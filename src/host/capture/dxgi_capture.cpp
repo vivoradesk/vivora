@@ -86,11 +86,16 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
         return false;
     }
 
-    // Get output description for resolution
+    // Get output description for resolution + desktop origin.  The origin
+    // matters for input injection on multi-monitor hosts (VIV-50): SendInput
+    // absolute coords span the virtual desktop, so a non-primary display's
+    // offset must be added to the normalized client coordinates.
     DXGI_OUTPUT_DESC desc;
     output->GetDesc(&desc);
     resolution_.width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
     resolution_.height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+    origin_x_ = desc.DesktopCoordinates.left;
+    origin_y_ = desc.DesktopCoordinates.top;
 
     // Try IDXGIOutput5::DuplicateOutput1 for FP16 HDR capture
     hr = output.As(&output5_);
@@ -405,6 +410,24 @@ std::vector<MonitorInfo> DxgiCapture::enumerate_monitors() {
 
 Resolution DxgiCapture::get_resolution() const {
     return resolution_;
+}
+
+bool DxgiCapture::switch_monitor(uint32_t monitor_index) {
+    // Release any held frame and drop the current duplication before moving.
+    if (frame_acquired_ && duplication_) {
+        duplication_->ReleaseFrame();
+        frame_acquired_ = false;
+    }
+    duplication_.Reset();
+    output5_.Reset();
+    monitor_index_ = monitor_index;
+    if (!init_output_duplication(monitor_index)) {
+        log::error(TAG, "switch_monitor: failed to duplicate output %u", monitor_index);
+        return false;
+    }
+    log::info(TAG, "Switched capture to monitor %u: %ux%u",
+              monitor_index, resolution_.width, resolution_.height);
+    return true;
 }
 
 // Factory implementation

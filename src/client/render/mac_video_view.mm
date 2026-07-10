@@ -1006,23 +1006,49 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     const bool is_hevc = (impl->codec == VideoCodec::HEVC);
 
     // Extract parameter sets from keyframes; build format description once we have
-    // HEVC: VPS+SPS+PPS, H.264: SPS+PPS.
+    // HEVC: VPS+SPS+PPS, H.264: SPS+PPS.  If a keyframe carries DIFFERENT sets
+    // than the ones the current format description was built from (host monitor
+    // switch changes resolution mid-session, VIV-50), drop the description and
+    // rebuild — enqueueing new-geometry samples under the old description froze
+    // the layer until the host switched back.
     if (keyframe) {
+        std::vector<uint8_t> nvps, nsps, npps;
         for (const auto& n : nals) {
             if (is_hevc) {
                 switch (hevc_nal_type(n.data, n.size)) {
-                    case HEVC_NAL_VPS: impl->vps.assign(n.data, n.data + n.size); break;
-                    case HEVC_NAL_SPS: impl->sps.assign(n.data, n.data + n.size); break;
-                    case HEVC_NAL_PPS: impl->pps.assign(n.data, n.data + n.size); break;
+                    case HEVC_NAL_VPS: nvps.assign(n.data, n.data + n.size); break;
+                    case HEVC_NAL_SPS: nsps.assign(n.data, n.data + n.size); break;
+                    case HEVC_NAL_PPS: npps.assign(n.data, n.data + n.size); break;
                     default: break;
                 }
             } else {
                 switch (h264_nal_type(n.data, n.size)) {
-                    case H264_NAL_SPS: impl->sps.assign(n.data, n.data + n.size); break;
-                    case H264_NAL_PPS: impl->pps.assign(n.data, n.data + n.size); break;
+                    case H264_NAL_SPS: nsps.assign(n.data, n.data + n.size); break;
+                    case H264_NAL_PPS: npps.assign(n.data, n.data + n.size); break;
                     default: break;
                 }
             }
+        }
+        bool params_changed = false;
+        auto adopt = [&params_changed](std::vector<uint8_t>& cur,
+                                       std::vector<uint8_t>& fresh) {
+            if (!fresh.empty() && fresh != cur) {
+                cur = std::move(fresh);
+                params_changed = true;
+            }
+        };
+        adopt(impl->vps, nvps);
+        adopt(impl->sps, nsps);
+        adopt(impl->pps, npps);
+        if (params_changed && impl->have_params) {
+            log::info(TAG, "Parameter sets changed mid-session — rebuilding format description");
+            AVSampleBufferVideoRenderer* r = impl->view.videoLayer.sampleBufferRenderer;
+            [r flush];  // drop old-geometry frames still queued in the layer
+            if (impl->format_desc) {
+                CFRelease(impl->format_desc);
+                impl->format_desc = nullptr;
+            }
+            impl->have_params = false;
         }
 
         const bool have_all = is_hevc

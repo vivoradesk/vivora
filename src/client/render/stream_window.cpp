@@ -114,10 +114,31 @@ StreamWindow::StreamWindow(QWidget* parent)
         renderer_.set_keep_aspect(keep);
     });
     connect(menu_, &StreamMenu::closed, this, [this]() {
+        // Skip when we're deliberately handing focus to the monitor panel —
+        // otherwise the panel would lose activation and dismiss itself.
+        if (suppress_menu_refocus_) return;
         // Return focus to the stream so input resumes (and relative-mouse
         // mode re-enters if the host has its cursor hidden).
         activateWindow();
         setFocus(Qt::OtherFocusReason);
+    });
+
+    // "Switch monitor…" panel (VIV-50).  Owned top-level overlay like the menu.
+    monitor_panel_ = new MonitorPanel(nullptr);
+    monitor_panel_->hide();
+    connect(monitor_panel_, &MonitorPanel::closed, this, [this]() {
+        activateWindow();
+        setFocus(Qt::OtherFocusReason);
+    });
+    connect(menu_, &StreamMenu::monitorClicked, this, [this]() {
+        // Ask the host for a fresh display list, then hand off from the menu
+        // to the panel without bouncing focus back to the stream.
+        if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        suppress_menu_refocus_ = true;
+        menu_->close_menu();
+        suppress_menu_refocus_ = false;
+        monitor_panel_->set_monitors(last_monitors_);
+        monitor_panel_->open_over(this);
     });
 }
 
@@ -125,14 +146,31 @@ StreamWindow::~StreamWindow() {
     if (hud_label_) { hud_label_->hide(); hud_label_->deleteLater(); hud_label_ = nullptr; }
     if (status_label_) { status_label_->hide(); status_label_->deleteLater(); status_label_ = nullptr; }
     if (menu_) { menu_->hide(); menu_->deleteLater(); menu_ = nullptr; }
+    if (monitor_panel_) { monitor_panel_->hide(); monitor_panel_->deleteLater(); monitor_panel_ = nullptr; }
 }
 
 void StreamWindow::set_menu_actions(const MenuActions& actions) {
-    if (!menu_) return;
-    menu_->set_actions(actions);
-    // Seed controls to the session defaults (unity volume, not muted, input
-    // forwarding on) without echoing them back through the callbacks.
-    menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+    menu_actions_ = actions;
+    if (menu_) {
+        menu_->set_actions(actions);
+        // Seed controls to the session defaults (unity volume, not muted, input
+        // forwarding on) without echoing them back through the callbacks.
+        menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+    }
+    // Wire the panel's switch/refresh to the same session callbacks (VIV-50).
+    if (monitor_panel_) {
+        monitor_panel_->set_select_callback([this](uint32_t idx) {
+            if (menu_actions_.select_monitor) menu_actions_.select_monitor(idx);
+        });
+        monitor_panel_->set_refresh_callback([this]() {
+            if (menu_actions_.request_monitors) menu_actions_.request_monitors();
+        });
+    }
+}
+
+void StreamWindow::set_monitor_list(const std::vector<protocol::MonitorDesc>& monitors) {
+    last_monitors_ = monitors;
+    if (monitor_panel_) monitor_panel_->set_monitors(monitors);
 }
 
 void StreamWindow::set_peer_label(const QString& peer) {
@@ -274,6 +312,12 @@ void StreamWindow::apply_pending_visibility() {
 
 void StreamWindow::enter_relative_mode() {
     if (relative_mode_) return;
+    // Loopback session: the "host cursor" IS the user's physical mouse.
+    // Hiding + clipping it here trapped the real pointer invisibly inside
+    // the window whenever the host cursor was elsewhere (e.g. on another
+    // display after a monitor switch, VIV-50).  Relative mode exists for
+    // remote games that hide the pointer — meaningless against yourself.
+    if (loopback_) return;
     relative_mode_ = true;
     saved_global_pos_ = QCursor::pos();
 
@@ -459,6 +503,15 @@ bool StreamWindow::nativeEvent(const QByteArray& eventType, void* message, qintp
 }
 
 void StreamWindow::send_event(const protocol::InputEvent& ev) {
+    // While an overlay (in-stream menu / monitor panel) is up, the user is
+    // interacting with the UI, not the host — forwarding input would drive
+    // the remote cursor underneath the overlay (and on a loopback session it
+    // teleports the LOCAL cursor away, making the overlay unclickable).  The
+    // Mac view has suppressed input while its menu is open since VIV-74; the
+    // Windows window never did (VIV-50).
+    if ((menu_ && menu_->isVisible())
+        || (monitor_panel_ && monitor_panel_->isVisible()))
+        return;
     if (input_cb_) input_cb_(ev);
 }
 
