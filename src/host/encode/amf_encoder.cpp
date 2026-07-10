@@ -409,8 +409,20 @@ void AmfEncoder::request_idr() {
 
 void AmfEncoder::set_bitrate(uint32_t bitrate_bps) {
     config_.bitrate_bps = bitrate_bps;
-    if (encoder_) {
+    if (!encoder_) return;
+    // Must use the codec's own property namespace — SetProperty with a key the
+    // component doesn't recognise silently no-ops, so setting the HEVC key on an
+    // AVC component left H.264 sessions pinned to the initial bitrate regardless
+    // of the adaptive controller.  Mirror create_encoder()'s CBR knobs (target +
+    // peak + VBV) so the rate actually moves under RTT/loss control.
+    if (config_.codec == VideoCodec::HEVC) {
         encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_TARGET_BITRATE, (amf_int64)bitrate_bps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_PEAK_BITRATE,   (amf_int64)bitrate_bps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_HEVC_VBV_BUFFER_SIZE, (amf_int64)bitrate_bps);
+    } else {
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)bitrate_bps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_PEAK_BITRATE,   (amf_int64)bitrate_bps);
+        encoder_->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, (amf_int64)bitrate_bps);
     }
 }
 
