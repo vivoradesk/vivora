@@ -1,5 +1,7 @@
 #include "app/gui/settings.h"
 
+#include "app/gui/autostart.h"
+
 #include <QCoreApplication>
 #include <QUuid>
 
@@ -67,6 +69,19 @@ Settings::Settings(QObject* parent)
     QCoreApplication::setOrganizationName("Vivora");
     QCoreApplication::setOrganizationDomain("vivora.dev");
     QCoreApplication::setApplicationName("Vivora");
+
+    // VIV-18 start-at-login: the OS registration (HKCU Run key on Windows)
+    // is the source of truth, not our ini — the user can remove it via Task
+    // Manager / regedit while Vivora isn't running.  Reconcile on startup so
+    // the checkbox reflects reality, and re-register while enabled so a
+    // moved/updated vivora.exe self-heals its stale registry path.
+    if (Autostart::supported()) {
+        const bool reg = Autostart::enabled();
+        if (reg != q_.value(K_START_AT_LOGIN, DEF_START_AT_LOGIN).toBool())
+            q_.setValue(K_START_AT_LOGIN, reg);
+        if (reg)
+            Autostart::setEnabled(true);
+    }
 }
 
 QString Settings::rendezvous() const          { return q_.value(K_RENDEZVOUS, DEF_RENDEZVOUS).toString(); }
@@ -119,7 +134,8 @@ bool Settings::minimizeToTray() const         { return q_.value(K_MIN_TO_TRAY, D
 void Settings::setMinimizeToTray(bool v)      { if (v != minimizeToTray()) { q_.setValue(K_MIN_TO_TRAY, v); emit changed(); } }
 
 bool Settings::startAtLogin() const           { return q_.value(K_START_AT_LOGIN, DEF_START_AT_LOGIN).toBool(); }
-void Settings::setStartAtLogin(bool v)        { if (v != startAtLogin()) { q_.setValue(K_START_AT_LOGIN, v); emit changed(); } }
+void Settings::setStartAtLogin(bool v)        { if (v != startAtLogin()) { q_.setValue(K_START_AT_LOGIN, v); Autostart::setEnabled(v); emit changed(); } }
+bool Settings::startAtLoginSupported() const  { return Autostart::supported(); }
 
 int Settings::approvalMode() const            { return q_.value(K_APPROVAL_MODE, DEF_APPROVAL_MODE).toInt(); }
 void Settings::setApprovalMode(int v)         { if (v != approvalMode()) { q_.setValue(K_APPROVAL_MODE, v); emit changed(); } }

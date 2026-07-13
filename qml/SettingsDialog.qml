@@ -46,6 +46,7 @@ Window {
         { icon: "◐", label: "Account",          index: 0 },
         { icon: "▢", label: "Appearance",       index: 1 },
         { icon: "⌘", label: "Shortcuts",        index: 2 },
+        { icon: "↻", label: "Startup",          index: 8 },
         { header: "SESSION" },
         { icon: "⇄", label: "Network",          index: 3 },
         { icon: "▤", label: "Codec",            index: 4 },
@@ -904,6 +905,28 @@ Window {
                                     onClicked: Qt.openUrlExternally("https://vivora.dev")
                                 }
                             }
+                        }
+                    }
+                }
+
+                // ── 8: Startup (VIV-18) ──────────────────────────────
+                // Sidebar shows this under GENERAL; it lives at the end of
+                // the stack so the existing panel indices stay stable.
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Startup"
+                        subtitle: "How Vivora behaves when you sign in to this computer."
+                    }
+                    Field {
+                        title: "Start at login"
+                        help: App.settings.startAtLoginSupported
+                              ? "Launch Vivora automatically when you sign in."
+                              : "Windows only for now — macOS and Linux are on the way."
+                        CreamSwitch {
+                            enabled: App.settings.startAtLoginSupported
+                            checked: App.settings.startAtLogin
+                            onToggled: App.settings.startAtLogin = checked
                         }
                     }
                 }

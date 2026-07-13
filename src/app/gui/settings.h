@@ -32,6 +32,10 @@ class Settings : public QObject {
                                             WRITE setStartSharingOnLaunch NOTIFY changed)
     Q_PROPERTY(bool    minimizeToTray  READ minimizeToTray  WRITE setMinimizeToTray  NOTIFY changed)
     Q_PROPERTY(bool    startAtLogin    READ startAtLogin    WRITE setStartAtLogin    NOTIFY changed)
+    // VIV-18: true when this build has a start-at-login backend for the
+    // current OS (Windows today; macOS/Linux are a separate future issue).
+    // The QML toggle stays disabled when unsupported.
+    Q_PROPERTY(bool    startAtLoginSupported READ startAtLoginSupported CONSTANT)
     // VIV-53/59 Security.  approvalMode: 0=always_prompt, 1=prompt_unknown_only,
     // 2=auto_accept.  singleSessionLock: reject new clients while a session
     // is live.
@@ -61,6 +65,7 @@ public:
     bool    startSharingOnLaunch() const;void setStartSharingOnLaunch(bool);
     bool    minimizeToTray() const;      void setMinimizeToTray(bool);
     bool    startAtLogin() const;        void setStartAtLogin(bool);
+    bool    startAtLoginSupported() const;
     int     approvalMode() const;        void setApprovalMode(int);
     bool    singleSessionLock() const;   void setSingleSessionLock(bool);
     int     theme() const;               void setTheme(int);
