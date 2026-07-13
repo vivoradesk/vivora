@@ -57,6 +57,12 @@ Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
 // plugin is imported; without one the first HTTPS request crashes.  Schannel
 // is the native Windows backend — no OpenSSL runtime dependency.
 Q_IMPORT_PLUGIN(QSchannelBackend)
+// Network information backend (Network List Manager) for
+// QNetworkInformation — drives the VIV-57 rendezvous refresh on network
+// change.  Same static-Qt rule as the TLS backend: no plugin imported,
+// no backend registered (NetworkChangeWatcher then logs a warning and
+// the host falls back to the 30 s keepalive only).
+Q_IMPORT_PLUGIN(QNetworkListManagerNetworkInformationBackendFactory)
 #endif
 
 namespace vivora::gui {

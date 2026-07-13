@@ -62,7 +62,9 @@ public:
     // Force the next poll iteration to re-register with rendezvous,
     // bypassing the 30 s pacing.  Wired to the GUI Refresh button so
     // the user can prod the registration if they suspect the server
-    // forgot us.  No-op if no rendezvous configured.
+    // forgot us, and to NetworkChangeWatcher (VIV-57) so a network
+    // change updates the reflexive mapping within ~2 s instead of
+    // waiting out the keepalive.  No-op if no rendezvous configured.
     void requestRendezvousRefresh() {
         rendezvous_refresh_flag_.store(true, std::memory_order_release);
     }

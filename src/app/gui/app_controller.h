@@ -20,6 +20,7 @@ namespace vivora::gui {
 
 class Tray;
 class HostWorker;
+class NetworkChangeWatcher;
 class ViewSession;
 
 // Top-level QML bridge.  Owns the Settings, AddressBook, Tray and (in
@@ -213,6 +214,10 @@ private:
     std::unique_ptr<Settings>    settings_;
     std::unique_ptr<AddressBook> peers_;
     std::unique_ptr<HostWorker>  hostWorker_;
+    // VIV-57: OS network-change events (reachability / transport / mac
+    // wake) force an immediate rendezvous re-register so the host's
+    // reflexive address is never stale for the full 30 s keepalive.
+    std::unique_ptr<NetworkChangeWatcher> netWatcher_;
     // Shared with the HostWorker thread.  Holds per-client approval
     // state and the callback we wire to bounce notifications back into
     // the GUI thread (where QML can show the approval dialog).

@@ -112,6 +112,7 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/gui_main.cpp
         gui/app_controller.cpp
         gui/host_worker.cpp
+        gui/network_change_watcher.cpp
         gui/view_session.cpp
         gui/settings.cpp
         gui/address_book.cpp
@@ -242,6 +243,15 @@ if(WIN32)
         secur32 crypt32 bcrypt ncrypt ws2_32
     )
 
+    # QNetworkInformation backend (Network List Manager) — VIV-57 network-
+    # change rendezvous refresh.  Same static-plugin rule as Schannel above:
+    # the .lib must be on the link line AND the plugin imported in
+    # gui_main.cpp (Q_IMPORT_PLUGIN(QNetworkListManagerNetworkInformation-
+    # BackendFactory)).
+    target_link_libraries(vivora PRIVATE
+        "${_VIVORA_QT_LIB_DIR}/../plugins/networkinformation/qnetworklistmanager.lib"
+    )
+
     # Qt6's openssl TLS plugin tries to dlopen OpenSSL 1.1 at runtime
     # (legacy hardcoded import).  Copy the matching DLLs next to the
     # exe so QApplication startup doesn't blow up.  Long-term we want to
@@ -287,6 +297,9 @@ if(APPLE)
         mac_host_platform.mm
         mac_view_platform.mm
         mac_video_pipeline.cpp
+        # VIV-57: NSWorkspaceDidWake observer feeding NetworkChangeWatcher
+        # (wake often re-associates WiFi without a reachability change).
+        gui/network_change_watcher_mac.mm
     )
     # macOS client: Cocoa window + AVSampleBufferDisplayLayer
     target_sources(vivora PRIVATE

@@ -3,6 +3,7 @@
 
 #include "app/gui/address_book.h"
 #include "app/gui/host_worker.h"
+#include "app/gui/network_change_watcher.h"
 #include "app/gui/settings.h"
 #include "app/gui/tray.h"
 #if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
@@ -113,6 +114,24 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                     "disconnecting in %2s.")
                 .arg(settings_->idleTimeoutMin()).arg(secs));
     });
+    // VIV-57: auto re-register with rendezvous on network change.  The
+    // watcher coalesces OS event bursts (WiFi toggle, VPN up/down, wake)
+    // into one signal ~1 s after the last event; the refresh flag makes
+    // the host loop re-send REGISTER on its next poll, and the rendezvous
+    // derives the fresh reflexive address from that packet's source.
+    // The steady-state 30 s keepalive is unchanged — this is just the
+    // fast path.  If no QNetworkInformation backend loads the watcher is
+    // inert (it logged a warning) and the keepalive alone covers recovery.
+    netWatcher_ = std::make_unique<NetworkChangeWatcher>(this);
+    connect(netWatcher_.get(), &NetworkChangeWatcher::networkChanged, this,
+            [this](const QString& reason) {
+        if (!hostWorker_ || !hostWorker_->running()) return;
+        log::info("AppController",
+                  "Network change (%s) — re-registering with rendezvous",
+                  reason.toUtf8().constData());
+        hostWorker_->requestRendezvousRefresh();
+    });
+
     pollTimer_.setInterval(500);
     connect(&pollTimer_, &QTimer::timeout, this, [this] {
         if (!hostWorker_->running()) return;

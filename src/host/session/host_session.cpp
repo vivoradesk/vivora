@@ -1296,6 +1296,29 @@ void HostSession::handle_rendezvous_packet(const uint8_t* data, size_t len,
                   (p.reflexive_ip >>  0) & 0xff, (p.reflexive_ip >>  8) & 0xff,
                   (p.reflexive_ip >> 16) & 0xff, (p.reflexive_ip >> 24) & 0xff,
                   p.reflexive_port, p.ttl_seconds);
+        // Keep the cached reflexive address current (VIV-57).  Every
+        // RegisterAck carries the source endpoint the rendezvous just
+        // observed on this very socket — a strictly fresher observation
+        // than the startup STUN exchange, and free: re-running
+        // StunClient::discover() here would block the host loop up to 1 s
+        // and swallow inbound session packets while it waits.  After a
+        // network change (new local IP / NAT binding) the forced
+        // re-register both updates the server's mapping and, via this
+        // ack, our own notion of the reflexive address.
+        const net::SocketAddr fresh{ p.reflexive_ip, p.reflexive_port };
+        if (fresh.ip != 0 && fresh != reflexive_addr_) {
+            if (reflexive_addr_.ip != 0) {
+                log::info("HostSession",
+                          "Reflexive address changed: %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u",
+                          (reflexive_addr_.ip >>  0) & 0xff, (reflexive_addr_.ip >>  8) & 0xff,
+                          (reflexive_addr_.ip >> 16) & 0xff, (reflexive_addr_.ip >> 24) & 0xff,
+                          reflexive_addr_.port,
+                          (fresh.ip >>  0) & 0xff, (fresh.ip >>  8) & 0xff,
+                          (fresh.ip >> 16) & 0xff, (fresh.ip >> 24) & 0xff,
+                          fresh.port);
+            }
+            reflexive_addr_ = fresh;
+        }
         // If the user enabled relay mode (--relay) without manually
         // pinning a session_id, fill the session_id from this RegisterAck
         // and BIND now — this is the path that makes --relay-session
