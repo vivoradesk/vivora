@@ -62,6 +62,15 @@ struct ClientInfo {
     crypto::CipherState audio_recv_cs;
     bool handshake_complete = false;
 
+    // Viewer's authenticated long-term static key (VIV-61) and the time of
+    // the last accepted HELLO.  Used to damp HELLO replays (VIV-92): a
+    // re-handshake from the SAME static key preserves an existing approval
+    // instead of re-prompting, and HELLOs arriving faster than the client's
+    // own retry cadence are dropped.
+    uint8_t   static_pubkey[32] = {};
+    bool      has_static_pubkey = false;
+    TimePoint last_hello_time{};
+
     // Where audio packets are sent for this client (client IP + the
     // audio_port the client advertised in its HELLO).  Mirrored into
     // AudioSender's destination list at handshake completion; we keep
@@ -92,6 +101,11 @@ public:
     static constexpr uint16_t DEFAULT_PORT = 9876;
     static constexpr int64_t DISCONNECT_TIMEOUT_MS = 5000;
     static constexpr int64_t PING_INTERVAL_MS = 1000;
+    // Minimum spacing between accepted HELLOs from an already-handshaked
+    // address (VIV-92).  Below the client's 500ms HELLO retry cadence so
+    // legitimate dropped-msg2 retries still get serviced, but a spoofed /
+    // replayed msg1 flood can't rebuild the session on every packet.
+    static constexpr int64_t REHANDSHAKE_COOLDOWN_MS = 400;
 
     bool start(uint16_t port = DEFAULT_PORT);
     void stop();

@@ -30,6 +30,12 @@ constexpr size_t                 MAX_PACKET  = 256;
 // machines rarely have more than two routable IPv4 interfaces; four gives
 // headroom for VPN / docker bridge while keeping the wire payload small.
 constexpr size_t                 MAX_LAN_CANDIDATES = 4;
+// Length of the client-chosen anti-spoofing nonce carried in Lookup /
+// LookupByCode and echoed verbatim in LookupResponse.  A client only
+// accepts a response whose nonce matches the one it just sent, so an
+// on-path attacker can't pre-forge a LookupResponse (it can't predict the
+// nonce) — this hardens the TOFU pin against MITM (VIV-92).
+constexpr size_t                 LOOKUP_NONCE_LEN = 8;
 
 enum class MsgType : uint8_t {
     Register        = 0x01,  // host → server: claim a peer id
@@ -91,10 +97,16 @@ struct RegisterAckPayload {
 };
 
 // Lookup: client wants to reach the host identified by pubkey.
+//   Wire shape:
+//     32 bytes         → legacy (no nonce), nonce treated as absent
+//     32 + 8 = 40 B    → pubkey + client nonce
+// `has_nonce` is not on the wire — the decoder sets it from the length so
+// the server knows whether to echo a nonce in its response.
 struct LookupPayload {
     uint8_t  pubkey[32];
+    uint8_t  nonce[LOOKUP_NONCE_LEN] = {};
+    bool     has_nonce = false;
 };
-static_assert(sizeof(LookupPayload) == 32, "LookupPayload must be packed");
 
 // LookupResponse: server returns the host's reflexive endpoint and the
 // LAN candidates it advertised at registration time.
@@ -113,6 +125,12 @@ struct LookupResponsePayload {
     uint32_t relay_ip = 0;
     uint16_t relay_port = 0;
     uint8_t  session_id[32] = {};
+    // Anti-spoofing nonce echoed from the client's Lookup.  When has_nonce
+    // is set an 8-byte nonce tail is appended after the (optional) relay
+    // tail, giving wire lengths 72/80/110/118.  The server sets this iff the
+    // client's request carried a nonce, so legacy clients still get 72/110.
+    uint8_t  nonce[LOOKUP_NONCE_LEN] = {};
+    bool     has_nonce = false;
 };
 
 // PunchHint: when a Lookup arrives, the rendezvous proactively tells the
@@ -138,8 +156,12 @@ using KeepalivePayload = RegisterPayload;
 struct LookupByCodePayload {
     // Null-terminated ASCII, fits MAX_CODE_LEN.  Padded with NULs.
     char code[24];
+    // Same anti-spoofing nonce as LookupPayload.  Wire shape:
+    //   24 bytes       → legacy (no nonce)
+    //   24 + 8 = 32 B  → code + client nonce
+    uint8_t nonce[LOOKUP_NONCE_LEN] = {};
+    bool    has_nonce = false;
 };
-static_assert(sizeof(LookupByCodePayload) == 24, "LookupByCodePayload must be packed");
 
 // ---------------------------------------------------------------------------
 // Encoding / decoding helpers.  All functions are header-only-friendly: no

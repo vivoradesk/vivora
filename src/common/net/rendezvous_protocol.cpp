@@ -111,17 +111,24 @@ size_t encode_register_ack(uint8_t* buf, size_t buf_len, const RegisterAckPayloa
 }
 
 size_t encode_lookup(uint8_t* buf, size_t buf_len, const LookupPayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::Lookup, sizeof(p));
+    // 32 (legacy) or 32 + nonce.  New clients always send the nonce; the
+    // legacy form exists only so the server can still decode old clients.
+    const size_t plen = p.has_nonce ? 32u + LOOKUP_NONCE_LEN : 32u;
+    const size_t total = encode_header(buf, buf_len, MsgType::Lookup, plen);
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.pubkey, 32);
+    if (p.has_nonce)
+        std::memcpy(buf + HEADER_SIZE + 32, p.nonce, LOOKUP_NONCE_LEN);
     return total;
 }
 
 size_t encode_lookup_resp(uint8_t* buf, size_t buf_len, const LookupResponsePayload& p) {
-    // Legacy form (no relay): 40 + 32 = 72 bytes.
-    // With relay tail: 72 + 4 + 2 + 32 = 110 bytes.
+    // Base (no relay): 40 + 32 = 72 bytes.  +38 relay tail, +8 nonce tail,
+    // in that order → valid lengths 72 / 80 / 110 / 118.
     constexpr size_t LEGACY_LEN = 40 + 8 * MAX_LAN_CANDIDATES;
-    const size_t plen = (p.relay_ip != 0) ? LEGACY_LEN + 38 : LEGACY_LEN;
+    const size_t plen = LEGACY_LEN
+                      + (p.relay_ip != 0 ? 38u : 0u)
+                      + (p.has_nonce     ? LOOKUP_NONCE_LEN : 0u);
     const size_t total = encode_header(buf, buf_len, MsgType::LookupResponse, plen);
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.pubkey, 32);
@@ -140,6 +147,11 @@ size_t encode_lookup_resp(uint8_t* buf, size_t buf_len, const LookupResponsePayl
         put_u32_le(buf + off +  0, p.relay_ip);
         put_u16_le(buf + off +  4, p.relay_port);
         std::memcpy(buf + off + 6, p.session_id, 32);
+        off += 38;
+    }
+    if (p.has_nonce) {
+        std::memcpy(buf + off, p.nonce, LOOKUP_NONCE_LEN);
+        off += LOOKUP_NONCE_LEN;
     }
     return total;
 }
@@ -161,9 +173,14 @@ size_t encode_keepalive(uint8_t* buf, size_t buf_len, const KeepalivePayload& p)
 }
 
 size_t encode_lookup_code(uint8_t* buf, size_t buf_len, const LookupByCodePayload& p) {
-    const size_t total = encode_header(buf, buf_len, MsgType::LookupByCode, sizeof(p));
+    // 24 (legacy) or 24 + nonce.
+    const size_t plen = p.has_nonce ? sizeof(p.code) + LOOKUP_NONCE_LEN
+                                    : sizeof(p.code);
+    const size_t total = encode_header(buf, buf_len, MsgType::LookupByCode, plen);
     if (total == 0) return 0;
     std::memcpy(buf + HEADER_SIZE, p.code, sizeof(p.code));
+    if (p.has_nonce)
+        std::memcpy(buf + HEADER_SIZE + sizeof(p.code), p.nonce, LOOKUP_NONCE_LEN);
     return total;
 }
 
@@ -192,15 +209,22 @@ bool decode_register_ack(const uint8_t* p, size_t len, RegisterAckPayload& out) 
 }
 
 bool decode_lookup(const uint8_t* p, size_t len, LookupPayload& out) {
-    if (len != 32) return false;
+    if (len != 32 && len != 32 + LOOKUP_NONCE_LEN) return false;
     std::memcpy(out.pubkey, p, 32);
+    std::memset(out.nonce, 0, LOOKUP_NONCE_LEN);
+    out.has_nonce = (len == 32 + LOOKUP_NONCE_LEN);
+    if (out.has_nonce)
+        std::memcpy(out.nonce, p + 32, LOOKUP_NONCE_LEN);
     return true;
 }
 
 bool decode_lookup_resp(const uint8_t* p, size_t len, LookupResponsePayload& out) {
-    constexpr size_t LEGACY_LEN = 40 + 8 * MAX_LAN_CANDIDATES;     // 72
-    constexpr size_t WITH_RELAY = LEGACY_LEN + 38;                  // 110
-    if (len != LEGACY_LEN && len != WITH_RELAY) return false;
+    constexpr size_t LEGACY_LEN   = 40 + 8 * MAX_LAN_CANDIDATES;    // 72
+    constexpr size_t WITH_NONCE   = LEGACY_LEN + LOOKUP_NONCE_LEN;  // 80
+    constexpr size_t WITH_RELAY   = LEGACY_LEN + 38;                // 110
+    constexpr size_t RELAY_NONCE  = WITH_RELAY + LOOKUP_NONCE_LEN;  // 118
+    if (len != LEGACY_LEN && len != WITH_NONCE
+        && len != WITH_RELAY && len != RELAY_NONCE) return false;
     std::memcpy(out.pubkey, p, 32);
     out.host_ip   = get_u32_le(p + 32);
     out.host_port = get_u16_le(p + 36);
@@ -217,11 +241,17 @@ bool decode_lookup_resp(const uint8_t* p, size_t len, LookupResponsePayload& out
     out.relay_ip   = 0;
     out.relay_port = 0;
     std::memset(out.session_id, 0, 32);
-    if (len == WITH_RELAY) {
+    const bool has_relay = (len == WITH_RELAY || len == RELAY_NONCE);
+    if (has_relay) {
         out.relay_ip   = get_u32_le(p + off +  0);
         out.relay_port = get_u16_le(p + off +  4);
         std::memcpy(out.session_id, p + off + 6, 32);
+        off += 38;
     }
+    out.has_nonce = (len == WITH_NONCE || len == RELAY_NONCE);
+    std::memset(out.nonce, 0, LOOKUP_NONCE_LEN);
+    if (out.has_nonce)
+        std::memcpy(out.nonce, p + off, LOOKUP_NONCE_LEN);
     return true;
 }
 
@@ -238,10 +268,15 @@ bool decode_keepalive(const uint8_t* p, size_t len, KeepalivePayload& out) {
 }
 
 bool decode_lookup_code(const uint8_t* p, size_t len, LookupByCodePayload& out) {
-    if (len != sizeof(out.code)) return false;
+    if (len != sizeof(out.code)
+        && len != sizeof(out.code) + LOOKUP_NONCE_LEN) return false;
     std::memcpy(out.code, p, sizeof(out.code));
     // Force terminator in case the sender forgot.
     out.code[sizeof(out.code) - 1] = '\0';
+    std::memset(out.nonce, 0, LOOKUP_NONCE_LEN);
+    out.has_nonce = (len == sizeof(out.code) + LOOKUP_NONCE_LEN);
+    if (out.has_nonce)
+        std::memcpy(out.nonce, p + sizeof(out.code), LOOKUP_NONCE_LEN);
     return true;
 }
 

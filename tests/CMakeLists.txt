@@ -34,6 +34,12 @@ target_link_libraries(stun_test PRIVATE vivora_common)
 target_include_directories(stun_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME stun_test COMMAND stun_test)
 
+# Rendezvous wire protocol + VIV-92 anti-spoofing nonce round-trip.
+add_executable(rendezvous_test rendezvous_test.cpp)
+target_link_libraries(rendezvous_test PRIVATE vivora_common)
+target_include_directories(rendezvous_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME rendezvous_test COMMAND rendezvous_test)
+
 add_executable(noise_test noise_test.cpp)
 target_link_libraries(noise_test PRIVATE vivora_common)
 target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

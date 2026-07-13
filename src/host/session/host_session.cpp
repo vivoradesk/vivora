@@ -702,6 +702,21 @@ bool HostSession::send_sealed(ClientInfo& client, const std::vector<uint8_t>& wi
 
 void HostSession::handle_hello(const uint8_t* payload, size_t len,
                                const net::SocketAddr& sender) {
+    // Replay/flood damping (VIV-92): a valid msg1 that's captured and
+    // replayed (or spoofed with a connected client's source addr) would
+    // otherwise rebuild the handshake, re-key, reset idr_needed and re-fire
+    // the approval prompt on every packet — clobbering the live session.
+    // Drop HELLOs from an already-handshaked address that arrive faster than
+    // the client's own 500ms retry cadence, before doing any crypto work.
+    const auto hello_now = Clock::now();
+    if (ClientInfo* existing = find_client(sender)) {
+        if (existing->handshake_complete) {
+            const auto since_hello = std::chrono::duration_cast<std::chrono::milliseconds>(
+                hello_now - existing->last_hello_time).count();
+            if (since_hello < REHANDSHAKE_COOLDOWN_MS) return;
+        }
+    }
+
     // The payload is a full Noise_NK msg1: 32 ephemeral pubkey + encrypted
     // payload + 16 tag.  The encrypted payload carries the same info the
     // legacy plaintext HELLO did: HELLO_MAGIC + optional client audio port.
@@ -729,6 +744,17 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     // so the approval gate can surface the viewer's identity / fingerprint.
     uint8_t client_pubkey[32] = {};
     const bool have_client_pubkey = handshake->peer_static_key(client_pubkey);
+
+    // Preserve an existing approval when the SAME viewer (matching static
+    // key) re-handshakes (VIV-92) — a dropped-msg2 retry or a replay must not
+    // bounce an already-approved, streaming session back to a Pending prompt.
+    bool prior_approved = false;
+    if (ClientInfo* existing = find_client(sender)) {
+        if (existing->approved && existing->has_static_pubkey && have_client_pubkey
+            && std::memcmp(existing->static_pubkey, client_pubkey, 32) == 0) {
+            prior_approved = true;
+        }
+    }
 
     uint16_t client_audio_port = 0;
     if (inner_len >= static_cast<int>(sizeof(HELLO_MAGIC)) + 2) {
@@ -783,7 +809,12 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client.connected_time = now;
     client.last_recv_time = now;
     client.last_ping_time = now;
+    client.last_hello_time = now;
     client.idr_needed     = true;
+    if (have_client_pubkey) {
+        std::memcpy(client.static_pubkey, client_pubkey, 32);
+        client.has_static_pubkey = true;
+    }
     client.probe_bw_bps   = 0;
     client.probe_pending  = false;
     client.probe_scheduled = false;   // re-arm deferred probe on each HELLO
@@ -821,7 +852,9 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     // pre-VIV-53 behaviour.
     client.audio_port_pending = client_audio_port;
     const bool dev_auto = std::getenv("VIVORA_AUTO_ACCEPT") != nullptr;
-    if (!approval_gate_ || dev_auto) {
+    // prior_approved: same viewer re-handshaking an already-approved session —
+    // keep it approved and skip the popup (VIV-92).
+    if (!approval_gate_ || dev_auto || prior_approved) {
         client.approved = true;
         if (audio_sender_ && client_audio_port != 0) {
             client.audio_dest.ip   = sender.ip;
@@ -1242,6 +1275,14 @@ void HostSession::send_rendezvous_register() {
 void HostSession::handle_rendezvous_packet(const uint8_t* data, size_t len,
                                            const net::SocketAddr& sender) {
     namespace rdv = net::rdv;
+    // Only the rendezvous server may drive this path.  Without this check any
+    // remote peer that can reach our UDP port could forge a PunchHint (turning
+    // us into a traffic reflector via punch_to()) or a RegisterAck that latches
+    // relay_session_set_ onto an attacker-chosen session_id and blocks the
+    // host loop inside relay_bind_blocking().  Mirrors the sender==relay_addr_
+    // guard on the relay-forwarded path in handle_packet().
+    if (rendezvous_addr_.ip == 0 || sender != rendezvous_addr_) return;
+
     rdv::MsgType type;
     size_t poff = 0, plen = 0;
     if (!rdv::parse_header(data, len, type, poff, plen)) return;

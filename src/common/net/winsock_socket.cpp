@@ -6,6 +6,7 @@
 #include <iphlpapi.h>
 #include <vector>
 #include <chrono>
+#include <atomic>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -179,17 +180,26 @@ int WinsockUdpSocket::send_to(const uint8_t* data, size_t len, const SocketAddr&
         int err = WSAGetLastError();
         if (err == WSAEWOULDBLOCK) return 0;
         // Throttle: WiFi drop fires sendto failures at packet rate
-        // (~100/s) which can fill the log file in seconds.
-        static auto last_log = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-        static uint64_t suppressed = 0;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - last_log >= std::chrono::seconds(1)) {
+        // (~100/s) which can fill the log file in seconds.  Atomic because the
+        // PacedSender thread and the host main thread (relay keepalive/bind,
+        // which bypass the pacer) can both land here concurrently — plain
+        // statics would be a data race / UB (VIV-96).  A relaxed CAS on the
+        // timestamp keeps at most one line per second; a lost race just merges
+        // into the suppressed count, which is fine for a log throttle.
+        static std::atomic<int64_t>  last_log_ns{0};
+        static std::atomic<uint64_t> suppressed{0};
+        using namespace std::chrono;
+        const int64_t now_ns =
+            duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
+        int64_t prev = last_log_ns.load(std::memory_order_relaxed);
+        if (now_ns - prev >= 1'000'000'000
+            && last_log_ns.compare_exchange_strong(prev, now_ns,
+                                                   std::memory_order_relaxed)) {
+            const uint64_t n = suppressed.exchange(0, std::memory_order_relaxed);
             log::error(TAG, "sendto failed: %d (x%llu suppressed)",
-                       err, static_cast<unsigned long long>(suppressed));
-            last_log = now;
-            suppressed = 0;
+                       err, static_cast<unsigned long long>(n));
         } else {
-            ++suppressed;
+            suppressed.fetch_add(1, std::memory_order_relaxed);
         }
         return -1;
     }
