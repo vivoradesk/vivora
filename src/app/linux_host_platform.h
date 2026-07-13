@@ -26,6 +26,16 @@ public:
     void request_idr() override;
     vivora::VideoCodec actual_codec() const override { return codec_; }
 
+    // Phase B+ lazy encoder (VIV-12).  start_encoder() builds the VAAPI /
+    // NVENC session from the cached capture geometry when the first viewer
+    // attaches; stop_encoder() destroys it when the last viewer drops.
+    // PipeWire capture keeps running across the gap — stopping it would
+    // force a portal re-negotiation (user-facing picker dialog) on the
+    // next connect.  The capture callback drops frames cheaply while the
+    // encoder is down (single mutex-guarded null check per frame).
+    bool start_encoder() override;
+    void stop_encoder() override;
+
     // Monitor list (VIV-50).  xdg-desktop-portal does NOT expose the displays
     // programmatically, so the list comes from wl_output; the captured source
     // is whatever the portal picker chose, so `viewing` is best-effort (the
@@ -70,8 +80,14 @@ private:
     bool first_frame_seen_ = false;
 
     // Capture geometry — set on first frame after PipeWire negotiates.
+    // geometry_seen_ is touched only on the PipeWire thread (one-shot
+    // first-frame latch); cap_w_/cap_h_ publication to the host_loop
+    // thread is ordered by the first_frame_mu_/cv handshake in init().
     uint32_t cap_w_ = 0, cap_h_ = 0;
-    bool     enc_ready_ = false;
+    bool     geometry_seen_ = false;
+    // Latest requested bitrate — cached even while the encoder is torn
+    // down so a stop/start cycle resumes at the adaptive controller's
+    // last rate instead of the boot default.
     uint32_t bitrate_bps_ = 0;
 
     // Encoder + output queue: PipeWire thread (or heartbeat path) feeds

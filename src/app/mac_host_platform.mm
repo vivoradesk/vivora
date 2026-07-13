@@ -39,8 +39,11 @@ bool MacHostPlatform::init(uint32_t display_index,
     return start_pipeline(display_index);
 }
 
-// (Re)build capture + encoder for the given display.  Shared by init() and
-// the VIV-50 monitor switch.  Caller has already validated display_index.
+// (Re)build capture for the given display.  Shared by init() and the VIV-50
+// monitor switch.  Caller has already validated display_index.  The encoder
+// is NOT built here — start_encoder() creates it when a viewer attaches
+// (Phase B+ lazy encoder, VIV-12), so a host that's "Listening" all day
+// holds no VideoToolbox session until somebody connects.
 bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
@@ -58,9 +61,21 @@ bool MacHostPlatform::start_pipeline(uint32_t display_index) {
         return false;
     }
 
-    uint32_t bitrate = manual_bitrate_bps_;
-    if (bitrate == 0)
-        bitrate = vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
+    current_display_index_ = display_index;
+    return true;
+}
+
+bool MacHostPlatform::start_encoder() {
+    if (encoder_live_) return true;   // already running
+
+    // Bitrate: last adaptive value if we've streamed before, else the
+    // user's pinned rate, else auto from the live capture resolution.
+    uint32_t bitrate = live_bitrate_bps_;
+    if (bitrate == 0) {
+        bitrate = manual_bitrate_bps_ != 0
+            ? manual_bitrate_bps_
+            : vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
+    }
 
     vivora::host::MacEncoderConfig ecfg;
     ecfg.width = capture_.width();
@@ -71,12 +86,21 @@ bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     ecfg.hdr = capture_.hdr_active();
     if (!encoder_.init(ecfg)) {
         vivora::log::error("HOST", "Failed to init encoder");
-        capture_.stop();
         return false;
     }
-
-    current_display_index_ = display_index;
+    encoder_live_     = true;
+    live_bitrate_bps_ = bitrate;
+    vivora::log::info("HOST", "Encoder started (hevc, %u kbps)", bitrate / 1000);
     return true;
+}
+
+void MacHostPlatform::stop_encoder() {
+    if (!encoder_live_) return;
+    // Invalidate the VT session (flushes + releases GPU state and clears
+    // the output queue).  Capture keeps running — see header note (VIV-95).
+    encoder_.shutdown();
+    encoder_live_ = false;
+    vivora::log::info("HOST", "Encoder stopped (no clients attached)");
 }
 
 std::vector<vivora::protocol::MonitorDesc> MacHostPlatform::list_monitors() {
@@ -103,15 +127,20 @@ bool MacHostPlatform::select_monitor(uint32_t index, bool /*seed_cursor*/) {
     const uint32_t prev = current_display_index_;
     // Tear the pipeline down and rebuild on the new display.  VideoToolbox is
     // bound to the old resolution, so a full encoder shutdown/init is needed.
+    // Rebuild the encoder only if it was live (a viewer is attached) —
+    // otherwise the lazy-encoder gap stays encoder-free (VIV-12).
+    const bool had_encoder = encoder_live_;
+    stop_encoder();
     capture_.stop();
-    encoder_.shutdown();
-    if (start_pipeline(index)) return true;
+    if (start_pipeline(index) && (!had_encoder || start_encoder()))
+        return true;
     // Roll back to the previous display so the session keeps streaming.
     vivora::log::error("HOST", "select_monitor: rebuild on display %u failed, restoring %u",
                        index, prev);
+    stop_encoder();
     capture_.stop();
-    encoder_.shutdown();
-    return start_pipeline(prev);
+    if (!start_pipeline(prev)) return false;
+    return had_encoder ? start_encoder() : true;
 }
 
 uint32_t MacHostPlatform::capture_width()  const { return capture_.width(); }
@@ -119,12 +148,27 @@ uint32_t MacHostPlatform::capture_height() const { return capture_.height(); }
 uint32_t MacHostPlatform::input_width()    const { return capture_.points_width(); }
 uint32_t MacHostPlatform::input_height()   const { return capture_.points_height(); }
 
-void MacHostPlatform::set_bitrate(uint32_t bps) { encoder_.set_bitrate(bps); }
-void MacHostPlatform::request_idr() { encoder_.request_idr(); }
+void MacHostPlatform::set_bitrate(uint32_t bps) {
+    // Remember the value even when the encoder is torn down so the next
+    // start_encoder() resumes at the latest adaptive rate (VIV-12).
+    live_bitrate_bps_ = bps;
+    if (encoder_live_) encoder_.set_bitrate(bps);
+}
+void MacHostPlatform::request_idr() {
+    // Don't latch idr_pending_ into a torn-down encoder: the next
+    // session's first frame is an IDR anyway.
+    if (encoder_live_) encoder_.request_idr();
+}
 
 bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
                                           bool& content_changed,
                                           bool force) {
+    // Phase B+ lazy encoder (VIV-12): host_loop's zero-client gate normally
+    // keeps us out of here while the encoder is down, but guard anyway so a
+    // disconnect racing this tick can't feed a dead VT session.  Not pulling
+    // the frame leaves it in the capture's latest-frame slot — free.
+    if (!encoder_live_) return false;
+
     CVPixelBufferRef pb = capture_.try_get_frame(&pts_us);
     if (pb) {
         content_changed = true;
@@ -150,6 +194,7 @@ bool MacHostPlatform::re_encode_last(uint64_t pts_us) {
     // rect emission).  Re-feed the cached last frame so the wire
     // maintains the expected cadence: keeps WiFi power-saving from
     // killing the link and gives FEC groups a steady fill rate.
+    if (!encoder_live_) return false;   // lazy encoder down (VIV-12)
     uint64_t cached_pts = 0;
     CVPixelBufferRef pb = capture_.get_last_frame_for_force(&cached_pts);
     if (!pb) return false;
@@ -158,6 +203,7 @@ bool MacHostPlatform::re_encode_last(uint64_t pts_us) {
 }
 
 bool MacHostPlatform::get_encoded_packet(EncodedPacketView& out) {
+    if (!encoder_live_) return false;   // queue is cleared by shutdown()
     vivora::host::MacEncodedPacket pkt;
     if (!encoder_.get_packet(pkt))
         return false;
@@ -174,7 +220,7 @@ void MacHostPlatform::on_idle() {
 }
 
 void MacHostPlatform::shutdown() {
-    encoder_.shutdown();
+    stop_encoder();   // no-op when the lazy encoder is already down
     capture_.stop();
 }
 

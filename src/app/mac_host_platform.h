@@ -28,6 +28,18 @@ public:
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
     bool select_monitor(uint32_t index, bool seed_cursor) override;
 
+    // Phase B+ lazy encoder (VIV-12).  start_encoder() (re)creates the
+    // VideoToolbox session from the live capture geometry + remembered
+    // bitrate when the first viewer attaches; stop_encoder() invalidates
+    // it when the last viewer drops.  ScreenCaptureKit capture is
+    // deliberately NOT stopped across the gap — VIV-95 tracks live races
+    // in the SCK stop/restart paths, and the VT session is the GPU cost
+    // anyway.  Frames landing while the encoder is down are simply never
+    // pulled from the capture's latest-frame slot (capture_and_encode
+    // early-returns), which is free.
+    bool start_encoder() override;
+    void stop_encoder() override;
+
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;
@@ -44,9 +56,17 @@ private:
     vivora::host::MacVideoToolboxEncoder encoder_;
     std::vector<uint8_t> pkt_buf_;
     uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
-    uint32_t manual_bitrate_bps_    = 0;     // remembered for encoder rebuild
-    // (Re)build capture+encoder for `display_index`.  Shared by init() and
-    // select_monitor().  Returns false leaving the object unusable on failure.
+    uint32_t manual_bitrate_bps_    = 0;     // user-pinned bitrate (0 = auto)
+    // Lazy-encoder state (VIV-12).  encoder_live_ mirrors whether the VT
+    // session exists; live_bitrate_bps_ caches the last set_bitrate() so a
+    // stop/start cycle resumes at the adaptive controller's last rate.
+    // All accessed on the host_loop thread only — no locking needed.
+    bool     encoder_live_    = false;
+    uint32_t live_bitrate_bps_ = 0;
+    // (Re)build capture for `display_index`.  Shared by init() and
+    // select_monitor().  The encoder is built separately by start_encoder()
+    // when a viewer is attached (Phase B+).  Returns false leaving the
+    // object unusable on failure.
     bool start_pipeline(uint32_t display_index);
 
     // Cursor tracking state.

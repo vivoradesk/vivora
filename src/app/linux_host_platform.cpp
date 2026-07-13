@@ -36,6 +36,9 @@ bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
     // return real values when host_loop reads them for bitrate sizing.
     // Without this, the bitrate controller initialises with 0×0 → ~50 kbps
     // ceiling and the stream falls apart on the first packet loss.
+    // Note (VIV-12): only capture geometry is validated here — the encoder
+    // is built lazily by start_encoder() when the first viewer attaches,
+    // so an encoder failure now surfaces per-connect instead of at boot.
     vivora::log::info("HOST", "Linux host platform up — waiting for first capture frame");
     std::unique_lock<std::mutex> lk(first_frame_mu_);
     if (!first_frame_cv_.wait_for(lk, std::chrono::seconds(10),
@@ -84,36 +87,70 @@ uint32_t LinuxHostPlatform::capture_width()  const { return cap_w_; }
 uint32_t LinuxHostPlatform::capture_height() const { return cap_h_; }
 
 void LinuxHostPlatform::set_bitrate(uint32_t bps) {
+    // enc_mu_ serialises against the PipeWire encode callback and against
+    // stop_encoder() destroying enc_ on last-client-disconnect (VIV-12).
+    std::lock_guard<std::mutex> lk(enc_mu_);
     bitrate_bps_ = bps;
-    if (enc_ready_ && enc_) enc_->set_bitrate(static_cast<int>(bps));
+    if (enc_) enc_->set_bitrate(static_cast<int>(bps));
 }
 
 void LinuxHostPlatform::request_idr() {
-    if (enc_ready_ && enc_) enc_->request_idr();
+    std::lock_guard<std::mutex> lk(enc_mu_);
+    if (enc_) enc_->request_idr();
+}
+
+bool LinuxHostPlatform::start_encoder() {
+    // First viewer attached (Phase B+, VIV-12).  Capture geometry is
+    // guaranteed valid here: init() blocked until the first PipeWire frame
+    // recorded cap_w_/cap_h_.  Building synchronously (instead of arming a
+    // build-on-next-frame flag) lets host_loop see a real failure and drop
+    // the connecting client instead of leaving it on a silent black stream.
+    std::lock_guard<std::mutex> lk(enc_mu_);
+    if (enc_) return true;   // already running
+    vivora::host::ILinuxEncoder::Config ec;
+    ec.width  = static_cast<int>(cap_w_);
+    ec.height = static_cast<int>(cap_h_);
+    ec.fps    = 60;
+    // Default bitrate if caller didn't override: ~bpp 0.1 at 60fps.
+    ec.bitrate_bps = bitrate_bps_ > 0
+        ? static_cast<int>(bitrate_bps_)
+        : static_cast<int>(static_cast<int64_t>(cap_w_) * cap_h_ * 60 / 10);
+    ec.codec = codec_;
+    // Factory probes NVENC (NVIDIA) first when allowed, else VAAPI (VIV-8).
+    enc_ = vivora::host::create_linux_encoder(encoder_kind_, ec);
+    if (!enc_) {
+        vivora::log::error("HOST", "no usable Linux encoder (NVENC/VAAPI both failed)");
+        return false;
+    }
+    vivora::log::info("HOST", "Encoder started (backend: %s, %u kbps)",
+                      enc_->backend_name(), static_cast<uint32_t>(ec.bitrate_bps) / 1000);
+    return true;
+}
+
+void LinuxHostPlatform::stop_encoder() {
+    // Last viewer dropped — release the GPU encode session.  Holding
+    // enc_mu_ makes this safe against an in-flight on_pw_frame: the
+    // callback either finishes its encode before we take the lock, or
+    // observes enc_ == nullptr afterwards and drops the frame.  PipeWire
+    // capture itself keeps running (see header note re portal re-pick).
+    std::lock_guard<std::mutex> lk(enc_mu_);
+    if (!enc_) return;
+    enc_.reset();   // ~encoder runs shutdown(): frees NVENC/CUDA or VAAPI state
+    // Drop packets queued from the ended session — the next viewer starts
+    // from the fresh encoder's IDR; stale pre-gap NALs would only confuse
+    // the decoder.
+    std::queue<QueuedPacket>().swap(queued_pkts_);
+    vivora::log::info("HOST", "Encoder stopped (no clients attached)");
 }
 
 void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& f) {
-    // Lazy encoder init on first frame — capture decides the size.
-    if (!enc_ready_) {
+    // First frame: latch capture geometry and unblock init().  Encoder
+    // creation is decoupled from this (VIV-12 lazy encoder): it happens in
+    // start_encoder() when the first viewer attaches.
+    if (!geometry_seen_) {
+        geometry_seen_ = true;
         cap_w_ = f.width;
         cap_h_ = f.height;
-        vivora::host::ILinuxEncoder::Config ec;
-        ec.width  = static_cast<int>(f.width);
-        ec.height = static_cast<int>(f.height);
-        ec.fps    = 60;
-        // Default bitrate if caller didn't override: ~bpp 0.1 at 60fps.
-        ec.bitrate_bps = bitrate_bps_ > 0
-            ? static_cast<int>(bitrate_bps_)
-            : static_cast<int>(static_cast<int64_t>(f.width) * f.height * 60 / 10);
-        ec.codec = codec_;
-        // Factory probes NVENC (NVIDIA) first when allowed, else VAAPI (VIV-8).
-        enc_ = vivora::host::create_linux_encoder(encoder_kind_, ec);
-        if (!enc_) {
-            vivora::log::error("HOST", "no usable Linux encoder (NVENC/VAAPI both failed)");
-            return;
-        }
-        vivora::log::info("HOST", "Encoder backend: %s", enc_->backend_name());
-        enc_ready_ = true;
         // Wake init() blocked on first frame.
         {
             std::lock_guard<std::mutex> lk(first_frame_mu_);
@@ -135,6 +172,8 @@ void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& 
     // through to encode_bgrx after shutdown() set the flag but before
     // it acquired enc_mu_ for the encoder teardown.
     if (shutting_down_.load(std::memory_order_acquire)) return;
+    // enc_ == nullptr: no viewers attached (lazy encoder down) — drop the
+    // frame; this null check is the entire per-frame cost of idling.
     if (!enc_ || !enc_->encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
     vivora::host::ILinuxEncoder::Packet pkt;
     while (enc_->get_packet(pkt)) {
@@ -157,7 +196,7 @@ bool LinuxHostPlatform::capture_and_encode(uint64_t& pts_us,
 
 bool LinuxHostPlatform::re_encode_last(uint64_t pts_us) {
     std::lock_guard<std::mutex> lk(enc_mu_);
-    if (!enc_ready_ || !enc_) return false;
+    if (!enc_) return false;
     if (!enc_->reencode_last(pts_us)) return false;
     bool produced = false;
     vivora::host::ILinuxEncoder::Packet pkt;
