@@ -1,4 +1,5 @@
 #include "client/render/qt_gl_video_view.h"
+#include "client/render/fullscreen_hotkey.h"
 #include "common/utils/log.h"
 
 #include <QFocusEvent>
@@ -652,6 +653,12 @@ void QtGlVideoView::keyPressEvent(QKeyEvent* e)   {
         toggle_menu();
         return;
     }
+    // F11 / Ctrl+Shift+F: borderless fullscreen toggle (VIV-20).  Client-
+    // local — swallow it so the host never sees the keypress.
+    if (is_fullscreen_hotkey(e)) {
+        toggle_fullscreen();
+        return;
+    }
     // F9: toggle diagnostics HUD.  Don't forward the key to the host —
     // it's a client-local debug control.
     if (e->key() == Qt::Key_F9) {
@@ -721,8 +728,25 @@ void QtGlVideoView::toggle_menu() {
 void QtGlVideoView::toggle_fullscreen() {
     QWidget* w = window();
     if (!w) return;
-    if (w->isFullScreen()) w->showNormal();
-    else                   w->showFullScreen();
+    if (w->isFullScreen()) {
+        // Restore the exact pre-fullscreen state.  showNormal() alone is
+        // usually enough, but explicitly re-applying the saved geometry
+        // guarantees position+size come back on every WM (VIV-20).
+        if (was_maximized_before_fullscreen_) {
+            w->showMaximized();
+        } else {
+            w->showNormal();
+            if (saved_normal_geometry_.isValid())
+                w->setGeometry(saved_normal_geometry_);
+        }
+    } else {
+        was_maximized_before_fullscreen_ = w->isMaximized();
+        // normalGeometry() is the non-maximized geometry even while
+        // maximized, so a maximized→fullscreen→maximized→restore chain
+        // still lands on the original floating rect.
+        saved_normal_geometry_ = w->normalGeometry();
+        w->showFullScreen();
+    }
 }
 
 void QtGlVideoView::feed_menu_info() {
@@ -777,6 +801,8 @@ void QtGlVideoView::keyReleaseEvent(QKeyEvent* e) {
     if (e->isAutoRepeat()) return;
     if (e->key() == Qt::Key_F1 && (e->modifiers() & Qt::ControlModifier))
         return;  // Ctrl+F1 menu toggle — local, don't forward
+    if (is_fullscreen_hotkey(e))
+        return;  // F11 / Ctrl+Shift+F fullscreen toggle — local (VIV-20)
     emit_key(e->key(), false);
 }
 

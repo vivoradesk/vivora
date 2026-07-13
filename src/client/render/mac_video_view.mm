@@ -90,6 +90,9 @@ static void emit_input(MacVideoViewImpl* impl, const protocol::InputEvent& ev);
 // since the @implementation above only has the forward declaration).
 static void invoke_menu_hotkey(MacVideoViewImpl* impl);
 static void invoke_menu_dismiss(MacVideoViewImpl* impl);
+// Toggle the Cocoa window between fullscreen and windowed (VIV-20).  Native
+// toggleFullScreen: restores the pre-fullscreen frame itself.
+static void invoke_fullscreen_toggle(MacVideoViewImpl* impl);
 // Returns true if a mapping exists. Extended-key handling relies on vk_code
 // on the Windows injector side (arrows, nav keys, etc.).
 static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk);
@@ -384,6 +387,16 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     // F9 (mac kVK 0x65) toggles the diagnostics HUD locally.  Eat it so
     // the host doesn't see a phantom keypress.
     if (event.keyCode == 0x65) { [self toggleHud]; return; }
+    // F11 (kVK 0x67) or Ctrl/Cmd+Shift+F (kVK_ANSI_F = 0x03) toggles
+    // borderless fullscreen (VIV-20).  Cmd is accepted alongside Ctrl for
+    // Mac idiom, same as the menu hotkey.  Eat it — never forward.
+    if (event.keyCode == 0x67 ||
+        (event.keyCode == 0x03 &&
+         (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) &&
+         (event.modifierFlags & NSEventModifierFlagShift))) {
+        vivora::invoke_fullscreen_toggle(impl);
+        return;
+    }
     if (menuOpen) return;  // menu has focus — don't forward keys to the host
     [self sendKey:event.keyCode down:YES];
 }
@@ -392,6 +405,11 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
         (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)))
         return; // Cmd/Ctrl+F1 menu toggle — local, don't forward
     if (event.keyCode == 0x65) return; // local toggle, don't forward
+    if (event.keyCode == 0x67 ||
+        (event.keyCode == 0x03 &&
+         (event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) &&
+         (event.modifierFlags & NSEventModifierFlagShift)))
+        return; // F11 / Ctrl+Shift+F fullscreen toggle — local (VIV-20)
     if (menuOpen) return;
     [self sendKey:event.keyCode down:NO];
 }
@@ -486,6 +504,11 @@ static void invoke_menu_hotkey(MacVideoViewImpl* impl) {
 
 static void invoke_menu_dismiss(MacVideoViewImpl* impl) {
     if (impl && impl->menu_dismiss_cb) impl->menu_dismiss_cb();
+}
+
+static void invoke_fullscreen_toggle(MacVideoViewImpl* impl) {
+    if (!impl || !impl->window) return;
+    @autoreleasepool { [impl->window toggleFullScreen:nil]; }
 }
 
 static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,

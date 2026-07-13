@@ -277,7 +277,7 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
     root->addWidget(monitor_btn_);
 
     root->addSpacing(10);
-    fullscreen_btn_ = make_button(1, "Toggle fullscreen", kIconLight,
+    fullscreen_btn_ = make_button(1, "Toggle fullscreen (F11)", kIconLight,
                                   QColor("#e6e8ec"), nullptr, false);
     root->addWidget(fullscreen_btn_);
 

@@ -11,6 +11,7 @@
 #include "common/protocol/monitor_info.h"
 #include <QCursor>
 #include <QLabel>
+#include <QRect>
 #include <QTimer>
 #include <QWidget>
 #include <cstdint>
@@ -101,8 +102,14 @@ private:
 
     // In-stream menu (VIV-74).
     void toggle_menu();
-    void toggle_fullscreen();
     void feed_menu_info();
+
+    // Borderless fullscreen toggle — menu button + F11 / Ctrl+Shift+F
+    // hotkeys (VIV-20).  Window geometry is saved on entry and restored
+    // on exit.
+    void toggle_fullscreen();
+    QRect saved_normal_geometry_;
+    bool  was_maximized_before_fullscreen_ = false;
 
     D3dRenderer renderer_;
     bool initialized_ = false;

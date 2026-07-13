@@ -16,6 +16,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QRect>
 #include <QTimer>
 
 #include <cstdint>
@@ -171,8 +172,14 @@ private:
     vivora::MenuActions menu_actions_;
     bool keep_aspect_ = true;   // letterbox vs stretch-to-fill
     void toggle_menu();
-    void toggle_fullscreen();
     void feed_menu_info();
+
+    // Borderless fullscreen toggle — menu button + F11 / Ctrl+Shift+F
+    // hotkeys (VIV-20).  Top-level window geometry is saved on entry and
+    // restored on exit.
+    void toggle_fullscreen();
+    QRect saved_normal_geometry_;
+    bool  was_maximized_before_fullscreen_ = false;
 
     InputCallback input_cb_;
     // VK codes the host currently believes are held — for release_all_keys().

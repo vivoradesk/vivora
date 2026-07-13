@@ -1,6 +1,7 @@
 #ifdef VIVORA_WINDOWS
 
 #include "client/render/stream_window.h"
+#include "client/render/fullscreen_hotkey.h"
 #include "common/utils/log.h"
 #include <QImage>
 #include <QKeyEvent>
@@ -188,8 +189,25 @@ void StreamWindow::toggle_menu() {
 }
 
 void StreamWindow::toggle_fullscreen() {
-    if (isFullScreen()) showNormal();
-    else                showFullScreen();
+    if (isFullScreen()) {
+        // Restore the exact pre-fullscreen state.  showNormal() alone is
+        // usually enough, but explicitly re-applying the saved geometry
+        // guarantees position+size come back on every WM (VIV-20).
+        if (was_maximized_before_fullscreen_) {
+            showMaximized();
+        } else {
+            showNormal();
+            if (saved_normal_geometry_.isValid())
+                setGeometry(saved_normal_geometry_);
+        }
+    } else {
+        was_maximized_before_fullscreen_ = isMaximized();
+        // normalGeometry() is the non-maximized geometry even while
+        // maximized, so a maximized→fullscreen→maximized→restore chain
+        // still lands on the original floating rect.
+        saved_normal_geometry_ = normalGeometry();
+        showFullScreen();
+    }
 }
 
 void StreamWindow::feed_menu_info() {
@@ -604,6 +622,12 @@ void StreamWindow::keyPressEvent(QKeyEvent* event) {
         toggle_menu();
         return;
     }
+    // F11 / Ctrl+Shift+F: borderless fullscreen toggle (VIV-20).  Client-
+    // local — swallow it so the host never sees the keypress.
+    if (is_fullscreen_hotkey(event)) {
+        toggle_fullscreen();
+        return;
+    }
     // F9: toggle diagnostics HUD locally — never forward to the host.
     if (event->key() == Qt::Key_F9) {
         hud_visible_ = !hud_visible_;
@@ -632,6 +656,8 @@ void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_F9) return;  // local toggle, don't forward
     if (event->key() == Qt::Key_F1 && (event->modifiers() & Qt::ControlModifier))
         return;                              // Ctrl+F1 menu toggle, don't forward
+    if (is_fullscreen_hotkey(event))
+        return;                              // F11 / Ctrl+Shift+F — local (VIV-20)
     const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_.erase(vk);
