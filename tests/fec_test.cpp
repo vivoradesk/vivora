@@ -169,14 +169,17 @@ static void test_single_erasure() {
     dec.feed(wires[0].data(), wires[0].size(), recovered);
     dec.feed(wires[1].data(), wires[1].size(), recovered);
     dec.feed(wires[3].data(), wires[3].size(), recovered);
+    assert(recovered.empty());
     dec.feed(fec[0].data(), fec[0].size(), recovered);
 
-    // Nothing recovered on feed (attempt_decode=false).  Tick forces decode.
-    assert(recovered.empty());
-    dec.tick(recovered);
-
+    // In-line recovery (VIV-82): the decoder recovers the instant it holds
+    // K shards — on the parity feed itself, not deferred to the next tick().
     assert(recovered.size() == 1);
     assert(recovered[0] == wires[2]);
+
+    // A resolved group must not re-emit on tick.
+    dec.tick(recovered);
+    assert(recovered.size() == 1);
     printf("    PASS\n");
 }
 
@@ -637,6 +640,68 @@ static void test_ranged_recovery() {
     printf("    PASS\n");
 }
 
+// Test 14: K + M ≤ 255 is enforced inside the encoder regardless of the
+// order the caller sets K and M in (VIV-96 #3) — and the clamped geometry
+// still encodes and recovers.
+static void test_km_clamp_255() {
+    printf("  K+M clamp to 255 (both set orders + clamped round-trip)...\n");
+
+    // K itself is capped at 200 (pooled ranged groups, VIV-82).
+    FecEncoder enc;
+    enc.set_group_size(250);
+    assert(enc.group_size() == 200);
+
+    // Oversized M set first, then K raised: K wins, M shrinks: 200+200 → M=55.
+    FecEncoder enc2;
+    enc2.set_group_size(2);
+    enc2.set_parity_count(200);
+    enc2.set_group_size(200);
+    assert(enc2.group_size() == 200);
+    assert(enc2.parity_count() == 55);
+
+    // K set first, then an oversized M request is clamped on set: 200+60 → M=55.
+    FecEncoder enc3;
+    enc3.set_group_size(200);
+    enc3.set_parity_count(60);
+    assert(enc3.parity_count() == 55);
+
+    // Boundary: exactly K + M = 255 passes untouched.
+    FecEncoder encB;
+    encB.set_group_size(200);
+    encB.set_parity_count(55);
+    assert(encB.parity_count() == 55);
+
+    // Round-trip on a clamped geometry.  The decoder rejects K > 200
+    // (fec_codec.cpp sanity bounds), so use K=200: requested M=60 clamps
+    // to 55, and the group still encodes and recovers 5 erasures.
+    FecEncoder enc4;
+    enc4.set_group_size(200);
+    enc4.set_parity_count(60);
+    assert(enc4.parity_count() == 55);
+
+    std::vector<std::vector<uint8_t>> wires;
+    for (int i = 0; i < 200; ++i)
+        wires.push_back(make_data_wire(static_cast<uint16_t>(700 + i), 3000, 40,
+                                       static_cast<uint8_t>(i)));
+    auto fec = encode_group(enc4, wires, 700, 3000, false);
+    assert(fec.size() == 55);
+
+    FecDecoder dec;
+    std::vector<std::vector<uint8_t>> recovered;
+    std::vector<std::vector<uint8_t>> delivered;
+    for (int i = 0; i < 200; ++i) {
+        if (i % 40 == 7) continue;  // drop 5 spread-out packets
+        dec.feed(wires[i].data(), wires[i].size(), recovered);
+        delivered.push_back(wires[i]);
+    }
+    for (auto& f : fec) dec.feed(f.data(), f.size(), recovered);
+    dec.tick(recovered);
+
+    assert(recovered.size() == 5);
+    assert(verify_all_present(wires, delivered, recovered) == 200);
+    printf("    PASS\n");
+}
+
 int main() {
 #ifdef _MSC_VER
     // Route CRT/STL debug assertions (e.g. "vector subscript out of range")
@@ -662,6 +727,7 @@ int main() {
     test_group_id_km_mismatch_no_oob();
     test_extreme_loss_garbage_fuzz();
     test_ranged_recovery();
+    test_km_clamp_255();
     printf("=== ALL TESTS PASSED ===\n");
     return 0;
 }
