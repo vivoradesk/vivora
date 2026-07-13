@@ -1220,11 +1220,10 @@ void ClientSession::send_perf_report() {
         if (++perf_clean_streak_ >= PERF_UP_STREAK) {
             uint16_t next = static_cast<uint16_t>(perf_target_fps_ * 5 / 4);
             if (next > PERF_TARGET_FPS_MAX) next = PERF_TARGET_FPS_MAX;
-            // Hold at 60 unless caller has explicitly opted into 120 — for
-            // now everything tops out at 60 as a safety; the 120 ceiling
-            // becomes meaningful when the host gains a `--target-fps 120`
-            // CLI flag and signals the cap to the client.
-            if (next > 60) next = 60;
+            // The report is a "can consume up to N" statement, not a demand:
+            // the host clamps it to its own configured framerate cap (VIV-67,
+            // HostSession::min_perf_target_fps), so climbing past 60 here is
+            // safe against 60-capped hosts and lets 90/120/144 caps engage.
             perf_target_fps_   = next;
             perf_clean_streak_ = 0;
         }

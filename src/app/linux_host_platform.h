@@ -16,8 +16,11 @@
 
 class LinuxHostPlatform : public vivora::HostPlatform {
 public:
+    // `stream_fps` is the VIV-67 framerate cap — it becomes the encoder's
+    // declared rate (NVENC intra-refresh period keys off it: one full
+    // refresh per second).  Defaulted so the legacy CLI keeps compiling.
     bool init(uint32_t manual_bitrate_bps, vivora::VideoCodec codec,
-              vivora::EncoderKind encoder_kind);
+              vivora::EncoderKind encoder_kind, uint16_t stream_fps = 60);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -73,6 +76,7 @@ private:
     std::unique_ptr<vivora::host::ILinuxEncoder> enc_;
     vivora::VideoCodec  codec_        = vivora::VideoCodec::H264;
     vivora::EncoderKind encoder_kind_ = vivora::EncoderKind::Auto;
+    uint16_t            stream_fps_   = 60;   // VIV-67 framerate cap
     // Set when first PipeWire frame arrives — init() blocks until then
     // so host_loop sees real capture dimensions for bitrate sizing.
     std::condition_variable first_frame_cv_;

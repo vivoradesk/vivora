@@ -684,6 +684,24 @@ Window {
                         }
                     }
                     Field {
+                        title: "Stream framerate"
+                        help: "Maximum FPS the host streams (VIV-67). Lower saves bandwidth and GPU; applied when the next viewer connects."
+                        CreamCombo {
+                            id: fpsCombo
+                            readonly property var fpsValues: [30, 60, 90, 120, 144]
+                            entries: [ { text: "30 fps",  sub: "bandwidth saver" },
+                                       { text: "60 fps",  sub: "default" },
+                                       { text: "90 fps" },
+                                       { text: "120 fps" },
+                                       { text: "144 fps", badge: "MAX" } ]
+                            currentIndex: {
+                                var i = fpsValues.indexOf(App.settings.hostFps)
+                                return i >= 0 ? i : 1
+                            }
+                            onActivated: App.settings.hostFps = fpsValues[currentIndex]
+                        }
+                    }
+                    Field {
                         title: "HDR passthrough"
                         help: "Stream HDR10 metadata when the host display supports it."
                         CreamSwitch {

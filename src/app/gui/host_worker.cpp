@@ -65,7 +65,8 @@ void HostWorker::runOnWorkerThread() {
     // created and destroyed on the same thread that drives the loop.
 #ifdef VIVORA_WINDOWS
     auto* p = new WindowsHostPlatform();
-    if (!p->init(cfg_.manual_bitrate_bps, cfg_.encoder_kind, cfg_.codec)) {
+    if (!p->init(cfg_.manual_bitrate_bps, cfg_.encoder_kind, cfg_.codec,
+                 cfg_.host_fps)) {
         delete p;
         emit initFailed("Windows host platform init failed (DXGI/encoder unavailable)");
         return;
@@ -74,7 +75,8 @@ void HostWorker::runOnWorkerThread() {
 #endif
 #ifdef VIVORA_MACOS
     auto* p = new MacHostPlatform();
-    if (!p->init(cfg_.display_index, cfg_.manual_bitrate_bps, cfg_.codec)) {
+    if (!p->init(cfg_.display_index, cfg_.manual_bitrate_bps, cfg_.codec,
+                 cfg_.host_fps)) {
         delete p;
         emit initFailed("macOS host platform init failed");
         return;
@@ -83,7 +85,8 @@ void HostWorker::runOnWorkerThread() {
 #endif
 #ifdef VIVORA_LINUX
     auto* p = new LinuxHostPlatform();
-    if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec, cfg_.encoder_kind)) {
+    if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec, cfg_.encoder_kind,
+                 cfg_.host_fps)) {
         delete p;
         emit initFailed("Linux host platform init failed");
         return;
@@ -104,6 +107,7 @@ void HostWorker::runOnWorkerThread() {
     lcfg.stop_flag          = &stop_flag_;
     lcfg.client_count_out   = &client_count_;
     lcfg.state_out          = &state_;
+    lcfg.max_fps            = cfg_.host_fps;   // VIV-67 framerate cap
     lcfg.idle_timeout_min   = cfg_.idle_timeout_min;
     lcfg.idle_warning_sec   = cfg_.idle_warning_sec;
     lcfg.approval_gate      = cfg_.approval_gate;

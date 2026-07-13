@@ -7,10 +7,12 @@
 
 bool LinuxHostPlatform::init(uint32_t manual_bitrate_bps,
                              vivora::VideoCodec codec,
-                             vivora::EncoderKind encoder_kind) {
+                             vivora::EncoderKind encoder_kind,
+                             uint16_t stream_fps) {
     codec_        = codec;
     bitrate_bps_  = manual_bitrate_bps;
     encoder_kind_ = encoder_kind;
+    stream_fps_   = stream_fps > 0 ? stream_fps : 60;   // VIV-67
 
     // VIV-66: prefer painting the cursor from X11 (reliable position + shape)
     // and ask the portal to keep the cursor out of the captured frame.  If X
@@ -110,11 +112,12 @@ bool LinuxHostPlatform::start_encoder() {
     vivora::host::ILinuxEncoder::Config ec;
     ec.width  = static_cast<int>(cap_w_);
     ec.height = static_cast<int>(cap_h_);
-    ec.fps    = 60;
-    // Default bitrate if caller didn't override: ~bpp 0.1 at 60fps.
+    ec.fps    = static_cast<int>(stream_fps_);   // VIV-67 user framerate cap
+    // Default bitrate if caller didn't override: ~bpp 0.1 at the
+    // configured framerate.
     ec.bitrate_bps = bitrate_bps_ > 0
         ? static_cast<int>(bitrate_bps_)
-        : static_cast<int>(static_cast<int64_t>(cap_w_) * cap_h_ * 60 / 10);
+        : static_cast<int>(static_cast<int64_t>(cap_w_) * cap_h_ * stream_fps_ / 10);
     ec.codec = codec_;
     // Factory probes NVENC (NVIDIA) first when allowed, else VAAPI (VIV-8).
     enc_ = vivora::host::create_linux_encoder(encoder_kind_, ec);

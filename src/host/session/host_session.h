@@ -250,9 +250,11 @@ public:
     bool probe_pending() const;
 
     // Worst-case target_fps across all connected clients (the host has
-    // to throttle to the slowest viewer).  Defaults to 60 when there are
-    // no clients yet; floors at 15 to keep interactivity from collapsing.
-    uint16_t min_perf_target_fps() const;
+    // to throttle to the slowest viewer).  `cap` is the host's configured
+    // framerate ceiling (VIV-67): the answer never exceeds it, and it is
+    // returned as-is when there are no clients yet.  Floors at 15 to keep
+    // interactivity from collapsing.
+    uint16_t min_perf_target_fps(uint16_t cap = 60) const;
 
     VideoSender* sender() { return sender_.get(); }
     AudioSender* audio_sender() { return audio_sender_.get(); }

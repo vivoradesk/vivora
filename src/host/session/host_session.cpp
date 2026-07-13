@@ -533,9 +533,13 @@ bool HostSession::probe_pending() const {
     return false;
 }
 
-uint16_t HostSession::min_perf_target_fps() const {
-    if (clients_.empty()) return 60;
-    uint16_t lowest = 60;
+uint16_t HostSession::min_perf_target_fps(uint16_t cap) const {
+    // `cap` is the host-configured framerate ceiling (VIV-67).  Starting
+    // `lowest` at the cap means a client reporting more than the host is
+    // willing to stream is clamped, so adaptation composes with the cap:
+    // it can only lower the effective rate, never raise it.
+    if (clients_.empty()) return cap;
+    uint16_t lowest = cap;
     for (const auto& [addr, client] : clients_) {
         if (client.perf_target_fps < lowest) lowest = client.perf_target_fps;
     }

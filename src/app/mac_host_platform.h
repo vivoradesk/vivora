@@ -10,8 +10,11 @@
 
 class MacHostPlatform : public vivora::HostPlatform {
 public:
+    // `stream_fps` is the VIV-67 framerate cap — it drives both the SCK
+    // capture minimum-interval and the VideoToolbox expected rate.
+    // Defaulted so the legacy CLI keeps compiling.
     bool init(uint32_t display_index, uint32_t manual_bitrate_bps,
-              vivora::VideoCodec codec);
+              vivora::VideoCodec codec, uint16_t stream_fps = 60);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -57,6 +60,7 @@ private:
     std::vector<uint8_t> pkt_buf_;
     uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
     uint32_t manual_bitrate_bps_    = 0;     // user-pinned bitrate (0 = auto)
+    uint16_t stream_fps_            = 60;    // VIV-67 framerate cap
     // Lazy-encoder state (VIV-12).  encoder_live_ mirrors whether the VT
     // session exists; live_bitrate_bps_ caches the last set_bitrate() so a
     // stop/start cycle resumes at the adaptive controller's last rate.

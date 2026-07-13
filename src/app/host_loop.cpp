@@ -28,11 +28,17 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     uint32_t cap_w = platform.capture_width();
     uint32_t cap_h = platform.capture_height();
 
-    // Bitrate controller — picks a sensible default from resolution, allows
-    // a manual override via --bitrate, and exposes hooks for future
-    // congestion-control feedback (RTT / loss / bandwidth estimate).
+    // VIV-67 stream framerate cap (Settings → HostWorkerConfig → here).
+    // Guard against a zeroed config so the interval math below never
+    // divides by zero.
+    const uint16_t fps_cap = cfg.max_fps > 0 ? cfg.max_fps : 60;
+
+    // Bitrate controller — picks a sensible default from resolution +
+    // configured framerate, allows a manual override via --bitrate, and
+    // exposes hooks for future congestion-control feedback (RTT / loss /
+    // bandwidth estimate).
     codec::BitrateController bitrate_ctl(
-        codec::default_bitrate_for(cap_w, cap_h, 60));
+        codec::default_bitrate_for(cap_w, cap_h, fps_cap));
     if (cfg.manual_bitrate_bps != 0) {
         bitrate_ctl.set_manual_target(cfg.manual_bitrate_bps);
         bitrate_ctl.tick();
@@ -210,10 +216,12 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // the slowest client.  EWMA over the last few samples avoids reacting
     // to single-interval spikes, and we log every applied change so we can
     // see the throttle live in the host log alongside bitrate adjustments.
+    // The user's framerate cap (VIV-67) seeds the state and bounds the
+    // per-tick target below — adaptation only ever lowers the rate.
     auto     last_capture_time   = TimePoint{};
-    uint16_t applied_target_fps  = 60;
-    float    target_fps_ewma     = 60.0f;
-    int64_t  min_frame_interval_us = 16667;  // 60 fps default
+    uint16_t applied_target_fps  = fps_cap;
+    float    target_fps_ewma     = static_cast<float>(fps_cap);
+    int64_t  min_frame_interval_us = 1'000'000 / fps_cap;
 
     // FEC group tail-flush: when capture stays silent on a static screen,
     // any in-progress FEC group (P-frame fragments not yet K-aligned) sits
@@ -607,7 +615,9 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // the interval when EWMA crosses ±2 fps from the applied value
         // (prevents single-spike whiplash).
         {
-            uint16_t want = session.min_perf_target_fps();
+            // min_perf_target_fps(fps_cap) already clamps client reports to
+            // the user's cap (VIV-67), so the EWMA can never ratchet above it.
+            uint16_t want = session.min_perf_target_fps(fps_cap);
             target_fps_ewma = 0.7f * target_fps_ewma + 0.3f * static_cast<float>(want);
             uint16_t smoothed = static_cast<uint16_t>(target_fps_ewma + 0.5f);
             int diff = static_cast<int>(smoothed) - static_cast<int>(applied_target_fps);

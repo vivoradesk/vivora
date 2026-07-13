@@ -26,6 +26,7 @@ constexpr const char* K_APPROVAL_MODE      = "security/approvalMode";
 constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
 constexpr const char* K_THEME              = "appearance/theme";
 constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
+constexpr const char* K_HOST_FPS           = "capture/hostFps";
 constexpr const char* K_CLOUD_URL          = "account/cloudUrl";
 constexpr const char* K_ACCOUNT_TOKEN      = "account/token";
 constexpr const char* K_ACCOUNT_EMAIL      = "account/email";
@@ -58,6 +59,7 @@ constexpr int   DEF_APPROVAL_MODE    = 0;   // always_prompt — safest default
 constexpr bool  DEF_SINGLE_SESSION   = false;
 constexpr int   DEF_THEME            = 0;   // light
 constexpr bool  DEF_HDR_PASSTHROUGH  = true;
+constexpr int   DEF_HOST_FPS         = 60;   // VIV-67 stream framerate cap
 constexpr const char* DEF_CLOUD_URL  = "https://cloud.vivora.dev";
 } // namespace
 
@@ -148,6 +150,17 @@ void Settings::setTheme(int v)                { if (v != theme()) { q_.setValue(
 
 bool Settings::hdrPassthrough() const         { return q_.value(K_HDR_PASSTHROUGH, DEF_HDR_PASSTHROUGH).toBool(); }
 void Settings::setHdrPassthrough(bool v)      { if (v != hdrPassthrough()) { q_.setValue(K_HDR_PASSTHROUGH, v); emit changed(); } }
+
+// VIV-67 stream framerate cap.  Sanitised on read so a hand-edited ini
+// can't push the host loop into a degenerate cadence (0 fps → div-by-zero,
+// 1000 fps → busy spin).
+int Settings::hostFps() const {
+    int v = q_.value(K_HOST_FPS, DEF_HOST_FPS).toInt();
+    if (v < 15)  return 15;
+    if (v > 240) return 240;
+    return v;
+}
+void Settings::setHostFps(int v)              { if (v != hostFps()) { q_.setValue(K_HOST_FPS, v); emit changed(); } }
 
 // VIV-70 announcement dedup sets (stored as QStringList).
 QStringList Settings::seenAnnouncements() const { return q_.value("announce/seen").toStringList(); }

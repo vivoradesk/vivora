@@ -12,7 +12,9 @@
 
 bool MacHostPlatform::init(uint32_t display_index,
                             uint32_t manual_bitrate_bps,
-                            vivora::VideoCodec codec) {
+                            vivora::VideoCodec codec,
+                            uint16_t stream_fps) {
+    stream_fps_ = stream_fps > 0 ? stream_fps : 60;   // VIV-67
     // NSCursor / NSScreen need the AppKit shared app initialized. Host mode
     // doesn't create a UI, so make sure the singleton exists.
     [NSApplication sharedApplication];
@@ -47,7 +49,7 @@ bool MacHostPlatform::init(uint32_t display_index,
 bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
-    ccfg.fps = 60;
+    ccfg.fps = stream_fps_;   // VIV-67 user framerate cap
     ccfg.show_cursor = false;
     // Auto-detect: capture HDR if the display reports HDR, otherwise SDR.
     // MacScreenCapture honours prefer_hdr only when display_is_hdr() agrees.
@@ -74,15 +76,17 @@ bool MacHostPlatform::start_encoder() {
     if (bitrate == 0) {
         bitrate = manual_bitrate_bps_ != 0
             ? manual_bitrate_bps_
-            : vivora::codec::default_bitrate_for(capture_.width(), capture_.height(), 60);
+            : vivora::codec::default_bitrate_for(capture_.width(), capture_.height(),
+                                                 stream_fps_);
     }
 
     vivora::host::MacEncoderConfig ecfg;
     ecfg.width = capture_.width();
     ecfg.height = capture_.height();
-    ecfg.fps = 60;
+    ecfg.fps = stream_fps_;   // VIV-67 user framerate cap
     ecfg.bitrate_bps = bitrate;
-    ecfg.idr_period = 120;
+    // Keep the keyframe interval at ~2s worth of frames (120 @ 60fps).
+    ecfg.idr_period = 2u * stream_fps_;
     ecfg.hdr = capture_.hdr_active();
     if (!encoder_.init(ecfg)) {
         vivora::log::error("HOST", "Failed to init encoder");

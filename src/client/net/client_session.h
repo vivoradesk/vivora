@@ -365,9 +365,11 @@ private:
     // reporting lets adaptive FEC track bursts closer to real time (VIV-82).
     static constexpr int64_t FEC_REPORT_INTERVAL_MS = 150;
     static constexpr int64_t PERF_REPORT_INTERVAL_MS = 1000;
-    // Bounds for the auto-tuned target framerate.  120 is the wire/spec
-    // max; 15 is the floor below which interactivity feels broken.
-    static constexpr uint16_t PERF_TARGET_FPS_MAX = 120;
+    // Bounds for the auto-tuned target framerate.  144 matches the highest
+    // host-side framerate cap offered in Settings (VIV-67) — the host clamps
+    // our report to its own cap, so this is just the client's advertised
+    // ceiling.  15 is the floor below which interactivity feels broken.
+    static constexpr uint16_t PERF_TARGET_FPS_MAX = 144;
     static constexpr uint16_t PERF_TARGET_FPS_MIN = 15;
     // Reject ratio thresholds over the last 1 s window.
     static constexpr float    PERF_REJECT_DOWN = 0.05f;  // > 5% → step down

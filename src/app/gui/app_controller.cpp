@@ -262,6 +262,7 @@ void AppController::startSharing() {
     }
     wc.license_file       = settings_->licenseFile().toStdString();
     wc.display_index      = settings_->displayIndex();
+    wc.host_fps           = static_cast<uint16_t>(settings_->hostFps());  // VIV-67
     wc.idle_timeout_min   = settings_->idleTimeoutMin();
     wc.idle_warning_sec   = settings_->idleWarningSec();
     wc.approval_gate      = approvalGate_;

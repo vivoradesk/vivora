@@ -32,6 +32,10 @@ struct HostWorkerConfig {
     std::string           relay_session_hex;
     std::string           license_file;
     uint32_t              display_index     = 0;   // mac/linux only
+    // VIV-67 stream framerate cap.  Drives the encoder's declared fps,
+    // the host tick cadence (min frame interval), the static-screen
+    // heartbeat interval and the adaptive-framerate ceiling.
+    uint16_t              host_fps          = 60;
     int                   idle_timeout_min  = 0;   // 0 disables
     int                   idle_warning_sec  = 30;
     // Optional approval gate (VIV-53).  When set, every new client

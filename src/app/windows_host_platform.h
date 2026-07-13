@@ -14,9 +14,13 @@
 
 class WindowsHostPlatform : public vivora::HostPlatform {
 public:
+    // `stream_fps` is the VIV-67 framerate cap — it becomes the encoder's
+    // declared rate (and thereby the intra-refresh period: one full
+    // refresh per second).  Defaulted so the legacy CLI keeps compiling.
     bool init(uint32_t manual_bitrate_bps,
               vivora::EncoderKind kind,
-              vivora::VideoCodec codec);
+              vivora::VideoCodec codec,
+              uint16_t stream_fps = 60);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -60,6 +64,7 @@ private:
     vivora::EncoderKind saved_kind_  = vivora::EncoderKind::Auto;
     vivora::VideoCodec  saved_codec_ = vivora::VideoCodec::HEVC;
     uint32_t              live_bitrate_bps_ = 0;
+    uint16_t              saved_fps_        = 60;   // VIV-67 framerate cap
 
     // Owned mirror of the most recently captured DXGI texture, fed to the
     // encoder by re_encode_last() when the screen is static and capture

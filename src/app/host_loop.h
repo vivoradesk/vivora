@@ -14,6 +14,11 @@ namespace vivora {
 struct HostLoopConfig {
     uint16_t port = 9876;
     uint32_t manual_bitrate_bps = 0;   // 0 = auto from resolution
+    // VIV-67 stream framerate cap.  The host paces capture+encode (and the
+    // static-screen heartbeat) at most this fast, and it is the ceiling the
+    // client-driven adaptive framerate works under — adaptation may lower
+    // the effective rate, never raise it above this.  0 falls back to 60.
+    uint16_t max_fps = 60;
     EncoderKind encoder_kind = EncoderKind::Auto;
     VideoCodec  codec = VideoCodec::HEVC;
     // GUI mode hooks.  When non-null:

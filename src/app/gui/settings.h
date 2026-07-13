@@ -47,6 +47,10 @@ class Settings : public QObject {
     // Codec.  hdrPassthrough: carry HDR10 metadata when the host display
     // is HDR (the existing FP16→HEVC Main10 auto-promote path).
     Q_PROPERTY(bool    hdrPassthrough  READ hdrPassthrough  WRITE setHdrPassthrough  NOTIFY changed)
+    // VIV-67: stream framerate cap in fps (30/60/90/120/144).  The host
+    // paces capture+encode to at most this rate; client-driven adaptive
+    // framerate can only lower the effective rate, never exceed it.
+    Q_PROPERTY(int     hostFps         READ hostFps         WRITE setHostFps         NOTIFY changed)
 
 public:
     explicit Settings(QObject* parent = nullptr);
@@ -70,6 +74,7 @@ public:
     bool    singleSessionLock() const;   void setSingleSessionLock(bool);
     int     theme() const;               void setTheme(int);
     bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
+    int     hostFps() const;             void setHostFps(int);
 
     // VIV-31 account/license cloud.  Persisted but not exposed as Q_PROPERTY
     // (QML talks to AppController's account state); the account setters do not

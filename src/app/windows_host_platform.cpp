@@ -10,7 +10,8 @@
 
 bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
                                vivora::EncoderKind kind,
-                               vivora::VideoCodec codec) {
+                               vivora::VideoCodec codec,
+                               uint16_t stream_fps) {
     capture_ = vivora::IScreenCapture::create();
     dxgi_ = dynamic_cast<vivora::DxgiCapture*>(capture_.get());
     if (!capture_ || !capture_->init(0)) {
@@ -42,9 +43,10 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     // resolution if the user didn't pin one.
     saved_kind_      = kind;
     saved_codec_     = effective_codec;
+    saved_fps_       = stream_fps > 0 ? stream_fps : 60;   // VIV-67
     live_bitrate_bps_ = manual_bitrate_bps != 0
         ? manual_bitrate_bps
-        : vivora::codec::default_bitrate_for(res.width, res.height, 60);
+        : vivora::codec::default_bitrate_for(res.width, res.height, saved_fps_);
 
     // Force initial mouse movement so DXGI produces its first frame
     // immediately (otherwise the duplication blocks until the user
@@ -70,14 +72,14 @@ bool WindowsHostPlatform::start_encoder() {
     vivora::EncoderConfig cfg;
     cfg.width       = res.width;
     cfg.height      = res.height;
-    cfg.fps         = 60;
+    cfg.fps         = saved_fps_;   // VIV-67 user framerate cap
     cfg.bitrate_bps = live_bitrate_bps_;
     // idr_period serves as AMF GOP_SIZE — auto-IDR cadence when no
     // client request comes in. NVENC/QSV ignore it (intra refresh).
     // Auto-IDR is now just a deep safety net; client IdrRequest fires
-    // recovery in 50-100ms.  1800 = 30s @ 60fps keeps the 100KB-IDR
-    // trickle off the wire.
-    cfg.idr_period  = 1800;
+    // recovery in 50-100ms.  30s worth of frames (1800 @ 60fps) keeps
+    // the 100KB-IDR trickle off the wire.
+    cfg.idr_period  = 30u * saved_fps_;
     cfg.codec       = saved_codec_;
     // Multi-slice output (VIV-82): localizes burst loss and lets the decoder
     // parallelize.  Opt-in via VIVORA_SLICES while we validate; default 1.
