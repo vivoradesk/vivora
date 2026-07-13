@@ -354,6 +354,18 @@ void HostSession::poll() {
         }
     }
 
+    // VIV-22: one delayed clipboard re-broadcast for UDP-loss resilience.
+    // Receivers dedup by clip_id, so the repeat is idempotent.
+    if (clip_resend_pending_) {
+        const auto since_clip = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - clip_last_send_).count();
+        if (since_clip >= CLIPBOARD_RESEND_MS) {
+            broadcast_clipboard_wires();
+            clip_resend_pending_ = false;
+            clip_tx_wires_.clear();
+        }
+    }
+
     // Keep the relay binding warm.
     if (relay_active_) {
         const auto since_kp = std::chrono::duration_cast<std::chrono::seconds>(
@@ -683,6 +695,21 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             break;
         case protocol::PacketType::BwProbeAck:
             handle_bw_probe_ack(payload, payload_len, sender);
+            break;
+        case protocol::PacketType::Clipboard:
+            // VIV-22: viewer -> host clipboard.  Honour the per-connection
+            // clipboard capability (VIV-60) and the approval gate — an
+            // unapproved or clipboard-denied viewer must not be able to
+            // write the host's clipboard.
+            if (client && client->approved && client->grant.clipboard) {
+                protocol::ClipboardMessage msg;
+                if (client->clipboard_rx.feed(payload, payload_len, msg)) {
+                    pending_clipboard_       = std::move(msg);
+                    pending_clipboard_valid_ = true;
+                    log::info("HostSession", "Clipboard received from viewer (%zu bytes)",
+                              pending_clipboard_.data.size());
+                }
+            }
             break;
         default:
             break;
@@ -1064,6 +1091,50 @@ void HostSession::send_cursor_shape(const protocol::CursorShapeMessage& msg) {
             send_sealed(client, wire);
         }
     }
+}
+
+void HostSession::broadcast_clipboard_wires() {
+    if (!socket_ || clip_tx_wires_.empty()) return;
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        if (!client.approved || !client.grant.clipboard) continue;  // VIV-60
+        for (const auto& wire : clip_tx_wires_) send_sealed(client, wire);
+    }
+}
+
+void HostSession::send_clipboard(const protocol::ClipboardMessage& msg) {
+    if (!socket_ || clients_.empty()) return;
+    const auto frags = protocol::fragment_clipboard(msg, ++clip_tx_id_);
+    if (frags.empty()) {
+        log::warn("HostSession", "Clipboard message rejected by fragmenter (%zu bytes)",
+                  msg.data.size());
+        return;
+    }
+    clip_tx_wires_.clear();
+    clip_tx_wires_.reserve(frags.size());
+    for (const auto& f : frags) {
+        protocol::Packet pkt;
+        pkt.header.type        = protocol::PacketType::Clipboard;
+        pkt.header.seq_no      = 0;
+        pkt.header.timestamp   = 0;
+        pkt.header.flags       = 0;
+        pkt.payload            = f;
+        pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+        clip_tx_wires_.push_back(pkt.serialize());
+    }
+    broadcast_clipboard_wires();
+    clip_last_send_      = Clock::now();
+    clip_resend_pending_ = true;
+    log::info("HostSession", "Clipboard sent to viewers (%zu bytes, %zu fragment(s))",
+              msg.data.size(), frags.size());
+}
+
+bool HostSession::take_new_clipboard(protocol::ClipboardMessage& out) {
+    if (!pending_clipboard_valid_) return false;
+    out = std::move(pending_clipboard_);
+    pending_clipboard_       = protocol::ClipboardMessage{};
+    pending_clipboard_valid_ = false;
+    return true;
 }
 
 void HostSession::send_bw_probe(ClientInfo& client) {

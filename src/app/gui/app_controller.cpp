@@ -2,6 +2,7 @@
 #include "app/gui/app_controller.h"
 
 #include "app/gui/address_book.h"
+#include "app/gui/clipboard_sync.h"
 #include "app/gui/host_worker.h"
 #include "app/gui/network_change_watcher.h"
 #include "app/gui/settings.h"
@@ -95,6 +96,10 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
         sharing_     = false;
         clientCount_ = 0;
+        // VIV-22: the worker thread has exited (stop() joins), so nothing
+        // touches the bridge anymore — safe to drop the clipboard pair.
+        hostClipboardSync_.reset();
+        hostClipboardBridge_.reset();
         emit sharingChanged();
         emit clientCountChanged();
         if (tray_) tray_->setSharing(sharing_, clientCount_);
@@ -256,6 +261,14 @@ void AppController::startSharing() {
     wc.idle_timeout_min   = settings_->idleTimeoutMin();
     wc.idle_warning_sec   = settings_->idleWarningSec();
     wc.approval_gate      = approvalGate_;
+
+    // VIV-22: clipboard sync host-side.  The bridge crosses into the worker
+    // thread; the sync QObject stays here on the GUI thread with QClipboard.
+    hostClipboardBridge_ = std::make_shared<vivora::ClipboardBridge>();
+    // No QObject parent — lifetime is managed by the unique_ptr (a parent
+    // would double-delete in ~AppController).
+    hostClipboardSync_   = std::make_unique<ClipboardSync>(hostClipboardBridge_);
+    wc.clipboard         = hostClipboardBridge_;
 
     sharing_     = true;
     clientCount_ = 0;

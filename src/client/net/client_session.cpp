@@ -589,6 +589,18 @@ void ClientSession::poll() {
             }
         }
 
+        // VIV-22: one delayed clipboard re-send for UDP-loss resilience.
+        // The host dedups by clip_id, so the repeat is idempotent.
+        if (clip_resend_pending_) {
+            auto since_clip = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - clip_last_send_).count();
+            if (since_clip >= CLIPBOARD_RESEND_MS) {
+                for (const auto& wire : clip_tx_wires_) send_sealed(wire);
+                clip_resend_pending_ = false;
+                clip_tx_wires_.clear();
+            }
+        }
+
         // BW probe flush: host sends N packets in a burst. If the tail is
         // lost we'd never hit the last-index trigger in handle_bw_probe and
         // the probe would time out. After 500ms of silence with partial
@@ -681,6 +693,17 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
         case protocol::PacketType::MonitorList:
             handle_monitor_list(payload, payload_len);
             break;
+        case protocol::PacketType::Clipboard: {
+            // VIV-22: host -> client clipboard, fragmented like CursorShape.
+            protocol::ClipboardMessage msg;
+            if (clipboard_rx_.feed(payload, payload_len, msg)) {
+                pending_clipboard_       = std::move(msg);
+                pending_clipboard_valid_ = true;
+                log::info("ClientSession", "Clipboard received from host (%zu bytes)",
+                          pending_clipboard_.data.size());
+            }
+            break;
+        }
         case protocol::PacketType::HostStats:
             // Host's current encoder target bitrate (kbps, u32 LE) — for the
             // "encoding (actual)" HUD readout (VIV-82).
@@ -1017,6 +1040,42 @@ void ClientSession::select_monitor(uint8_t index) {
     auto wire = pkt.serialize();
     send_sealed(wire);
     log::info("ClientSession", "Requested host display switch -> %u", index);
+}
+
+void ClientSession::send_clipboard(const protocol::ClipboardMessage& msg) {
+    if (state_ != SessionState::Connected || !socket_) return;
+
+    const auto frags = protocol::fragment_clipboard(msg, ++clip_tx_id_);
+    if (frags.empty()) {
+        log::warn("ClientSession", "Clipboard message rejected by fragmenter (%zu bytes)",
+                  msg.data.size());
+        return;
+    }
+    clip_tx_wires_.clear();
+    clip_tx_wires_.reserve(frags.size());
+    for (const auto& f : frags) {
+        protocol::Packet pkt;
+        pkt.header.type        = protocol::PacketType::Clipboard;
+        pkt.header.seq_no      = 0;
+        pkt.header.timestamp   = 0;
+        pkt.header.flags       = 0;
+        pkt.payload            = f;
+        pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+        clip_tx_wires_.push_back(pkt.serialize());
+    }
+    for (const auto& wire : clip_tx_wires_) send_sealed(wire);
+    clip_last_send_      = Clock::now();
+    clip_resend_pending_ = true;
+    log::info("ClientSession", "Clipboard sent to host (%zu bytes, %zu fragment(s))",
+              msg.data.size(), frags.size());
+}
+
+bool ClientSession::take_new_clipboard(protocol::ClipboardMessage& out) {
+    if (!pending_clipboard_valid_) return false;
+    out = std::move(pending_clipboard_);
+    pending_clipboard_       = protocol::ClipboardMessage{};
+    pending_clipboard_valid_ = false;
+    return true;
 }
 
 void ClientSession::reset_video_stream() {

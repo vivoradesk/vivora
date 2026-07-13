@@ -343,6 +343,16 @@ bool ViewLoopState::iter_threaded() {
         if (session.take_new_monitor_list(monitors)) {
             platform.set_monitor_list(monitors);
         }
+        // VIV-22 clipboard: GUI thread <-> session handoff via the bridge.
+        if (cfg_->clipboard) {
+            protocol::ClipboardMessage clip;
+            if (cfg_->clipboard->take_outbound(clip)) {
+                session.send_clipboard(clip);
+            }
+            if (session.take_new_clipboard(clip)) {
+                cfg_->clipboard->push_inbound(std::move(clip));
+            }
+        }
     }
 
     // Drain Q2 with the render-penultimate policy: drop stale, render the
@@ -780,6 +790,16 @@ bool ViewLoopState::iter() {
         }
         if (session.has_cursor_position()) {
             platform.update_cursor_position(session.cursor_position());
+        }
+        // VIV-22 clipboard: GUI thread <-> session handoff via the bridge.
+        if (cfg_->clipboard) {
+            protocol::ClipboardMessage clip;
+            if (cfg_->clipboard->take_outbound(clip)) {
+                session.send_clipboard(clip);
+            }
+            if (session.take_new_clipboard(clip)) {
+                cfg_->clipboard->push_inbound(std::move(clip));
+            }
         }
     }
 

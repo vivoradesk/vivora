@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/clipboard_bridge.h"
 #include "app/view_platform.h"
 #include "app/video_pipeline.h"
 #include "client/net/client_session.h"
@@ -37,6 +38,11 @@ struct ViewLoopConfig {
     // GUI mode hook: when non-null, iter() exits the loop at the next
     // chance.  CLI ignores it (uses Ctrl+C / window-close instead).
     std::atomic<bool>* stop_flag = nullptr;
+    // VIV-22 clipboard sync (GUI mode only).  When set, each iter() drains
+    // the bridge's outbound slot into session.send_clipboard() and pushes
+    // any reassembled host clipboard into the inbound slot for the
+    // GUI-thread ClipboardSync.  CLI leaves this null → feature off.
+    std::shared_ptr<ClipboardBridge> clipboard;
 };
 
 // Iterable view-loop state machine.  Split out of the legacy

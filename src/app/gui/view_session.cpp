@@ -89,6 +89,12 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     loop_cfg_.license_file       = cfg_.license_file.empty()       ? nullptr : cfg_.license_file.c_str();
     loop_cfg_.stop_flag          = &stop_flag_;
 
+    // VIV-22: clipboard sync client-side.  ClipboardSync watches QClipboard
+    // on this (GUI) thread; the loop drains/fills the bridge every iter().
+    clipboardBridge_ = std::make_shared<vivora::ClipboardBridge>();
+    clipboardSync_   = std::make_unique<ClipboardSync>(clipboardBridge_);
+    loop_cfg_.clipboard = clipboardBridge_;
+
     loop_ = std::make_unique<ViewLoopState>();
     if (!loop_->init(*platform_, loop_cfg_)) {
         log::error("ViewSession", "ViewLoopState::init failed (rc=%d)", loop_->exit_code());
@@ -115,6 +121,8 @@ void ViewSession::onTick() {
         tick_.stop();
         loop_.reset();
         platform_.reset();
+        clipboardSync_.reset();     // VIV-22: stop watching the clipboard
+        clipboardBridge_.reset();
         if (!finished_emitted_) {
             finished_emitted_ = true;
             emit finished();

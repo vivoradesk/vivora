@@ -6,6 +6,7 @@
 #include "client/net/video_receiver.h"
 #include "client/audio/audio_receiver.h"
 #include "common/audio/audio_output.h"
+#include "common/protocol/clipboard_message.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
 #include "common/protocol/monitor_info.h"
@@ -177,6 +178,14 @@ public:
     // nothing new arrived.
     bool take_new_monitor_list(std::vector<protocol::MonitorDesc>& out);
 
+    // VIV-22 clipboard sync.  send_clipboard() fragments the message and
+    // sends it to the host; the prepared wires are re-sent once ~150ms
+    // later from poll() for UDP-loss resilience (host dedups by clip_id).
+    void send_clipboard(const protocol::ClipboardMessage& msg);
+    // Pop the latest fully-reassembled clipboard from the host since the
+    // last call (latest wins).  Returns false if none arrived.
+    bool take_new_clipboard(protocol::ClipboardMessage& out);
+
 private:
     void handle_packet(const uint8_t* data, size_t len);
     void handle_control(const uint8_t* payload, size_t len);
@@ -300,6 +309,18 @@ private:
     // on arrival so the view layer pushes it into the monitor panel once.
     std::vector<protocol::MonitorDesc> monitor_list_;
     bool new_monitor_list_ = false;
+
+    // VIV-22 clipboard state.  Inbound: reassembler + latest complete
+    // message.  Outbound: prepared plaintext wires kept for one delayed
+    // re-send from poll() (sealed fresh on each send).
+    protocol::ClipboardReassembler clipboard_rx_;
+    protocol::ClipboardMessage     pending_clipboard_{};
+    bool                           pending_clipboard_valid_ = false;
+    uint32_t                       clip_tx_id_ = 0;
+    std::vector<std::vector<uint8_t>> clip_tx_wires_;
+    bool      clip_resend_pending_ = false;
+    TimePoint clip_last_send_{};
+    static constexpr int64_t CLIPBOARD_RESEND_MS = 150;
 
     // Shape fragment reassembly buffer keyed by shape_id. Each entry holds
     // one chunk per fragment index; missing chunks remain empty until the

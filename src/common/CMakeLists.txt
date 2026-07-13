@@ -4,6 +4,7 @@ add_library(vivora_common STATIC
     utils/peer_code.cpp
     utils/thread_priority.cpp
     protocol/packet.cpp
+    protocol/clipboard_message.cpp
     net/socket.cpp
     net/frame_fragmenter.cpp
     net/frame_assembler.cpp

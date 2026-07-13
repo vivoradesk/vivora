@@ -26,6 +26,7 @@ enum class PacketType : uint8_t {
     MonitorListRequest = 0x17,  // Client → host: enumerate capturable displays (VIV-50)
     MonitorList        = 0x18,  // Host → client: list of displays (MonitorListMessage)
     SelectMonitor      = 0x19,  // Client → host: switch capture to display index
+    Clipboard          = 0x1A,  // Both ways: fragmented ClipboardMessage (VIV-22)
 };
 
 enum PacketFlags : uint8_t {

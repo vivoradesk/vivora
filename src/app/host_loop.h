@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/clipboard_bridge.h"
 #include "app/host_platform.h"
 #include "host/encode/video_encoder.h"
 #include "host/session/host_approval_gate.h"
@@ -63,6 +64,13 @@ struct HostLoopConfig {
     // forces an immediate rendezvous re-registration on the next
     // poll iteration.  Cleared by the loop after firing.
     std::atomic<bool>* rendezvous_refresh_flag = nullptr;
+
+    // VIV-22 clipboard sync (GUI mode only).  When set, each loop tick
+    // drains the bridge's outbound slot into session.send_clipboard() and
+    // pushes any reassembled viewer clipboard into the inbound slot for
+    // the GUI-thread ClipboardSync to apply.  CLI mode leaves this null
+    // (no QClipboard without a GUI event loop) → feature off.
+    std::shared_ptr<ClipboardBridge> clipboard;
 };
 
 // Run the host main loop.  Blocks until the client disconnects.

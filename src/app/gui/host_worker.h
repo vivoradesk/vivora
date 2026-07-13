@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/clipboard_bridge.h"
 #include "app/host_platform.h"
 #include "host/encode/video_encoder.h"
 #include "host/session/host_approval_gate.h"
@@ -37,6 +38,10 @@ struct HostWorkerConfig {
     // lands Pending and the gate's callback fires on the worker
     // thread so the GUI can raise the approval popup.
     std::shared_ptr<vivora::host::HostApprovalGate> approval_gate;
+    // Optional clipboard bridge (VIV-22).  When set, the host loop
+    // exchanges clipboard updates with the GUI-thread ClipboardSync
+    // through it.
+    std::shared_ptr<vivora::ClipboardBridge> clipboard;
 };
 
 // Owns a HostPlatform and runs run_host_loop on its own QThread.  The GUI

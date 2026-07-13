@@ -245,6 +245,20 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
 
         session.poll();
 
+        // VIV-22 clipboard sync: GUI thread <-> session handoff via the
+        // shared bridge.  Outbound (host user copied something) → broadcast
+        // to granted viewers; inbound (viewer copied) → hand to the GUI
+        // thread's ClipboardSync to write the local clipboard.
+        if (cfg.clipboard) {
+            protocol::ClipboardMessage clip;
+            if (cfg.clipboard->take_outbound(clip)) {
+                session.send_clipboard(clip);
+            }
+            if (session.take_new_clipboard(clip)) {
+                cfg.clipboard->push_inbound(std::move(clip));
+            }
+        }
+
         // Auto-exit on "all clients disconnected" is CLI-only behaviour:
         // headless host process is one-shot per session.  GUI host stays
         // up indefinitely, polled by AppController, so we suppress the

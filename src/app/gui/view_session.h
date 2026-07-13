@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/clipboard_bridge.h"
+#include "app/gui/clipboard_sync.h"
 #include "app/view_loop.h"
 #include "app/view_platform.h"
 
@@ -74,6 +76,11 @@ private:
     std::atomic<bool>                      stop_flag_{false};
     std::unique_ptr<vivora::ViewPlatform>  platform_;
     std::unique_ptr<ViewLoopState>         loop_;
+    // VIV-22 clipboard sync while viewing.  Everything runs on the GUI
+    // thread here (the view loop itself is QTimer-driven), but the shared
+    // bridge keeps the wiring identical to the host side.
+    std::shared_ptr<vivora::ClipboardBridge> clipboardBridge_;
+    std::unique_ptr<ClipboardSync>            clipboardSync_;
     QTimer                                 tick_;
     ViewLoopConfig                         loop_cfg_{};
     bool                                   finished_emitted_ = false;

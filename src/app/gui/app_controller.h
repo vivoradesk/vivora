@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/clipboard_bridge.h"
 #include "app/gui/address_book.h"
 #include "app/gui/announcements_client.h"
 #include "app/gui/cloud_client.h"
@@ -22,6 +23,7 @@ class Tray;
 class HostWorker;
 class NetworkChangeWatcher;
 class ViewSession;
+class ClipboardSync;
 
 // Top-level QML bridge.  Owns the Settings, AddressBook, Tray and (in
 // Phase A.1) the actual host / view session workers.  Exposed to QML as
@@ -222,6 +224,12 @@ private:
     // state and the callback we wire to bounce notifications back into
     // the GUI thread (where QML can show the approval dialog).
     std::shared_ptr<vivora::host::HostApprovalGate> approvalGate_;
+    // VIV-22 clipboard sync while sharing.  The bridge is shared with the
+    // host worker thread (via HostWorkerConfig); the ClipboardSync QObject
+    // lives on the GUI thread and owns the QClipboard wiring.  Both exist
+    // only while sharing_ is true.
+    std::shared_ptr<vivora::ClipboardBridge> hostClipboardBridge_;
+    std::unique_ptr<ClipboardSync>           hostClipboardSync_;
     // Pending approval prompts: key -> (pubkeyHex, peerCode).  Lets
     // approveConnection() record/pin the viewer in the address book once
     // the user decides (VIV-61).  Cleared on approve/reject.

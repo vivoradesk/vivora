@@ -111,6 +111,7 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
     target_sources(vivora PRIVATE
         gui/gui_main.cpp
         gui/app_controller.cpp
+        gui/clipboard_sync.cpp
         gui/host_worker.cpp
         gui/network_change_watcher.cpp
         gui/view_session.cpp

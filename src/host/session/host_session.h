@@ -3,6 +3,7 @@
 #include "common/codec/video_codec.h"
 #include "common/crypto/noise_nk.h"
 #include "common/net/socket.h"
+#include "common/protocol/clipboard_message.h"
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/monitor_info.h"
 #include "common/protocol/stream_info.h"
@@ -94,6 +95,10 @@ struct ClientInfo {
     // Client's advertised audio port from HELLO — held until approval
     // promotes it into AudioSender's destination list.
     uint16_t audio_port_pending = 0;
+
+    // Clipboard fragment reassembly for this viewer (VIV-22).  Fed only when
+    // the client is approved AND its grant has clipboard enabled.
+    protocol::ClipboardReassembler clipboard_rx;
 };
 
 class HostSession {
@@ -290,6 +295,15 @@ public:
     // Broadcast the capturable-display list to all connected clients.
     void send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
 
+    // VIV-22 clipboard sync.  send_clipboard() fragments the message and
+    // broadcasts it to every approved client whose grant has clipboard
+    // enabled; the prepared wires are re-broadcast once ~150ms later from
+    // poll() for UDP-loss resilience (receiver dedups by clip_id).
+    void send_clipboard(const protocol::ClipboardMessage& msg);
+    // Pop the latest fully-reassembled clipboard received from any approved
+    // viewer since the last call (latest wins).  Returns false if none.
+    bool take_new_clipboard(protocol::ClipboardMessage& out);
+
     // True when a new client just connected since last check.
     // True when at least one connected client is NOT on this machine.  A
     // loopback-only session must not have its cursor teleported by the
@@ -388,6 +402,20 @@ private:
     bool     monitor_list_requested_ = false;
     bool     monitor_select_pending_ = false;
     uint32_t monitor_select_index_   = 0;
+
+    // VIV-22 clipboard state.  Outbound: prepared plaintext wires kept for
+    // one delayed re-broadcast (each send re-seals through the per-client
+    // cipher, so storing plaintext is fine).  Inbound: latest reassembled
+    // message from any granted viewer, consumed by host_loop.
+    uint32_t  clip_tx_id_ = 0;
+    std::vector<std::vector<uint8_t>> clip_tx_wires_;
+    bool      clip_resend_pending_ = false;
+    TimePoint clip_last_send_{};
+    static constexpr int64_t CLIPBOARD_RESEND_MS = 150;
+    void broadcast_clipboard_wires();
+
+    protocol::ClipboardMessage pending_clipboard_{};
+    bool                       pending_clipboard_valid_ = false;
 
     // STUN discovery: target server (zeroed = disabled) and the result
     // captured at start() for external signaling to pick up.
