@@ -73,6 +73,10 @@ void ClientSession::set_relay_license(const uint8_t token[95]) {
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
+    // Stale-state guard: a re-dial on a fresh attempt must not report the
+    // previous attempt's trust question (VIV-23).
+    trust_pending_active_ = false;
+    trust_pending_ = TrustPending{};
     // The pubkey may be either pinned up front (--host-key HEX) or learned
     // mid-start() from a rendezvous lookup-by-code. The hard check moves
     // to after the lookup attempt — until then either a pinned pubkey or
@@ -140,7 +144,35 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
             // Trust-on-first-use pin against persisted file.  Decoupled
             // from the explicit --host-key check above so even hex-pinned
             // connects benefit from the historical record.
-            if (!peer_code_.empty()) {
+            if (!peer_code_.empty() && interactive_trust_) {
+                // VIV-23 GUI path: never auto-pin, never hard-refuse — hand
+                // the decision to the user.  On Unknown/Mismatch we record
+                // what we learned and abort; the GUI pins on consent (via
+                // crypto::pin_peer) and re-dials, and the retry Matches.
+                std::string stored_hex;
+                switch (crypto::query_peer_pin(peer_code_, resolved_pk, &stored_hex)) {
+                    case crypto::PinQuery::Match:
+                        break;
+                    case crypto::PinQuery::Unknown:
+                        trust_pending_ = TrustPending{
+                            /*mismatch=*/false, peer_code_,
+                            crypto::hex_encode(resolved_pk, 32), std::string() };
+                        trust_pending_active_ = true;
+                        log::info("ClientSession",
+                            "Peer '%s' not pinned yet — awaiting user trust decision",
+                            peer_code_.c_str());
+                        return false;
+                    case crypto::PinQuery::Mismatch:
+                        trust_pending_ = TrustPending{
+                            /*mismatch=*/true, peer_code_,
+                            crypto::hex_encode(resolved_pk, 32), stored_hex };
+                        trust_pending_active_ = true;
+                        log::warn("ClientSession",
+                            "Peer '%s' pubkey CHANGED (possible MITM) — "
+                            "awaiting user trust decision", peer_code_.c_str());
+                        return false;
+                }
+            } else if (!peer_code_.empty()) {
                 using crypto::PinResult;
                 const PinResult pr = crypto::check_or_pin_peer(peer_code_, resolved_pk);
                 if (pr == PinResult::NewlyPinned) {

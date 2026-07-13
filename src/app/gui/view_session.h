@@ -56,6 +56,16 @@ public:
     // iter cleans up; finished() fires from the QTimer callback.
     void stop();
 
+    // VIV-23: when start() returned false because the peer needs a TOFU
+    // trust decision (first connect, or key changed), these expose the
+    // details captured before the loop was torn down.  AppController shows
+    // the trust dialog and, on consent, pins the key and re-dials.
+    bool    trustPromptPending() const { return trustPending_; }
+    bool    trustMismatch()      const { return trustMismatch_; }
+    QString trustPeerCode()      const { return trustPeerCode_; }
+    QString trustNewPubkeyHex()  const { return trustNewHex_; }
+    QString trustOldPubkeyHex()  const { return trustOldHex_; }
+
 signals:
     // Loop has fully torn down — session.stop(), platform.shutdown()
     // have run.  AppController removes us from its active-views list
@@ -84,6 +94,12 @@ private:
     QTimer                                 tick_;
     ViewLoopConfig                         loop_cfg_{};
     bool                                   finished_emitted_ = false;
+    // VIV-23 trust-prompt capture (see trustPromptPending above).
+    bool    trustPending_  = false;
+    bool    trustMismatch_ = false;
+    QString trustPeerCode_;
+    QString trustNewHex_;
+    QString trustOldHex_;
 };
 
 } // namespace vivora::gui

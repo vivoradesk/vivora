@@ -14,10 +14,12 @@
 #include "common/crypto/host_identity.h"
 #include "common/crypto/license_pubkey.h"
 #include "common/crypto/license_token.h"
+#include "common/crypto/peer_pin.h"
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -231,6 +233,8 @@ void AppController::loadIdentity() {
     }
     myPubkeyHex_ = QString::fromStdString(crypto::hex_encode(kp.public_key, 32));
     myPeerCode_  = QString::fromStdString(peer_code::encode(kp.public_key));
+    // VIV-23: canonical short fingerprint for out-of-band verification.
+    myFingerprint_ = QString::fromStdString(crypto::key_fingerprint(kp.public_key));
     emit identityChanged();
 }
 
@@ -327,6 +331,21 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
         log::info("AppController", "View session ended (%d remaining)", activeViews_);
     });
     if (!vs->start(vc)) {
+        // VIV-23: not an error when the connect paused on a TOFU trust
+        // question — stash the context, raise the QML trust dialog and
+        // wait for resolveTrustPrompt().
+        if (vs->trustPromptPending()) {
+            trustDial_   = peerCodeOrHex;
+            trustCode_   = vs->trustPeerCode();
+            trustNewHex_ = vs->trustNewPubkeyHex();
+            const QString newFp = QString::fromStdString(
+                crypto::key_fingerprint_hex(trustNewHex_.toStdString()));
+            const QString oldFp = QString::fromStdString(
+                crypto::key_fingerprint_hex(vs->trustOldPubkeyHex().toStdString()));
+            emit trustPromptRequested(trustCode_, newFp, oldFp, vs->trustMismatch());
+            emit showWindowRequested();
+            return;
+        }
         log::error("AppController", "ViewSession::start failed");
         if (tray_) tray_->notify("Vivora",
             QString("Could not connect to %1").arg(peerCodeOrHex));
@@ -358,6 +377,43 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     (void)peerCodeOrHex;
     log::warn("AppController", "Connect not yet implemented on this platform");
 #endif
+}
+
+void AppController::resolveTrustPrompt(bool trust) {
+    // VIV-23: user answered the TOFU dialog for the connect stashed in
+    // trustDial_.  Trusting persists the pin (replacing a mismatched one)
+    // and simply re-dials — the retry then passes the pin check.
+    const QString dial = trustDial_;
+    const QString code = trustCode_;
+    const QString hex  = trustNewHex_;
+    trustDial_.clear();
+    trustCode_.clear();
+    trustNewHex_.clear();
+    if (!trust) {
+        log::info("AppController", "Trust prompt declined for '%s'",
+                  code.toUtf8().constData());
+        return;
+    }
+    uint8_t pk[32];
+    if (dial.isEmpty() || code.isEmpty()
+        || !crypto::hex_decode_32(hex.toStdString(), pk)) {
+        log::error("AppController", "Trust prompt: stale or invalid context");
+        return;
+    }
+    if (!crypto::pin_peer(code.toStdString(), pk)) {
+        log::error("AppController", "Could not write peer pin file (%s)",
+                   crypto::default_peer_pins_path().c_str());
+        if (tray_) tray_->notify("Vivora",
+            "Could not save the trusted key — check permissions.");
+        return;
+    }
+    log::info("AppController", "Pinned key for '%s' — reconnecting",
+              code.toUtf8().constData());
+    connectToPeer(dial);
+}
+
+void AppController::copyToClipboard(const QString& text) {
+    if (QClipboard* cb = QApplication::clipboard()) cb->setText(text);
 }
 
 void AppController::disconnectView(int /*viewId*/) {

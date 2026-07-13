@@ -88,6 +88,8 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     loop_cfg_.relay_session_hex  = cfg_.relay_session_hex.empty()  ? nullptr : cfg_.relay_session_hex.c_str();
     loop_cfg_.license_file       = cfg_.license_file.empty()       ? nullptr : cfg_.license_file.c_str();
     loop_cfg_.stop_flag          = &stop_flag_;
+    // VIV-23: GUI asks the user before trusting a new / changed peer key.
+    loop_cfg_.interactive_trust  = true;
 
     // VIV-22: clipboard sync client-side.  ClipboardSync watches QClipboard
     // on this (GUI) thread; the loop drains/fills the bridge every iter().
@@ -97,7 +99,20 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
 
     loop_ = std::make_unique<ViewLoopState>();
     if (!loop_->init(*platform_, loop_cfg_)) {
-        log::error("ViewSession", "ViewLoopState::init failed (rc=%d)", loop_->exit_code());
+        // VIV-23: capture a pending TOFU trust question before the loop is
+        // destroyed, so AppController can show the dialog and re-dial.
+        vivora::client::TrustPending tp;
+        if (loop_->trust_pending(tp)) {
+            trustPending_  = true;
+            trustMismatch_ = tp.mismatch;
+            trustPeerCode_ = QString::fromStdString(tp.code);
+            trustNewHex_   = QString::fromStdString(tp.pubkey_hex);
+            trustOldHex_   = QString::fromStdString(tp.stored_hex);
+            log::info("ViewSession", "Connect paused: trust decision needed for '%s'",
+                      tp.code.c_str());
+        } else {
+            log::error("ViewSession", "ViewLoopState::init failed (rc=%d)", loop_->exit_code());
+        }
         loop_.reset();
         platform_.reset();
         return false;

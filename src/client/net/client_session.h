@@ -24,6 +24,19 @@ namespace vivora::client {
 
 enum class SessionState { Disconnected, Connecting, Connected };
 
+// VIV-23: why start() stopped for a TOFU trust decision.  Filled by the
+// session when interactive-trust mode is on and the persisted pin either
+// doesn't exist yet (first connect → mismatch=false) or disagrees with the
+// pubkey the rendezvous just returned (possible MITM → mismatch=true).
+// The GUI shows the trust dialog, pins on consent (crypto::pin_peer) and
+// simply re-dials — the retry then passes the pin check.
+struct TrustPending {
+    bool        mismatch = false;  // false = unknown peer (first connect)
+    std::string code;              // memorable peer code being dialled
+    std::string pubkey_hex;        // pubkey the rendezvous returned (64 hex)
+    std::string stored_hex;        // previously pinned pubkey (mismatch only)
+};
+
 class ClientSession {
 public:
     static constexpr int64_t HELLO_RETRY_MS = 500;
@@ -79,6 +92,15 @@ public:
     // server-side and the client receives the pubkey alongside the
     // reflexive endpoint.  Mutually exclusive with set_peer_pubkey.
     void set_peer_code(const std::string& code) { peer_code_ = code; }
+
+    // VIV-23 interactive TOFU.  When on, start() does NOT auto-pin an
+    // unknown peer and does NOT hard-refuse a pin mismatch: in both cases
+    // it records a TrustPending and returns false so the (GUI) caller can
+    // ask the user and retry.  Off (default) keeps the CLI behaviour:
+    // silent pin on first contact, log + refuse on mismatch.
+    void set_interactive_trust(bool on) { interactive_trust_ = on; }
+    bool has_trust_pending() const { return trust_pending_active_; }
+    const TrustPending& trust_pending() const { return trust_pending_; }
 
     // Drive the session: send hellos, receive packets, respond to pings.
     void poll();
@@ -244,6 +266,10 @@ private:
     uint8_t         peer_pubkey_[32] = {};
     bool            peer_pubkey_set_ = false;
     std::string     peer_code_;        // alternative to peer_pubkey_; resolved at start()
+    // VIV-23 interactive TOFU state (see set_interactive_trust above).
+    bool            interactive_trust_    = false;
+    bool            trust_pending_active_ = false;
+    TrustPending    trust_pending_{};
     // LAN candidates advertised by the host at registration, retrieved in
     // the LookupResponse and used by start() for same-NAT short-circuit.
     static constexpr size_t MAX_LAN_CANDIDATES = 4;

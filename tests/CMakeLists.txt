@@ -46,6 +46,12 @@ target_link_libraries(rendezvous_test PRIVATE vivora_common)
 target_include_directories(rendezvous_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME rendezvous_test COMMAND rendezvous_test)
 
+# TOFU peer pinning + trust UX helpers (VIV-23).
+add_executable(peer_pin_test peer_pin_test.cpp)
+target_link_libraries(peer_pin_test PRIVATE vivora_common)
+target_include_directories(peer_pin_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME peer_pin_test COMMAND peer_pin_test)
+
 add_executable(noise_test noise_test.cpp)
 target_link_libraries(noise_test PRIVATE vivora_common)
 target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

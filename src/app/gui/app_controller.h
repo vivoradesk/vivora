@@ -39,6 +39,9 @@ class AppController : public QObject {
     Q_PROPERTY(int     clientCount   READ clientCount   NOTIFY clientCountChanged)
     Q_PROPERTY(QString myPeerCode    READ myPeerCode    NOTIFY identityChanged)
     Q_PROPERTY(QString myPubkeyHex   READ myPubkeyHex   NOTIFY identityChanged)
+    // VIV-23: this device's key fingerprint (canonical short form) —
+    // read-only, shown in Settings for out-of-band comparison.
+    Q_PROPERTY(QString myFingerprint READ myFingerprint NOTIFY identityChanged)
     Q_PROPERTY(int     activeViews   READ activeViews   NOTIFY activeViewsChanged)
     Q_PROPERTY(vivora::gui::Settings* settings    READ settings    CONSTANT)
     Q_PROPERTY(vivora::gui::AddressBook* peers    READ peers       CONSTANT)
@@ -81,6 +84,7 @@ public:
     int     clientCount() const { return clientCount_; }
     QString myPeerCode() const  { return myPeerCode_; }
     QString myPubkeyHex() const { return myPubkeyHex_; }
+    QString myFingerprint() const { return myFingerprint_; }
     int     activeViews() const { return activeViews_; }
     Settings*    settings() const { return settings_.get(); }
     AddressBook* peers()    const { return peers_.get(); }
@@ -146,6 +150,16 @@ public slots:
     // from the Refresh button in the sharing card.
     Q_INVOKABLE void refreshRendezvous();
 
+    // VIV-23 TOFU trust prompt resolution — QML calls this from the
+    // TrustPromptDialog buttons.  trust=true pins (or replaces) the peer's
+    // key in known_peers.txt and re-dials the connect that was paused;
+    // trust=false drops the attempt.
+    Q_INVOKABLE void resolveTrustPrompt(bool trust);
+
+    // Small QML helper: put `text` on the system clipboard (used by the
+    // copy button next to the fingerprint in Settings, VIV-23).
+    Q_INVOKABLE void copyToClipboard(const QString& text);
+
     // VIV-29: import a license token file — copies it next to the config as
     // license.bin, points the setting at it and re-verifies.  Accepts a
     // plain path or a file:// URL (from the QML file dialog).
@@ -209,6 +223,14 @@ signals:
                                      bool    recognized,
                                      int     seenCount,
                                      QString deviceName);
+    // VIV-23: outgoing connect paused on a TOFU trust question.  QML shows
+    // TrustPromptDialog; mismatch=false is the friendly first-connect
+    // variant, mismatch=true is the red key-changed (possible MITM) one.
+    // Fingerprints are the canonical short form (crypto::key_fingerprint).
+    void trustPromptRequested(QString peerCode,
+                              QString newFingerprint,
+                              QString oldFingerprint,
+                              bool    mismatch);
 
 private:
     void loadIdentity();        // populates myPeerCode_ + myPubkeyHex_
@@ -249,6 +271,14 @@ private:
     int     activeViews_ = 0;
     QString myPeerCode_;
     QString myPubkeyHex_;
+    QString myFingerprint_;
+
+    // VIV-23: the connect attempt paused on a trust question.  dial is the
+    // exact string the user dialled (re-fed to connectToPeer on consent);
+    // code + newHex identify what to pin.
+    QString trustDial_;
+    QString trustCode_;
+    QString trustNewHex_;
 
     // VIV-29 license status (verified offline).
     bool    licenseValid_ = false;

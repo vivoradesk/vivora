@@ -730,15 +730,42 @@ Window {
                         }
                     }
                     Field {
-                        title: "Your pubkey"
-                        help: "Share out-of-band to let peers verify it's really you."
-                        Label {
-                            text: App.myPubkeyHex.length > 12
-                                  ? "ED25:" + App.myPubkeyHex.substring(0,6) + "…" + App.myPubkeyHex.substring(App.myPubkeyHex.length-4)
-                                  : "—"
-                            color: theme.text
-                            font.family: theme.monoFont
-                            font.pixelSize: 13
+                        title: "Your key fingerprint"
+                        help: "Read it to a peer out-of-band so they can verify it's really you (VIV-23)."
+                        RowLayout {
+                            spacing: 8
+                            Label {
+                                text: App.myFingerprint.length > 0 ? App.myFingerprint : "—"
+                                color: theme.text
+                                font.family: theme.monoFont
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: fpCopyLbl.implicitWidth + 18
+                                Layout.preferredHeight: 26
+                                radius: 7
+                                color: fpCopyHover.hovered ? theme.hoverBg : theme.ctrlBg
+                                border.color: theme.border
+                                border.width: 1
+                                HoverHandler { id: fpCopyHover }
+                                Label {
+                                    id: fpCopyLbl
+                                    anchors.centerIn: parent
+                                    text: fpCopyTimer.running ? "Copied" : "Copy"
+                                    color: theme.text
+                                    font.pixelSize: 11
+                                }
+                                Timer { id: fpCopyTimer; interval: 1200 }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        App.copyToClipboard(App.myFingerprint)
+                                        fpCopyTimer.restart()
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -38,6 +38,11 @@ struct ViewLoopConfig {
     // GUI mode hook: when non-null, iter() exits the loop at the next
     // chance.  CLI ignores it (uses Ctrl+C / window-close instead).
     std::atomic<bool>* stop_flag = nullptr;
+    // VIV-23 GUI mode hook: interactive TOFU.  When true, an unknown or
+    // changed peer pin makes init() fail with a TrustPending (see
+    // trust_pending() below) instead of auto-pinning / hard-refusing.
+    // CLI leaves this false → legacy behaviour.
+    bool interactive_trust = false;
     // VIV-22 clipboard sync (GUI mode only).  When set, each iter() drains
     // the bridge's outbound slot into session.send_clipboard() and pushes
     // any reassembled host clipboard into the inbound slot for the
@@ -78,6 +83,15 @@ public:
     uint64_t frames_decoded() const { return frames_decoded_; }
     double   rtt_ms() const;
     client::SessionState state() const;
+
+    // VIV-23: after init() returned false, true when the failure was a
+    // TOFU trust question (first connect / key changed) rather than a real
+    // error.  `out` receives the details for the GUI dialog.
+    bool trust_pending(client::TrustPending& out) const {
+        if (!session_.has_trust_pending()) return false;
+        out = session_.trust_pending();
+        return true;
+    }
 
 private:
     // Min interval between IDR requests.  Was a fixed 600ms — but under frequent

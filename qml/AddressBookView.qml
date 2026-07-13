@@ -194,7 +194,8 @@ ListView {
                 Layout.fillWidth: true
             }
             Label {
-                text: "The peer can reconnect later; only the local record is removed."
+                text: "Removes the local record and the trusted key pin — "
+                      + "you'll re-verify its key on the next connect."
                 color: "#6f6b60"
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap

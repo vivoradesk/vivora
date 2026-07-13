@@ -45,6 +45,19 @@ ApplicationWindow {
             window.raise()
             window.requestActivate()
         }
+        // VIV-23: outgoing connect paused on a TOFU trust question — show
+        // the trust dialog (first-connect or red key-changed variant).
+        function onTrustPromptRequested(peerCode, newFingerprint, oldFingerprint,
+                                        mismatch) {
+            trustLoader.peerCode       = peerCode
+            trustLoader.newFingerprint = newFingerprint
+            trustLoader.oldFingerprint = oldFingerprint
+            trustLoader.mismatch       = mismatch
+            trustLoader.active = true
+            window.show()
+            window.raise()
+            window.requestActivate()
+        }
     }
 
     Loader {
@@ -65,6 +78,25 @@ ApplicationWindow {
             initialCode: addPeerLoader.pendingCode
             initialPubkey: addPeerLoader.pendingPubkey
             onClosed: addPeerLoader.active = false
+        }
+    }
+    // VIV-23 outgoing TOFU trust prompt.  One at a time is fine — connects
+    // are user-initiated, so there is no queue like the approval dialog's.
+    Loader {
+        id: trustLoader
+        active: false
+        property string peerCode: ""
+        property string newFingerprint: ""
+        property string oldFingerprint: ""
+        property bool   mismatch: false
+        sourceComponent: TrustPromptDialog {
+            visible: true
+            peerCode:       trustLoader.peerCode
+            newFingerprint: trustLoader.newFingerprint
+            oldFingerprint: trustLoader.oldFingerprint
+            mismatch:       trustLoader.mismatch
+            onTrusted:   { App.resolveTrustPrompt(true);  trustLoader.active = false }
+            onDismissed: { App.resolveTrustPrompt(false); trustLoader.active = false }
         }
     }
     Loader {

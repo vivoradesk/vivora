@@ -6,6 +6,7 @@
         <file>SettingsDialog.qml</file>
         <file>AddPeerDialog.qml</file>
         <file>ConnectionApprovalDialog.qml</file>
+        <file>TrustPromptDialog.qml</file>
     </qresource>
     <qresource prefix="/icons">
         <file alias="app/16.png">../icons/win/vivora-16.png</file>

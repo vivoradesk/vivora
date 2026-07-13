@@ -174,4 +174,23 @@ bool hex_decode_32(const std::string& hex, uint8_t out[32]) {
     return true;
 }
 
+std::string key_fingerprint(const uint8_t pubkey[32]) {
+    return key_fingerprint_hex(hex_encode(pubkey, 32));
+}
+
+std::string key_fingerprint_hex(const std::string& pubkey_hex) {
+    // First 16 hex chars, uppercased, grouped in fours: "6D2E 0C4A 7F3B 9E11".
+    // Tolerates short/garbage input by grouping whatever is there.
+    std::string out;
+    out.reserve(19);
+    const size_t n = pubkey_hex.size() < 16 ? pubkey_hex.size() : size_t(16);
+    for (size_t i = 0; i < n; ++i) {
+        if (i > 0 && (i % 4) == 0) out += ' ';
+        char c = pubkey_hex[i];
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        out += c;
+    }
+    return out;
+}
+
 } // namespace vivora::crypto

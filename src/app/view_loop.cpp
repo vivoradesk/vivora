@@ -554,8 +554,15 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             }
         }
     }
+    // VIV-23: GUI mode asks the user before pinning / replacing a peer key.
+    session_.set_interactive_trust(cfg.interactive_trust);
     if (!session_.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
-        log::error("VIEW", "Failed to start client session");
+        if (session_.has_trust_pending()) {
+            // Not an error — the GUI shows the trust dialog and re-dials.
+            log::info("VIEW", "Session paused for TOFU trust decision");
+        } else {
+            log::error("VIEW", "Failed to start client session");
+        }
         exit_code_ = 1;
         return false;
     }

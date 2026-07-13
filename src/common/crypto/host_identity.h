@@ -35,4 +35,16 @@ std::string hex_encode(const uint8_t* bytes, size_t len);
 // non-hex char or wrong length.  Used by the client's `--host-key HEX` CLI.
 bool hex_decode_32(const std::string& hex, uint8_t out[32]);
 
+// Canonical human-comparable key fingerprint (VIV-23): the first 16 hex
+// chars of the pubkey, uppercased and grouped in fours — "6D2E 0C4A 7F3B
+// 9E11".  Short enough to read over the phone, long enough (64 bits) that
+// a targeted second-preimage is out of reach for a MITM in real time.
+// Every UI surface (trust dialogs, Settings) MUST use this one helper so
+// the two sides always compare like with like.
+std::string key_fingerprint(const uint8_t pubkey[32]);
+// Same, from a 64-char hex string (e.g. a pin-file entry).  Malformed or
+// short input is grouped as-is after uppercasing — never fails, so a
+// corrupt pin line still shows *something* comparable in the dialog.
+std::string key_fingerprint_hex(const std::string& pubkey_hex);
+
 } // namespace vivora::crypto

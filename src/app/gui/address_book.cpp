@@ -1,5 +1,7 @@
 #include "app/gui/address_book.h"
 
+#include "common/crypto/peer_pin.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -131,6 +133,12 @@ void AddressBook::setTrusted(int row, bool trusted) {
 
 void AddressBook::remove(int row) {
     if (row < 0 || row >= peers_.size()) return;
+    // VIV-23: "Forget" also drops the TOFU pin from known_peers.txt so the
+    // next connect re-runs the first-time trust prompt instead of silently
+    // matching (or worse, mismatching) a key the user asked us to forget.
+    // Matched on both the last-seen code and the stable pubkey.
+    crypto::forget_peer_pin(peers_[row].lastPeerCode.toStdString(),
+                            peers_[row].pubkeyHex.toStdString());
     beginRemoveRows({}, row, row);
     peers_.remove(row);
     endRemoveRows();
