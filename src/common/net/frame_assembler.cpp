@@ -209,12 +209,19 @@ std::vector<NackBatch> FrameAssembler::collect_nacks(int64_t gap_ms, int64_t rat
         if (pf.complete) continue;
         if (pf.received >= pf.frag_count) continue;
 
-        // Eligibility: newer frame has started, OR this frame is older than gap_ms.
-        bool newer_frame_started = has_seq_ &&
-            static_cast<int16_t>(newest_seq_ - seq) > 0;
+        // Eligibility: the frame must be at least gap_ms old.  "A newer
+        // frame has started" is deliberately NOT a trigger: FEC
+        // interleaving (VIV-82, D=6) and send pacing intentionally lace a
+        // frame's tail packets between the next frame's head, so a newer
+        // seq arriving proves nothing about loss — keying off it produced
+        // a steady stream of spurious NACKs for packets still in flight
+        // (observed on clean wired LAN: retx counter climbing with FEC
+        // loss at 0.0%).  age_ms is measured from the frame's FIRST
+        // packet, so callers must pass a gap of at least one frame
+        // interval to cover the paced spread of the frame itself.
         auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - pf.first_arrival).count();
-        if (!newer_frame_started && age_ms < gap_ms) continue;
+        if (age_ms < gap_ms) continue;
 
         NackBatch batch;
         batch.seq_no = seq;

@@ -35,9 +35,11 @@ public:
     bool pop_frame(AssembledFrame& frame);
 
     // Collect fragments that need NACKing.
-    // A fragment is eligible when either:
-    //   (a) a newer frame has started arriving but this frame is still incomplete, or
-    //   (b) first arrival of this frame was more than gap_ms ago and gaps remain.
+    // A fragment is eligible when the frame's first packet arrived more
+    // than gap_ms ago and gaps remain.  gap_ms must cover at least one
+    // frame interval — pacing spreads a frame's own packets across its
+    // interval and FEC interleaving laces frames together, so anything
+    // shorter fires NACKs at packets still in flight.
     // Fragments already NACKed within rate_limit_ms are skipped (avoid duplicates
     // while a retransmit is still in flight).
     std::vector<NackBatch> collect_nacks(int64_t gap_ms, int64_t rate_limit_ms);

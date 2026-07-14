@@ -583,9 +583,14 @@ void ClientSession::poll() {
             // NACK processing: retransmit only what FEC couldn't recover.
             // We tried gap=2 / rl=RTT for tail-loss recovery — it caused
             // a hang/crash within a couple of seconds (suspected NACK
-            // storm).  Reverted to the conservative 4 ms / 1.5×RTT
-            // values that have been stable across the project.
-            int64_t gap_ms = 4;
+            // storm).  gap must span at least ~1.5 frame intervals: age is
+            // measured from the frame's FIRST packet while pacing spreads
+            // the frame across its whole interval, so a shorter gap NACKs
+            // packets that are still in flight (spurious retx storms on
+            // clean links, worse the higher the framerate).
+            const uint16_t fps = effective_target_fps();
+            int64_t gap_ms = fps > 0 ? (1500 / fps) : 25;
+            if (gap_ms < 8) gap_ms = 8;
             int64_t rl_ms = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_ * 1.5) : 8;
             if (rl_ms < 8) rl_ms = 8;
             auto batches = receiver_->collect_nacks(gap_ms, rl_ms);
