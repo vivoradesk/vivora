@@ -267,7 +267,9 @@ public:
 
     // Broadcast the real (pre-padding) stream dimensions so the client can
     // trim encoder-alignment padding and scale mouse input correctly.
-    void send_stream_info(uint16_t width, uint16_t height);
+    // target_fps = currently applied framerate target (user cap after
+    // adaptive clamping) so clients can display the effective rate.
+    void send_stream_info(uint16_t width, uint16_t height, uint16_t target_fps);
 
     // Broadcast the current encoder target bitrate (kbps) so the client HUD can
     // show "encoding (actual)" — the gently-climbing target vs the measured

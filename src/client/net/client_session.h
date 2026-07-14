@@ -137,6 +137,12 @@ public:
 
     // HUD accessors — populated each PerfReport tick / audio stat tick.
     uint16_t perf_target_fps()  const { return perf_target_fps_; }
+    // Effective stream target for the HUD: the host's applied rate (its
+    // VIV-67 cap after adaptive clamping, from StreamInfo) when known,
+    // else our own PerfReport request (old hosts don't send the field).
+    uint16_t effective_target_fps() const {
+        return host_target_fps_ != 0 ? host_target_fps_ : perf_target_fps_;
+    }
     float    last_reject_pct()  const { return last_reject_pct_; }
     float    last_drop_pct()    const { return last_drop_pct_; }
     uint32_t last_audio_pps()   const { return last_audio_pps_; }
@@ -330,6 +336,10 @@ private:
     // (host re-sends the same values every keyframe for loss resilience).
     protocol::StreamInfoMessage stream_info_{};
     bool new_stream_info_ = false;
+    // Host's applied framerate target from StreamInfo (0 = old host,
+    // field never received).  Tracked separately from stream_info_ so an
+    // fps-only change doesn't trigger the dimension-change path.
+    uint16_t host_target_fps_ = 0;
 
     // Latest display list from the host (VIV-50).  `new_monitor_list_` latches
     // on arrival so the view layer pushes it into the monitor panel once.

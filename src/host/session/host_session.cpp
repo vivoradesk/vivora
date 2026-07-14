@@ -986,11 +986,13 @@ void HostSession::send_cursor_position(const protocol::CursorPositionMessage& ms
     }
 }
 
-void HostSession::send_stream_info(uint16_t width, uint16_t height) {
+void HostSession::send_stream_info(uint16_t width, uint16_t height,
+                                   uint16_t target_fps) {
     if (!socket_ || clients_.empty()) return;
     protocol::StreamInfoMessage msg;
-    msg.width  = width;
-    msg.height = height;
+    msg.width      = width;
+    msg.height     = height;
+    msg.target_fps = target_fps;
 
     protocol::Packet pkt;
     pkt.header.type        = protocol::PacketType::StreamInfo;
@@ -1004,8 +1006,8 @@ void HostSession::send_stream_info(uint16_t width, uint16_t height) {
         if (!client.handshake_complete) continue;
         send_sealed(client, wire);
     }
-    log::info("HostSession", "Sent StreamInfo %ux%u to %zu client(s)",
-              width, height, clients_.size());
+    log::info("HostSession", "Sent StreamInfo %ux%u @%u fps to %zu client(s)",
+              width, height, target_fps, clients_.size());
 }
 
 void HostSession::send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors) {

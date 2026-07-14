@@ -883,6 +883,12 @@ void ClientSession::handle_stream_info(const uint8_t* payload, size_t len) {
         return;
     }
     if (msg.width == 0 || msg.height == 0) return;
+    // Host's applied framerate target (VIV-67): 0 means an old host that
+    // doesn't send the field — keep whatever we had.
+    if (msg.target_fps != 0 && msg.target_fps != host_target_fps_) {
+        host_target_fps_ = msg.target_fps;
+        log::info("ClientSession", "Host stream target -> %u fps", host_target_fps_);
+    }
     if (msg.width  != stream_info_.width ||
         msg.height != stream_info_.height) {
         stream_info_ = msg;

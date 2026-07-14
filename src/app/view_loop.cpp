@@ -411,7 +411,7 @@ bool ViewLoopState::iter_threaded() {
             v.fec_recovered     = r->fec_recovered();
             v.fec_groups_failed = r->fec_failed();
         }
-        v.target_fps = session.perf_target_fps();
+        v.target_fps = session.effective_target_fps();
         v.reject_pct = session.last_reject_pct();
         v.drop_pct   = session.last_drop_pct();
         v.audio_pps  = session.last_audio_pps();
@@ -850,7 +850,7 @@ bool ViewLoopState::iter() {
             v.fec_recovered     = r->fec_recovered();
             v.fec_groups_failed = r->fec_failed();
         }
-        v.target_fps = session.perf_target_fps();
+        v.target_fps = session.effective_target_fps();
         v.reject_pct = session.last_reject_pct();
         v.drop_pct   = session.last_drop_pct();
         v.audio_pps  = session.last_audio_pps();

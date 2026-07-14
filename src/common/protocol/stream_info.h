@@ -19,12 +19,19 @@ namespace vivora::protocol {
 // is picked up without needing a handshake round-trip.
 //
 // Wire format:
-//   width(2B LE) | height(2B LE) = 4 bytes
+//   width(2B LE) | height(2B LE) | target_fps(2B LE) = 6 bytes
+// target_fps is the host's currently APPLIED framerate target — the user
+// cap (VIV-67) after adaptive clamping — so the client HUD can show the
+// effective rate instead of its own optimistic PerfReport request.  The
+// field was appended later: decoders accept the legacy 4-byte form and
+// leave target_fps at 0 (= unknown, HUD falls back to the local request).
 struct StreamInfoMessage {
-    uint16_t width  = 0;
-    uint16_t height = 0;
+    uint16_t width      = 0;
+    uint16_t height     = 0;
+    uint16_t target_fps = 0;
 
-    static constexpr size_t WIRE_SIZE = 4;
+    static constexpr size_t WIRE_SIZE        = 6;
+    static constexpr size_t WIRE_SIZE_LEGACY = 4;
 
     std::vector<uint8_t> serialize() const {
         std::vector<uint8_t> buf(WIRE_SIZE);
@@ -32,13 +39,18 @@ struct StreamInfoMessage {
         buf[1] = static_cast<uint8_t>((width  >> 8) & 0xFF);
         buf[2] = static_cast<uint8_t>(height & 0xFF);
         buf[3] = static_cast<uint8_t>((height >> 8) & 0xFF);
+        buf[4] = static_cast<uint8_t>(target_fps & 0xFF);
+        buf[5] = static_cast<uint8_t>((target_fps >> 8) & 0xFF);
         return buf;
     }
 
     static bool deserialize(const uint8_t* data, size_t len, StreamInfoMessage& out) {
-        if (len < WIRE_SIZE) return false;
+        if (len < WIRE_SIZE_LEGACY) return false;
         out.width  = static_cast<uint16_t>(data[0] | (data[1] << 8));
         out.height = static_cast<uint16_t>(data[2] | (data[3] << 8));
+        out.target_fps = len >= WIRE_SIZE
+            ? static_cast<uint16_t>(data[4] | (data[5] << 8))
+            : 0;
         return true;
     }
 };

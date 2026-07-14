@@ -328,7 +328,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             // mapping matches the host screen.  Repeated on every
             // keyframe below for loss resilience.
             session.send_stream_info(static_cast<uint16_t>(cap_w),
-                                     static_cast<uint16_t>(cap_h));
+                                     static_cast<uint16_t>(cap_h),
+                                     applied_target_fps);
             if (!had_clients) {
                 // First client: arm warm-up ramp (cold start).
                 bitrate_ctl.notify_client_connected();
@@ -591,7 +592,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 session.set_screen_origin(platform.input_origin_x(),
                                           platform.input_origin_y());
                 session.send_stream_info(static_cast<uint16_t>(cap_w),
-                                         static_cast<uint16_t>(cap_h));
+                                         static_cast<uint16_t>(cap_h),
+                                         applied_target_fps);
                 platform.request_idr();
                 force_encode = true;
                 // The switch resets the client's decoder (new resolution) — give
@@ -627,6 +629,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 log::info("HOST", "Adaptive framerate -> %u fps (interval %lld us)",
                           applied_target_fps,
                           static_cast<long long>(min_frame_interval_us));
+                // Push the new effective target to clients right away so
+                // their HUDs track it without waiting for the next keyframe.
+                session.send_stream_info(static_cast<uint16_t>(cap_w),
+                                         static_cast<uint16_t>(cap_h),
+                                         applied_target_fps);
             }
         }
         if (last_capture_time.time_since_epoch().count() != 0 && !force_encode) {
@@ -762,7 +769,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                     // catches up quickly after a lost initial packet or
                     // a mid-session reconnect.
                     session.send_stream_info(static_cast<uint16_t>(cap_w),
-                                             static_cast<uint16_t>(cap_h));
+                                             static_cast<uint16_t>(cap_h),
+                                             applied_target_fps);
                 }
                 session.send_frame(pkt.data, pkt.len,
                                    frame_seq, timestamp, pkt.keyframe,
