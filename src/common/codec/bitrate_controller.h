@@ -124,6 +124,20 @@ public:
         ceiling_override_bps_ = bps;
     }
 
+    // Hard clamp requested by a viewer (tightest cap across clients, from
+    // PerfReport; 0 = none).  Applied inside clamp() so every adaptation
+    // path — warmup, recovery, damage cuts — respects it, and the current
+    // bitrate is pulled down immediately when the cap tightens.
+    void set_client_cap(uint32_t bps) {
+        if (client_cap_bps_ == bps) return;
+        client_cap_bps_ = bps;
+        if (bps != 0 && current_bps_ > bps) {
+            current_bps_ = clamp(bps);
+            log::info("BitrateCtl", "Client cap %u kbps -> bitrate lowered",
+                      bps / 1000);
+        }
+    }
+
     // Force a specific bitrate (e.g. when client count changes and the
     // current bitrate is already too high for the new N).
     void force_bitrate(uint32_t bps) {
@@ -432,7 +446,9 @@ public:
 
 private:
     uint32_t clamp(uint32_t bps) const {
-        return std::max(bounds_.min_bps, std::min(bounds_.max_bps, bps));
+        uint32_t hi = bounds_.max_bps;
+        if (client_cap_bps_ != 0 && client_cap_bps_ < hi) hi = client_cap_bps_;
+        return std::max(bounds_.min_bps, std::min(hi, bps));
     }
 
     static constexpr int64_t ADAPT_MS = 500;             // run adaptation every 500ms
@@ -471,6 +487,7 @@ private:
     uint32_t probe_ceiling_bps_          = 0;
     uint32_t recovery_ceiling_bps_       = 0;  // post-warmup cap for additive recovery
     uint32_t ceiling_override_bps_       = 0;  // diagnostic: raise hard cap above WARMUP_CEILING_BPS
+    uint32_t client_cap_bps_             = 0;  // viewer-requested hard cap (0 = none)
     uint32_t client_count_               = 1;
     // Network feedback.
     double   last_rtt_ms_      = 0.0;

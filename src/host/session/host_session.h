@@ -49,6 +49,9 @@ struct ClientInfo {
     uint16_t  perf_target_fps = 60;
     uint8_t   perf_reject_pct = 0;
     uint8_t   perf_drop_pct   = 0;
+    // Client's user-configured bitrate cap (kbps, 0 = none) from
+    // PerfReport bytes [4..8).
+    uint32_t  bitrate_cap_kbps = 0;
 
     // Noise_NK handshake state.  `handshake` is created on msg1 arrival and
     // destroyed once finalize() has populated `send_cs` / `recv_cs`.
@@ -255,6 +258,11 @@ public:
     // returned as-is when there are no clients yet.  Floors at 15 to keep
     // interactivity from collapsing.
     uint16_t min_perf_target_fps(uint16_t cap = 60) const;
+
+    // Tightest user-configured bitrate cap across connected clients, in
+    // bps (0 = nobody requested one).  Fed into the bitrate controller as
+    // a hard clamp so a viewer can bound the stream it receives.
+    uint32_t min_client_bitrate_cap_bps() const;
 
     VideoSender* sender() { return sender_.get(); }
     AudioSender* audio_sender() { return audio_sender_.get(); }

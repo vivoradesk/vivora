@@ -617,6 +617,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // the interval when EWMA crosses ±2 fps from the applied value
         // (prevents single-spike whiplash).
         {
+            // Viewer-requested bitrate cap (PerfReport bytes [4..8), 0 =
+            // none): hard clamp inside the controller, cheap no-op when
+            // unchanged.
+            bitrate_ctl.set_client_cap(session.min_client_bitrate_cap_bps());
             // min_perf_target_fps(fps_cap) already clamps client reports to
             // the user's cap (VIV-67), so the EWMA can never ratchet above it.
             uint16_t want = session.min_perf_target_fps(fps_cap);

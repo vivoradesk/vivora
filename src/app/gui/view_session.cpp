@@ -90,6 +90,9 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     loop_cfg_.stop_flag          = &stop_flag_;
     // VIV-23: GUI asks the user before trusting a new / changed peer key.
     loop_cfg_.interactive_trust  = true;
+    // Viewing caps (Settings → Viewing, 0 = none).
+    loop_cfg_.view_fps_cap  = static_cast<uint16_t>(std::max(0, cfg_.view_fps_cap));
+    loop_cfg_.view_max_kbps = static_cast<uint32_t>(std::max(0, cfg_.view_max_kbps));
 
     // VIV-22: clipboard sync client-side.  ClipboardSync watches QClipboard
     // on this (GUI) thread; the loop drains/fills the bridge every iter().

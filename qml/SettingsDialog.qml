@@ -50,6 +50,7 @@ Window {
         { header: "SESSION" },
         { icon: "⇄", label: "Network",          index: 3 },
         { icon: "▤", label: "Codec",            index: 4 },
+        { icon: "▷", label: "Viewing",          index: 9 },
         { icon: "✓", label: "Security",         index: 5 },
         { header: "ADVANCED" },
         { icon: "∞", label: "Self-hosted relay", index: 6 },
@@ -972,6 +973,54 @@ Window {
                             enabled: App.settings.startAtLoginSupported
                             checked: App.settings.startAtLogin
                             onToggled: App.settings.startAtLogin = checked
+                        }
+                    }
+                }
+
+                // ── 9: Viewing ───────────────────────────────────────
+                // Client-side caps applied when THIS device watches a
+                // remote desktop.  Appended at the stack end so existing
+                // panel indices stay stable (same pattern as Startup).
+                ColumnLayout {
+                    spacing: 0
+                    SectionTitle {
+                        title: "Viewing"
+                        subtitle: "Limits for streams you watch from this device. Applied on the next connect."
+                    }
+                    Field {
+                        title: "Max framerate"
+                        help: "Ceiling for the adaptive framerate when viewing. Auto lets it probe up to what this device sustains."
+                        CreamCombo {
+                            readonly property var fpsValues: [0, 30, 60, 90, 120, 144]
+                            entries: [ { text: "Auto", sub: "adaptive" },
+                                       { text: "30 fps" },
+                                       { text: "60 fps" },
+                                       { text: "90 fps" },
+                                       { text: "120 fps" },
+                                       { text: "144 fps" } ]
+                            currentIndex: {
+                                var i = fpsValues.indexOf(App.settings.viewFpsCap)
+                                return i >= 0 ? i : 0
+                            }
+                            onActivated: App.settings.viewFpsCap = fpsValues[currentIndex]
+                        }
+                    }
+                    Field {
+                        title: "Max bitrate"
+                        help: "Hard limit the host must respect for this viewer. Auto adapts to the link."
+                        CreamCombo {
+                            readonly property var kbpsValues: [0, 5000, 10000, 20000, 35000, 50000]
+                            entries: [ { text: "Auto", sub: "adaptive" },
+                                       { text: "5 Mbps" },
+                                       { text: "10 Mbps" },
+                                       { text: "20 Mbps" },
+                                       { text: "35 Mbps" },
+                                       { text: "50 Mbps" } ]
+                            currentIndex: {
+                                var i = kbpsValues.indexOf(App.settings.viewMaxKbps)
+                                return i >= 0 ? i : 0
+                            }
+                            onActivated: App.settings.viewMaxKbps = kbpsValues[currentIndex]
                         }
                     }
                 }

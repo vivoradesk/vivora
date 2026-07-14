@@ -317,6 +317,8 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
             "Managed relay needs Pro — connecting via direct/rendezvous only");
     }
     vc.license_file       = settings_->licenseFile().toStdString();
+    vc.view_fps_cap       = settings_->viewFpsCap();
+    vc.view_max_kbps      = settings_->viewMaxKbps();
 
     auto vs = std::make_unique<ViewSession>(this);
     ViewSession* vs_ptr = vs.get();

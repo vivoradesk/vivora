@@ -27,6 +27,8 @@ constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
 constexpr const char* K_THEME              = "appearance/theme";
 constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
 constexpr const char* K_HOST_FPS           = "capture/hostFps";
+constexpr const char* K_VIEW_FPS_CAP       = "viewing/fpsCap";
+constexpr const char* K_VIEW_MAX_KBPS      = "viewing/maxKbps";
 constexpr const char* K_CLOUD_URL          = "account/cloudUrl";
 constexpr const char* K_ACCOUNT_TOKEN      = "account/token";
 constexpr const char* K_ACCOUNT_EMAIL      = "account/email";
@@ -161,6 +163,26 @@ int Settings::hostFps() const {
     return v;
 }
 void Settings::setHostFps(int v)              { if (v != hostFps()) { q_.setValue(K_HOST_FPS, v); emit changed(); } }
+
+// Viewing caps (client side).  0 = no cap.  Sanitised on read like
+// hostFps; nonzero fps caps clamp into [15, 240], bitrate into
+// [500 kbps, 500 Mbps].
+int Settings::viewFpsCap() const {
+    int v = q_.value(K_VIEW_FPS_CAP, 0).toInt();
+    if (v <= 0)  return 0;
+    if (v < 15)  return 15;
+    if (v > 240) return 240;
+    return v;
+}
+void Settings::setViewFpsCap(int v)           { if (v != viewFpsCap()) { q_.setValue(K_VIEW_FPS_CAP, v); emit changed(); } }
+int Settings::viewMaxKbps() const {
+    int v = q_.value(K_VIEW_MAX_KBPS, 0).toInt();
+    if (v <= 0)       return 0;
+    if (v < 500)      return 500;
+    if (v > 500'000)  return 500'000;
+    return v;
+}
+void Settings::setViewMaxKbps(int v)          { if (v != viewMaxKbps()) { q_.setValue(K_VIEW_MAX_KBPS, v); emit changed(); } }
 
 // VIV-70 announcement dedup sets (stored as QStringList).
 QStringList Settings::seenAnnouncements() const { return q_.value("announce/seen").toStringList(); }

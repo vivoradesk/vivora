@@ -556,6 +556,9 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     }
     // VIV-23: GUI mode asks the user before pinning / replacing a peer key.
     session_.set_interactive_trust(cfg.interactive_trust);
+    // User-configured viewing caps (Settings → Viewing, 0 = none).
+    session_.set_fps_cap(cfg.view_fps_cap);
+    session_.set_bitrate_cap_kbps(cfg.view_max_kbps);
     if (!session_.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
         if (session_.has_trust_pending()) {
             // Not an error — the GUI shows the trust dialog and re-dials.

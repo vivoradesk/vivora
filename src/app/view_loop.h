@@ -48,6 +48,11 @@ struct ViewLoopConfig {
     // any reassembled host clipboard into the inbound slot for the
     // GUI-thread ClipboardSync.  CLI leaves this null → feature off.
     std::shared_ptr<ClipboardBridge> clipboard;
+    // User-configured viewing caps (Settings → Viewing; 0 = none).
+    // fps cap bounds the client's PerfReport ratchet; the bitrate cap is
+    // forwarded to the host inside PerfReport as a hard controller clamp.
+    uint16_t view_fps_cap  = 0;
+    uint32_t view_max_kbps = 0;
 };
 
 // Iterable view-loop state machine.  Split out of the legacy

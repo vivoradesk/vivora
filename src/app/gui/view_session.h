@@ -29,6 +29,9 @@ struct GuiViewConfig {
     std::string relay_server;
     std::string relay_session_hex;
     std::string license_file;
+    // User viewing caps from Settings (0 = none).
+    int view_fps_cap  = 0;
+    int view_max_kbps = 0;
 };
 
 // One active "Connect to peer" session in the GUI.

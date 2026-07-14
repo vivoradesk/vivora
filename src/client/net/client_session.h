@@ -113,6 +113,15 @@ public:
     void note_decoder_accepted();
     void note_decoder_rejected();
 
+    // User-configured viewing caps (0 = none).  The fps cap bounds the
+    // PerfReport ratchet; the bitrate cap rides PerfReport bytes [4..8)
+    // and is applied host-side as a hard bitrate-controller clamp.
+    void set_fps_cap(uint16_t fps) {
+        user_fps_cap_ = fps;
+        if (fps != 0 && perf_target_fps_ > fps) perf_target_fps_ = fps;
+    }
+    void set_bitrate_cap_kbps(uint32_t kbps) { user_bitrate_cap_kbps_ = kbps; }
+
     // Pop next complete video frame. Returns false if none available.
     bool pop_frame(net::AssembledFrame& frame);
 
@@ -394,6 +403,17 @@ private:
     int      perf_clean_streak_  = 0;
     uint16_t perf_target_fps_    = 60;
     TimePoint last_perf_report_time_;
+    // User caps (0 = none) — see set_fps_cap()/set_bitrate_cap_kbps().
+    uint16_t user_fps_cap_          = 0;
+    uint32_t user_bitrate_cap_kbps_ = 0;
+    // Learned fps ceiling: after two up-steps that were punished (rejects/
+    // drops within two report windows), stop probing above the last stable
+    // level for the rest of the session — repeated probing reads as
+    // periodic freezes to the user.  0 = no ceiling learned yet.
+    uint16_t learned_fps_ceiling_ = 0;
+    uint16_t last_climb_from_     = 0;
+    uint8_t  climb_strikes_       = 0;
+    uint8_t  windows_since_climb_ = 255;
 
     // Cached snapshots for the HUD overlay — last-known rates updated
     // whenever the corresponding periodic computation runs.

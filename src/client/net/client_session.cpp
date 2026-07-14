@@ -1225,22 +1225,54 @@ void ClientSession::send_perf_report() {
         // 45, 30, 22, 15.  Floor at PERF_TARGET_FPS_MIN.
         uint16_t next = static_cast<uint16_t>(perf_target_fps_ * 3 / 4);
         if (next < PERF_TARGET_FPS_MIN) next = PERF_TARGET_FPS_MIN;
+        // Learned ceiling: a punishment landing within two report windows
+        // of an up-step means the climb itself likely overran what the
+        // decoder/link sustains.  Two such punished climbs in a session
+        // pin the ceiling at the level we last climbed FROM, so we stop
+        // revisiting a rate that stutters (user-visible freezes) just to
+        // re-learn the same lesson.
+        if (windows_since_climb_ <= 2 && last_climb_from_ > 0) {
+            if (++climb_strikes_ >= 2 &&
+                (learned_fps_ceiling_ == 0 ||
+                 last_climb_from_ < learned_fps_ceiling_)) {
+                learned_fps_ceiling_ = last_climb_from_;
+                log::info("ClientSession",
+                          "Learned fps ceiling: %u (2 punished climbs — "
+                          "not probing higher this session)",
+                          learned_fps_ceiling_);
+            }
+        }
         perf_target_fps_     = next;
         perf_clean_streak_   = 0;
     } else if (reject_ratio < PERF_REJECT_UP && drop_ratio < PERF_REJECT_UP) {
         if (++perf_clean_streak_ >= PERF_UP_STREAK) {
-            uint16_t next = static_cast<uint16_t>(perf_target_fps_ * 5 / 4);
-            if (next > PERF_TARGET_FPS_MAX) next = PERF_TARGET_FPS_MAX;
+            // Gentler probing above 60 fps: +12.5% instead of +25%, so a
+            // probe that overruns the decoder overshoots by one small step
+            // (72→81) instead of a leap (58→72) that visibly freezes.
+            const uint16_t step = perf_target_fps_ >= 60
+                ? std::max<uint16_t>(2, perf_target_fps_ / 8)
+                : std::max<uint16_t>(2, perf_target_fps_ / 4);
+            uint16_t next = static_cast<uint16_t>(perf_target_fps_ + step);
             // The report is a "can consume up to N" statement, not a demand:
             // the host clamps it to its own configured framerate cap (VIV-67,
-            // HostSession::min_perf_target_fps), so climbing past 60 here is
-            // safe against 60-capped hosts and lets 90/120/144 caps engage.
-            perf_target_fps_   = next;
+            // HostSession::min_perf_target_fps).  Locally we additionally
+            // honour the user's cap and the session's learned ceiling.
+            uint16_t cap = PERF_TARGET_FPS_MAX;
+            if (user_fps_cap_ != 0 && user_fps_cap_ < cap) cap = user_fps_cap_;
+            if (learned_fps_ceiling_ != 0 && learned_fps_ceiling_ < cap)
+                cap = learned_fps_ceiling_;
+            if (next > cap) next = cap;
+            if (next > perf_target_fps_) {
+                last_climb_from_    = perf_target_fps_;
+                windows_since_climb_ = 0;  // incremented to 1 below
+                perf_target_fps_    = next;
+            }
             perf_clean_streak_ = 0;
         }
     } else {
         perf_clean_streak_ = 0;  // marginal interval — neither up nor down
     }
+    if (windows_since_climb_ < 255) ++windows_since_climb_;
 
     // Build wire payload (8 bytes).
     protocol::Packet pkt;
@@ -1253,7 +1285,12 @@ void ClientSession::send_perf_report() {
     pkt.payload[1] = static_cast<uint8_t>((perf_target_fps_ >> 8) & 0xFF);
     pkt.payload[2] = static_cast<uint8_t>(reject_ratio * 100.0f + 0.5f);
     pkt.payload[3] = static_cast<uint8_t>(drop_ratio   * 100.0f + 0.5f);
-    // [4..8) reserved for future fields (decode_us / render_us avg).
+    // [4..8): user-configured bitrate cap in kbps (LE u32, 0 = none).
+    // Old hosts ignore these bytes (they were reserved zeros before).
+    pkt.payload[4] = static_cast<uint8_t>(user_bitrate_cap_kbps_ & 0xFF);
+    pkt.payload[5] = static_cast<uint8_t>((user_bitrate_cap_kbps_ >> 8) & 0xFF);
+    pkt.payload[6] = static_cast<uint8_t>((user_bitrate_cap_kbps_ >> 16) & 0xFF);
+    pkt.payload[7] = static_cast<uint8_t>((user_bitrate_cap_kbps_ >> 24) & 0xFF);
     pkt.header.payload_len = 8;
 
     // Cache for HUD before resetting the counters below.

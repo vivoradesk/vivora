@@ -51,6 +51,11 @@ class Settings : public QObject {
     // paces capture+encode to at most this rate; client-driven adaptive
     // framerate can only lower the effective rate, never exceed it.
     Q_PROPERTY(int     hostFps         READ hostFps         WRITE setHostFps         NOTIFY changed)
+    // Viewing caps (client side, 0 = none).  fpsCap bounds the client's
+    // adaptive framerate request; maxKbps is sent to the host as a hard
+    // bitrate clamp for streams this client watches.
+    Q_PROPERTY(int     viewFpsCap      READ viewFpsCap      WRITE setViewFpsCap      NOTIFY changed)
+    Q_PROPERTY(int     viewMaxKbps     READ viewMaxKbps     WRITE setViewMaxKbps     NOTIFY changed)
 
 public:
     explicit Settings(QObject* parent = nullptr);
@@ -75,6 +80,8 @@ public:
     int     theme() const;               void setTheme(int);
     bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
     int     hostFps() const;             void setHostFps(int);
+    int     viewFpsCap() const;          void setViewFpsCap(int);
+    int     viewMaxKbps() const;         void setViewMaxKbps(int);
 
     // VIV-31 account/license cloud.  Persisted but not exposed as Q_PROPERTY
     // (QML talks to AppController's account state); the account setters do not

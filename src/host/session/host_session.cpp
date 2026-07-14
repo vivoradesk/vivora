@@ -547,6 +547,16 @@ uint16_t HostSession::min_perf_target_fps(uint16_t cap) const {
     return lowest;
 }
 
+uint32_t HostSession::min_client_bitrate_cap_bps() const {
+    uint32_t lowest_kbps = 0;
+    for (const auto& [addr, client] : clients_) {
+        if (client.bitrate_cap_kbps == 0) continue;
+        if (lowest_kbps == 0 || client.bitrate_cap_kbps < lowest_kbps)
+            lowest_kbps = client.bitrate_cap_kbps;
+    }
+    return lowest_kbps * 1000u;
+}
+
 // ── Packet handling ──────────────────────────────────────────────────
 
 ClientInfo* HostSession::find_client(const net::SocketAddr& addr) {
@@ -692,9 +702,20 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
                 client->perf_target_fps = target_fps;
                 client->perf_reject_pct = reject_pct;
                 client->perf_drop_pct   = drop_pct;
+                // Bytes [4..8): client's user-configured bitrate cap in
+                // kbps (LE u32, 0 = none).  Old clients send zeros here
+                // (the bytes were reserved), which reads as "no cap".
+                if (payload_len >= 8) {
+                    client->bitrate_cap_kbps =
+                          static_cast<uint32_t>(payload[4])
+                        | (static_cast<uint32_t>(payload[5]) << 8)
+                        | (static_cast<uint32_t>(payload[6]) << 16)
+                        | (static_cast<uint32_t>(payload[7]) << 24);
+                }
                 log::info("HostSession",
-                          "PerfReport: target_fps=%u reject=%u%% drop=%u%%",
-                          target_fps, reject_pct, drop_pct);
+                          "PerfReport: target_fps=%u reject=%u%% drop=%u%% cap=%u kbps",
+                          target_fps, reject_pct, drop_pct,
+                          client->bitrate_cap_kbps);
             }
             break;
         case protocol::PacketType::BwProbeAck:
