@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QColor>
@@ -137,7 +138,14 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         "  border-radius: 2px; }"
         "QSlider::handle:horizontal { width: 15px; margin: -6px 0;"
         "  background: white; border-radius: 7px; }"
-        "QSlider::sub-page:horizontal { background: #4a8cff; border-radius: 2px; }");
+        "QSlider::sub-page:horizontal { background: #4a8cff; border-radius: 2px; }"
+        "QComboBox { background: rgba(255,255,255,0.06); border: none;"
+        "  border-radius: 7px; padding: 4px 10px; min-height: 20px; }"
+        "QComboBox:hover { background: rgba(255,255,255,0.11); }"
+        "QComboBox::drop-down { border: none; width: 18px; }"
+        "QComboBox QAbstractItemView { background: #2a2d33; color: #e6e8ec;"
+        "  border: 1px solid rgba(255,255,255,0.12); border-radius: 7px;"
+        "  selection-background-color: #4a8cff; outline: none; }");
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(20, 18, 20, 15);
@@ -235,6 +243,34 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
     add_check(aspect_check_, "Keep aspect ratio", QString());
     aspect_check_->setChecked(true);
 
+    // ---- Quality caps (VIV-67) ----------------------------------------
+    // Applied live: the session forwards them to the host with the next
+    // PerfReport (~1s), no restart.  "Auto" = adaptive with no user cap.
+    root->addSpacing(16);
+    root->addWidget(make_separator(this));
+    root->addSpacing(14);
+    auto add_combo = [&](QComboBox*& combo, const char* label) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(12);
+        auto* l = new QLabel(label, this);
+        l->setObjectName("label");
+        combo = new QComboBox(this);
+        combo->setCursor(Qt::PointingHandCursor);
+        row->addWidget(l);
+        row->addStretch(1);
+        row->addWidget(combo);
+        root->addLayout(row);
+    };
+    add_combo(fps_cap_combo_, "Max framerate");
+    for (int v : {0, 30, 60, 90, 120, 144})
+        fps_cap_combo_->addItem(v == 0 ? QStringLiteral("Auto")
+                                       : QStringLiteral("%1 fps").arg(v), v);
+    root->addSpacing(10);
+    add_combo(bitrate_cap_combo_, "Max bitrate");
+    for (int v : {0, 5000, 10000, 20000, 35000, 50000})
+        bitrate_cap_combo_->addItem(v == 0 ? QStringLiteral("Auto")
+                                           : QStringLiteral("%1 Mbps").arg(v / 1000), v);
+
     root->addSpacing(16);
     root->addWidget(make_separator(this));
     root->addSpacing(14);
@@ -329,6 +365,20 @@ StreamMenu::StreamMenu(QWidget* parent) : QWidget(parent) {
         if (suppress_signals_) return;
         emit keepAspectToggled(on);
     });
+    connect(fps_cap_combo_, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int idx) {
+        if (suppress_signals_) return;
+        if (actions_.set_fps_cap)
+            actions_.set_fps_cap(static_cast<uint16_t>(
+                fps_cap_combo_->itemData(idx).toInt()));
+    });
+    connect(bitrate_cap_combo_, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int idx) {
+        if (suppress_signals_) return;
+        if (actions_.set_bitrate_cap_kbps)
+            actions_.set_bitrate_cap_kbps(static_cast<uint32_t>(
+                bitrate_cap_combo_->itemData(idx).toInt()));
+    });
     connect(monitor_btn_, &QPushButton::clicked, this,
             [this]() { emit monitorClicked(); });
     connect(fullscreen_btn_, &QPushButton::clicked, this,
@@ -358,6 +408,16 @@ void StreamMenu::set_initial_state(float volume, bool muted, bool view_only,
     volume_slider_->setEnabled(!muted);
     viewonly_check_->setChecked(view_only);
     aspect_check_->setChecked(keep_aspect);
+    suppress_signals_ = false;
+}
+
+void StreamMenu::set_initial_caps(uint16_t fps_cap, uint32_t bitrate_cap_kbps) {
+    suppress_signals_ = true;
+    // Match by item data; unknown values (hand-edited ini) fall back to Auto.
+    int i = fps_cap_combo_->findData(static_cast<int>(fps_cap));
+    fps_cap_combo_->setCurrentIndex(i >= 0 ? i : 0);
+    i = bitrate_cap_combo_->findData(static_cast<int>(bitrate_cap_kbps));
+    bitrate_cap_combo_->setCurrentIndex(i >= 0 ? i : 0);
     suppress_signals_ = false;
 }
 

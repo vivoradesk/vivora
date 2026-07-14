@@ -157,6 +157,8 @@ void StreamWindow::set_menu_actions(const MenuActions& actions) {
         // Seed controls to the session defaults (unity volume, not muted, input
         // forwarding on) without echoing them back through the callbacks.
         menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+        menu_->set_initial_caps(actions.initial_fps_cap,
+                                actions.initial_bitrate_cap_kbps);
     }
     // Wire the panel's switch/refresh to the same session callbacks (VIV-50).
     if (monitor_panel_) {

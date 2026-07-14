@@ -690,6 +690,8 @@ void QtGlVideoView::set_menu_actions(const vivora::MenuActions& actions) {
     if (!menu_) return;
     menu_->set_actions(actions);
     menu_->set_initial_state(1.0f, false, false, keep_aspect_);
+    menu_->set_initial_caps(actions.initial_fps_cap,
+                            actions.initial_bitrate_cap_kbps);
     // Wire the panel's switch/refresh to the same session callbacks (VIV-50).
     if (monitor_panel_) {
         monitor_panel_->set_select_callback([this](uint32_t idx) {

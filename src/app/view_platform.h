@@ -62,6 +62,15 @@ struct MenuActions {
     // captured display by index.
     std::function<void()>          request_monitors;
     std::function<void(uint32_t)>  select_monitor;
+    // Live viewing caps (VIV-67): 0 = auto.  Applied to the running
+    // session immediately (the host picks the change up with the next
+    // PerfReport, ~1s) — no stream restart needed.
+    std::function<void(uint16_t)>  set_fps_cap;
+    std::function<void(uint32_t)>  set_bitrate_cap_kbps;
+    // Initial control state for the menu combos: the persisted Settings
+    // values the session was started with.
+    uint16_t initial_fps_cap          = 0;
+    uint32_t initial_bitrate_cap_kbps = 0;
 };
 
 struct ViewPlatform {

@@ -590,6 +590,20 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     actions.disconnect    = [this]() {
         user_disconnect_.store(true, std::memory_order_relaxed);
     };
+    // VIV-67 live quality caps: menu combos → session, picked up by the
+    // host with the next PerfReport (~1s), no stream restart.  Menu
+    // callbacks fire from Qt's event pump inside pump_events(), i.e. on
+    // this loop's thread — same as the audio controls above.
+    actions.set_fps_cap = [this](uint16_t fps) {
+        session_.set_fps_cap(fps);
+        log::info("VIEW", "fps cap -> %u (menu)", fps);
+    };
+    actions.set_bitrate_cap_kbps = [this](uint32_t kbps) {
+        session_.set_bitrate_cap_kbps(kbps);
+        log::info("VIEW", "bitrate cap -> %u kbps (menu)", kbps);
+    };
+    actions.initial_fps_cap          = cfg.view_fps_cap;
+    actions.initial_bitrate_cap_kbps = cfg.view_max_kbps;
     // VIV-50 monitor selection: panel open → ask host for its display list;
     // thumbnail/number-key → switch.  Both run on this loop thread (the menu
     // callbacks fire from Qt's event pump inside pump_events()).

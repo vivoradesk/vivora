@@ -7,6 +7,7 @@
 #include <cstdint>
 
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QPushButton;
 class QSlider;
@@ -49,6 +50,8 @@ public:
     // Seed the controls without firing the action callbacks.
     void set_initial_state(float volume, bool muted, bool view_only,
                            bool keep_aspect = true);
+    // Seed the quality-cap combos (VIV-67) without firing callbacks.
+    void set_initial_caps(uint16_t fps_cap, uint32_t bitrate_cap_kbps);
 
     // Live connection info — fed ~once per second.
     void set_info(const MenuInfo& info);
@@ -88,6 +91,8 @@ private:
     QCheckBox*   mute_check_     = nullptr;
     QCheckBox*   viewonly_check_ = nullptr;
     QCheckBox*   aspect_check_   = nullptr;
+    QComboBox*   fps_cap_combo_     = nullptr;
+    QComboBox*   bitrate_cap_combo_ = nullptr;
 
     QPushButton* monitor_btn_    = nullptr;
     QPushButton* fullscreen_btn_ = nullptr;

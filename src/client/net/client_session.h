@@ -116,11 +116,18 @@ public:
     // User-configured viewing caps (0 = none).  The fps cap bounds the
     // PerfReport ratchet; the bitrate cap rides PerfReport bytes [4..8)
     // and is applied host-side as a hard bitrate-controller clamp.
+    // Changing either cap mid-session (in-stream menu) resets the learned
+    // fps ceiling: the user is explicitly re-tuning, and a new bitrate
+    // changes what the decoder/link can sustain — let the ratchet re-probe.
     void set_fps_cap(uint16_t fps) {
+        if (fps != user_fps_cap_) reset_learned_ceiling();
         user_fps_cap_ = fps;
         if (fps != 0 && perf_target_fps_ > fps) perf_target_fps_ = fps;
     }
-    void set_bitrate_cap_kbps(uint32_t kbps) { user_bitrate_cap_kbps_ = kbps; }
+    void set_bitrate_cap_kbps(uint32_t kbps) {
+        if (kbps != user_bitrate_cap_kbps_) reset_learned_ceiling();
+        user_bitrate_cap_kbps_ = kbps;
+    }
 
     // Pop next complete video frame. Returns false if none available.
     bool pop_frame(net::AssembledFrame& frame);
@@ -414,6 +421,11 @@ private:
     uint16_t last_climb_from_     = 0;
     uint8_t  climb_strikes_       = 0;
     uint8_t  windows_since_climb_ = 255;
+    void reset_learned_ceiling() {
+        learned_fps_ceiling_ = 0;
+        climb_strikes_       = 0;
+        windows_since_climb_ = 255;
+    }
 
     // Cached snapshots for the HUD overlay — last-known rates updated
     // whenever the corresponding periodic computation runs.
