@@ -677,15 +677,9 @@ Window {
                             onModified: (v) => App.settings.bitrateMbps = v
                         }
                     }
-                    Field {
-                        title: "Display"
-                        help: "Which monitor to capture while sharing."
-                        CreamSpin {
-                            from: 0; to: 8
-                            value: App.settings.displayIndex
-                            onModified: (v) => App.settings.displayIndex = v
-                        }
-                    }
+                    // No "Display" field: viewers pick the captured monitor
+                    // live from the in-stream panel (VIV-50).  The backend
+                    // displayIndex setting still exists for CLI/ini use.
                     Field {
                         title: "Max framerate"
                         help: "Ceiling for the stream framerate while sharing. Lower saves bandwidth and GPU; applied when the next viewer connects."
