@@ -59,6 +59,21 @@ public:
     void set_manual_target(uint32_t bps) {
         manual_target_ = bps == 0 ? 0 : clamp(bps);
     }
+
+    // Refresh the auto default when the real capture geometry becomes
+    // known.  With the lazy encoder the resolution can be unknown (0x0)
+    // when the controller is constructed at host-loop start — the default
+    // then collapses to the 1 Mbps floor, and everything keyed off it
+    // (warmup end, recovery ceiling) pins the session there.  Called on
+    // the first-client path once dimensions are real.
+    void update_default(uint32_t bps) {
+        if (bps == 0) return;
+        const uint32_t clamped = clamp(bps);
+        if (clamped == default_bps_) return;
+        log::info("BitrateCtl", "Auto default %u -> %u kbps (capture geometry known)",
+                  default_bps_ / 1000, clamped / 1000);
+        default_bps_ = clamped;
+    }
     uint32_t manual_target() const { return manual_target_; }
 
     // Called when a (new) client connects. Arms the warm-up ramp:
@@ -243,13 +258,15 @@ public:
                 return current_bps_;
             }
             // Ramp finished: snap to the capped end, raise flag.
-            // Lock post-warmup recovery to the same ceiling — the full
-            // default_bps_ is usually unreachable on WiFi and recovering
-            // toward it just causes congestion oscillation.
             warmup_active_     = false;
             warmup_just_ended_ = true;
-            // Recovery may climb to the FULL ceiling — gently, in small steps.
-            recovery_ceiling_bps_ = std::min(base, full_ceiling);
+            // Recovery may climb to the FULL ceiling — gently, in small
+            // steps under its own loss governors.  Do NOT min() this with
+            // `base`: when warmup ends damaged (e.g. the BW probe's burst
+            // cost the ramp its budget) or `base` is a floor-collapsed
+            // auto default, locking recovery to it pins the whole session
+            // at ~1 Mbps with no way back up.
+            recovery_ceiling_bps_ = full_ceiling;
             log::info("BitrateCtl",
                       "Warmup done at %u kbps, recovery ceiling = %u kbps",
                       warmup_end / 1000, recovery_ceiling_bps_ / 1000);

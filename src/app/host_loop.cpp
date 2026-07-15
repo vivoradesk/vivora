@@ -334,8 +334,21 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             session.send_stream_info(static_cast<uint16_t>(cap_w),
                                      static_cast<uint16_t>(cap_h),
                                      applied_target_fps);
-            if (!had_clients) {
-                // First client: arm warm-up ramp (cold start).
+            // `n <= 1` must take the first-client path even when
+            // had_clients is stale (a reconnect after the previous viewer
+            // dropped): the proportional-cut branch below computes
+            // current*(n-1)/n = 0 at n=1 and slams the session to the
+            // 1 Mbps floor.
+            const size_t n_clients = session.client_count();
+            if (!had_clients || n_clients <= 1) {
+                // First client: the capture geometry is real by now (the
+                // encoder just started) — refresh the auto default the
+                // controller was built with, which is floor-garbage when
+                // dimensions weren't known at host-loop start (lazy
+                // encoder), then arm the warm-up ramp (cold start).
+                bitrate_ctl.update_default(codec::default_bitrate_for(
+                    platform.capture_width(), platform.capture_height(), fps_cap));
+                bitrate_ctl.set_client_count(1);
                 bitrate_ctl.notify_client_connected();
                 platform.set_bitrate(bitrate_ctl.current());
                 last_applied_br = bitrate_ctl.current();
@@ -346,17 +359,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 last_bytes_sample = session.sender() ? session.sender()->bytes_sent() : 0;
                 last_bytes_time   = std::chrono::steady_clock::now();
             } else {
-                // Additional client: cut bitrate proportionally so total
-                // wire rate doesn't spike (N clients share the link).
-                size_t n = session.client_count();
-                bitrate_ctl.set_client_count(n);
-                uint32_t new_br = bitrate_ctl.current() * (n - 1) / n;
+                // Additional client (n >= 2): cut bitrate proportionally so
+                // total wire rate doesn't spike (N clients share the link).
+                bitrate_ctl.set_client_count(n_clients);
+                uint32_t new_br = bitrate_ctl.current() * (n_clients - 1) / n_clients;
                 if (new_br < 1'000'000) new_br = 1'000'000;
                 bitrate_ctl.force_bitrate(new_br);
                 platform.set_bitrate(new_br);
                 last_applied_br = new_br;
                 log::info("HOST", "New client connected (%zu total), bitrate -> %u kbps",
-                          n, new_br / 1000);
+                          n_clients, new_br / 1000);
             }
             had_clients = true;
         }
