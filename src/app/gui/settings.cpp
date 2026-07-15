@@ -116,7 +116,15 @@ void Settings::setCodecIndex(int v)           { if (v != codecIndex()) { q_.setV
 int Settings::encoderIndex() const            { return q_.value(K_ENCODER, DEF_ENCODER).toInt(); }
 void Settings::setEncoderIndex(int v)         { if (v != encoderIndex()) { q_.setValue(K_ENCODER, v); emit changed(); } }
 
-int Settings::bitrateMbps() const             { return q_.value(K_BITRATE, DEF_BITRATE).toInt(); }
+// Sanitised on read: 0 = auto, manual values clamp to [1, 100] Mbps so a
+// hand-edited ini (or a stale pre-slider value) can't push the encoder
+// into a degenerate rate.
+int Settings::bitrateMbps() const {
+    int v = q_.value(K_BITRATE, DEF_BITRATE).toInt();
+    if (v <= 0)   return 0;
+    if (v > 100)  return 100;
+    return v;
+}
 void Settings::setBitrateMbps(int v)          { if (v != bitrateMbps()) { q_.setValue(K_BITRATE, v); emit changed(); } }
 
 int Settings::displayIndex() const            { return q_.value(K_DISPLAY, DEF_DISPLAY).toInt(); }

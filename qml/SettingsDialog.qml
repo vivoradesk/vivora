@@ -307,6 +307,64 @@ Window {
         }
     }
 
+    // Cream-themed slider with a value readout.  `zeroLabel` names the
+    // 0 position (e.g. "Auto") since 0 conventionally means "no manual
+    // override" in our settings.
+    component CreamSlider: RowLayout {
+        id: cslider
+        property int from: 0
+        property int to: 100
+        property int value: 0
+        property string suffix: ""
+        property string zeroLabel: ""
+        signal modified(int v)
+        spacing: 12
+        Slider {
+            id: sl
+            Layout.preferredWidth: 170
+            from: cslider.from
+            to: cslider.to
+            stepSize: 1
+            value: cslider.value
+            onMoved: {
+                var nv = Math.round(sl.value)
+                if (nv !== cslider.value) cslider.modified(nv)
+            }
+            background: Rectangle {
+                x: sl.leftPadding
+                y: sl.topPadding + sl.availableHeight / 2 - height / 2
+                width: sl.availableWidth
+                height: 4
+                radius: 2
+                color: theme.border
+                Rectangle {
+                    width: sl.visualPosition * parent.width
+                    height: parent.height
+                    radius: 2
+                    color: theme.accent
+                }
+            }
+            handle: Rectangle {
+                x: sl.leftPadding + sl.visualPosition * (sl.availableWidth - width)
+                y: sl.topPadding + sl.availableHeight / 2 - height / 2
+                width: 18; height: 18; radius: 9
+                color: sl.pressed ? theme.hoverBg : theme.ctrlBg
+                border.color: theme.border
+                border.width: 1
+            }
+        }
+        Label {
+            text: cslider.value === 0 && cslider.zeroLabel !== ""
+                  ? cslider.zeroLabel
+                  : cslider.value + cslider.suffix
+            color: theme.text
+            font.pixelSize: 13
+            font.family: theme.monoFont
+            horizontalAlignment: Text.AlignRight
+            Layout.preferredWidth: 64
+        }
+    }
+
     // Cream toggle switch.
     component CreamSwitch: Switch {
         // Use default Switch behaviour; just recolour the groove/handle.
@@ -670,9 +728,11 @@ Window {
                     }
                     Field {
                         title: "Bitrate"
-                        help: "Megabits/sec. 0 = automatic from resolution."
-                        CreamSpin {
-                            from: 0; to: 200
+                        help: "Fixed encoder bitrate while sharing. Auto adapts from resolution and link."
+                        CreamSlider {
+                            from: 0; to: 100
+                            suffix: " Mbps"
+                            zeroLabel: "Auto"
                             value: App.settings.bitrateMbps
                             onModified: (v) => App.settings.bitrateMbps = v
                         }
