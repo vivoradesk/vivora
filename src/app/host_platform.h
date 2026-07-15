@@ -104,6 +104,15 @@ struct HostPlatform {
     virtual bool start_encoder() { return true; }
     virtual void stop_encoder() {}
 
+    // Current framerate pacing interval (VIV-67 cap after adaptive
+    // clamping).  host_loop re-arms this whenever the applied target
+    // changes.  Pull-model platforms (Windows DXGI, macOS latest-frame
+    // slot) can ignore it — host_loop's own capture gate already paces
+    // them.  Push-model platforms (Linux PipeWire) MUST honour it by
+    // dropping frames that arrive early: their capture callback runs at
+    // the compositor rate and never passes through host_loop's gate.
+    virtual void set_min_frame_interval_us(int64_t) {}
+
     // Cursor sync (Windows DXGI for now; default no-op elsewhere).
     struct CursorState {
         float    x_norm   = 0.0f;   // 0..1 relative to host screen

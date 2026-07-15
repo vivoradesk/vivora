@@ -222,6 +222,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     uint16_t applied_target_fps  = fps_cap;
     float    target_fps_ewma     = static_cast<float>(fps_cap);
     int64_t  min_frame_interval_us = 1'000'000 / fps_cap;
+    // Push-model platforms (Linux PipeWire) pace their own capture
+    // callback with this — host_loop's gate below never sees frames the
+    // compositor pushes at panel rate (VIV-67).
+    platform.set_min_frame_interval_us(min_frame_interval_us);
 
     // FEC group tail-flush: when capture stays silent on a static screen,
     // any in-progress FEC group (P-frame fragments not yet K-aligned) sits
@@ -630,6 +634,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             if (diff >= 2 || diff <= -2) {
                 applied_target_fps = smoothed;
                 min_frame_interval_us = 1'000'000 / std::max<uint16_t>(smoothed, 1);
+                platform.set_min_frame_interval_us(min_frame_interval_us);
                 log::info("HOST", "Adaptive framerate -> %u fps (interval %lld us)",
                           applied_target_fps,
                           static_cast<long long>(min_frame_interval_us));

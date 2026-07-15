@@ -39,6 +39,12 @@ public:
     bool start_encoder() override;
     void stop_encoder() override;
 
+    // Framerate pacing (VIV-67).  PipeWire pushes frames at the compositor
+    // rate, bypassing host_loop's pull-side capture gate — on_pw_frame
+    // drops frames arriving sooner than this interval (with 1/8 tolerance
+    // against vsync jitter).  host_loop re-arms it on adaptive changes.
+    void set_min_frame_interval_us(int64_t us) override;
+
     // Monitor list (VIV-50).  xdg-desktop-portal does NOT expose the displays
     // programmatically, so the list comes from wl_output; the captured source
     // is whatever the portal picker chose, so `viewing` is best-effort (the
@@ -93,6 +99,13 @@ private:
     // down so a stop/start cycle resumes at the adaptive controller's
     // last rate instead of the boot default.
     uint32_t bitrate_bps_ = 0;
+
+    // Framerate pacing state (VIV-67).  Interval is written by host_loop
+    // (its thread) and read by the PipeWire callback — atomic, relaxed is
+    // fine (a stale interval for one frame is harmless).  The last-accepted
+    // pts is only ever touched under enc_mu_.
+    std::atomic<int64_t> min_frame_interval_us_{1'000'000 / 60};
+    int64_t last_accepted_pts_us_ = 0;
 
     // Encoder + output queue: PipeWire thread (or heartbeat path) feeds
     // the encoder and pushes any drained packets into queued_pkts_; the

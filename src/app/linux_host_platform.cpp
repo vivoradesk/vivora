@@ -177,11 +177,31 @@ void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& 
     if (shutting_down_.load(std::memory_order_acquire)) return;
     // enc_ == nullptr: no viewers attached (lazy encoder down) — drop the
     // frame; this null check is the entire per-frame cost of idling.
-    if (!enc_ || !enc_->encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
+    if (!enc_) return;
+    // Framerate pacing (VIV-67): PipeWire pushes at the compositor rate
+    // (a 165 Hz panel delivers ~146 fps) and these frames never pass
+    // host_loop's pull-side gate, so the cap must be enforced here.
+    // The 1/8 tolerance keeps a source running at exactly the cap from
+    // halving: without it, alternate frames land a hair short of the
+    // interval and get dropped.  A backwards pts (capture restart /
+    // monitor switch) re-latches instead of dropping.
+    const int64_t interval = min_frame_interval_us_.load(std::memory_order_relaxed);
+    const int64_t pts_us   = static_cast<int64_t>(f.pts_ns / 1000);
+    const int64_t elapsed  = pts_us - last_accepted_pts_us_;
+    if (last_accepted_pts_us_ != 0 && interval > 0 &&
+        elapsed >= 0 && elapsed < interval - interval / 8) {
+        return;
+    }
+    if (!enc_->encode_bgrx(f.data, static_cast<int>(f.stride), f.pts_ns / 1000)) return;
+    last_accepted_pts_us_ = pts_us;
     vivora::host::ILinuxEncoder::Packet pkt;
     while (enc_->get_packet(pkt)) {
         queued_pkts_.push({std::move(pkt), /*heartbeat=*/false});
     }
+}
+
+void LinuxHostPlatform::set_min_frame_interval_us(int64_t us) {
+    min_frame_interval_us_.store(us, std::memory_order_relaxed);
 }
 
 bool LinuxHostPlatform::capture_and_encode(uint64_t& pts_us,
