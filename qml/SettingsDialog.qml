@@ -752,7 +752,7 @@ Window {
                     }
                     Field {
                         title: "Your key fingerprint"
-                        help: "Read it to a peer out-of-band so they can verify it's really you (VIV-23)."
+                        help: "Read it to a peer out-of-band so they can verify it's really you."
                         RowLayout {
                             spacing: 8
                             Label {
