@@ -49,7 +49,7 @@ Window {
         { icon: "↻", label: "Startup",          index: 8 },
         { header: "SESSION" },
         { icon: "⇄", label: "Network",          index: 3 },
-        { icon: "▤", label: "Codec",            index: 4 },
+        { icon: "▤", label: "Hosting",          index: 4 },
         { icon: "▷", label: "Viewing",          index: 9 },
         { icon: "✓", label: "Security",         index: 5 },
         { header: "ADVANCED" },
@@ -637,12 +637,14 @@ Window {
                     }
                 }
 
-                // ── 4: Codec ─────────────────────────────────────────
+                // ── 4: Hosting ───────────────────────────────────────
+                // Encoding/capture settings for when THIS device shares
+                // its screen.  The client-side counterpart is Viewing (9).
                 ColumnLayout {
                     spacing: 0
                     SectionTitle {
-                        title: "Codec"
-                        subtitle: "Video encoding. Auto picks the best available hardware encoder."
+                        title: "Hosting"
+                        subtitle: "Encoding and capture when this device shares its screen. Auto picks the best available hardware encoder."
                     }
                     Field {
                         title: "Codec"
@@ -677,7 +679,7 @@ Window {
                     }
                     Field {
                         title: "Display"
-                        help: "Which monitor to capture (host)."
+                        help: "Which monitor to capture while sharing."
                         CreamSpin {
                             from: 0; to: 8
                             value: App.settings.displayIndex
@@ -685,8 +687,8 @@ Window {
                         }
                     }
                     Field {
-                        title: "Stream framerate"
-                        help: "Maximum FPS the host streams (VIV-67). Lower saves bandwidth and GPU; applied when the next viewer connects."
+                        title: "Max framerate"
+                        help: "Ceiling for the stream framerate while sharing. Lower saves bandwidth and GPU; applied when the next viewer connects."
                         CreamCombo {
                             id: fpsCombo
                             readonly property var fpsValues: [30, 60, 90, 120, 144]
@@ -985,7 +987,7 @@ Window {
                     spacing: 0
                     SectionTitle {
                         title: "Viewing"
-                        subtitle: "Limits for streams you watch from this device. Applied on the next connect."
+                        subtitle: "Limits for streams you watch from this device. Also adjustable mid-stream from the in-stream menu (Ctrl+F1)."
                     }
                     Field {
                         title: "Max framerate"
