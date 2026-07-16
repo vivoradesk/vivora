@@ -39,13 +39,13 @@ Dialog {
     // back on approve so the host pins the viewer as trusted.
     property bool   trustChecked: false
 
-    // GRANT ON ACCEPT toggles (VIV-60).  input is enforced (view-only when
-    // off); clipboard/file_transfer are carried for the features to honour
-    // once they ship (their toggles stay disabled until then).
+    // GRANT ON ACCEPT toggles (VIV-60).  input and clipboard are enforced
+    // (view-only when input is off; clipboard sync blocked both directions
+    // when clipboard is off).  File transfer stays a disabled placeholder
+    // until the feature ships (VIV-39) — showing it ON would imply a
+    // capability that doesn't exist.
     property bool   grantInput:     true
-    // Clipboard/file default OFF and stay disabled until VIV-22 / VIV-39
-    // ship — showing them ON would imply a capability that doesn't exist.
-    property bool   grantClipboard: false
+    property bool   grantClipboard: true
     property bool   grantFile:      false
 
     readonly property int totalSeconds: 30
@@ -64,7 +64,7 @@ Dialog {
         dialog.secondsRemaining = dialog.totalSeconds
         dialog.trustChecked = false
         dialog.grantInput = true
-        dialog.grantClipboard = false
+        dialog.grantClipboard = true
         dialog.grantFile = false
     }
 
@@ -277,9 +277,9 @@ Dialog {
         }
 
         // ── GRANT ON ACCEPT (VIV-60) ─────────────────────────────────
-        // Keyboard & mouse control is live (view-only when off).  Clipboard
-        // sync and File transfer are shown disabled until those features
-        // exist (VIV-22 / VIV-39); their grant flags still ride along.
+        // Keyboard & mouse control and Clipboard sync are live toggles.
+        // File transfer is shown disabled until the feature exists
+        // (VIV-39); its grant flag still rides along.
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -299,7 +299,7 @@ Dialog {
             GrantRow {
                 glyph: "⧉"; label: "Clipboard sync"
                 on: dialog.grantClipboard
-                interactive: false
+                onToggled: dialog.grantClipboard = !dialog.grantClipboard
             }
             GrantRow {
                 glyph: "🗀"; label: "File transfer"
