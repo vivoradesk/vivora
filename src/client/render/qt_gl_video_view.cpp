@@ -160,6 +160,35 @@ uint16_t qt_key_to_vk(int qt_key) {
         case Qt::Key_Minus:     return 0xBD;
         case Qt::Key_Equal:     return 0xBB;
         case Qt::Key_QuoteLeft: return 0xC0;  // Backtick
+
+        // Shifted punctuation: Qt reports the produced SYMBOL, not the
+        // physical key — Shift+1 arrives as Key_Exclam, and without these
+        // entries the event mapped to 0 and was silently dropped.  Map
+        // each symbol back to its US-layout base key; the host already
+        // holds Shift (forwarded as its own event), so injecting the base
+        // VK reproduces the symbol.  Non-US layouts remain best-effort
+        // until the scancode transport lands (P3 roadmap).
+        case Qt::Key_Exclam:       return 0x31;  // Shift+1
+        case Qt::Key_At:           return 0x32;  // Shift+2
+        case Qt::Key_NumberSign:   return 0x33;  // Shift+3
+        case Qt::Key_Dollar:       return 0x34;  // Shift+4
+        case Qt::Key_Percent:      return 0x35;  // Shift+5
+        case Qt::Key_AsciiCircum:  return 0x36;  // Shift+6
+        case Qt::Key_Ampersand:    return 0x37;  // Shift+7
+        case Qt::Key_Asterisk:     return 0x38;  // Shift+8
+        case Qt::Key_ParenLeft:    return 0x39;  // Shift+9
+        case Qt::Key_ParenRight:   return 0x30;  // Shift+0
+        case Qt::Key_Underscore:   return 0xBD;  // Shift+Minus
+        case Qt::Key_Plus:         return 0xBB;  // Shift+Equal
+        case Qt::Key_BraceLeft:    return 0xDB;  // Shift+[
+        case Qt::Key_BraceRight:   return 0xDD;  // Shift+]
+        case Qt::Key_Bar:          return 0xDC;  // Shift+Backslash
+        case Qt::Key_Colon:        return 0xBA;  // Shift+Semicolon
+        case Qt::Key_QuoteDbl:     return 0xDE;  // Shift+Apostrophe
+        case Qt::Key_Less:         return 0xBC;  // Shift+Comma
+        case Qt::Key_Greater:      return 0xBE;  // Shift+Period
+        case Qt::Key_Question:     return 0xBF;  // Shift+Slash
+        case Qt::Key_AsciiTilde:   return 0xC0;  // Shift+Backtick
     }
     return 0;
 }
