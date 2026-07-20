@@ -110,12 +110,13 @@ void AddressBook::setTrustedByPubkey(const QString& pubkeyHex, bool trusted) {
 }
 
 void AddressBook::setGrantByPubkey(const QString& pubkeyHex,
-                                   bool input, bool clipboard, bool file) {
+                                   bool input, bool clipboard, bool audio, bool file) {
     if (pubkeyHex.isEmpty()) return;
     for (int i = 0; i < peers_.size(); ++i) {
         if (peers_[i].pubkeyHex == pubkeyHex) {
             peers_[i].grantInput     = input;
             peers_[i].grantClipboard = clipboard;
+            peers_[i].grantAudio     = audio;
             peers_[i].grantFile      = file;
             save();
             return;
@@ -183,6 +184,10 @@ void AddressBook::load() {
         p.trusted       = o.value("trusted").toBool(false);
         p.grantInput     = o.value("grantInput").toBool(true);
         p.grantClipboard = o.value("grantClipboard").toBool(true);
+        // VIV-65: default TRUE when absent — peers approved through the old
+        // dialog have no grantAudio persisted, and they must keep receiving
+        // host audio (as before this grant existed) until re-approved.
+        p.grantAudio     = o.value("grantAudio").toBool(true);
         p.grantFile      = o.value("grantFile").toBool(false);
         if (!p.pubkeyHex.isEmpty()) peers_.push_back(p);
     }
@@ -201,6 +206,7 @@ void AddressBook::save() const {
         o["trusted"]   = p.trusted;
         o["grantInput"]     = p.grantInput;
         o["grantClipboard"] = p.grantClipboard;
+        o["grantAudio"]     = p.grantAudio;
         o["grantFile"]      = p.grantFile;
         arr.append(o);
     }

@@ -36,6 +36,7 @@ struct Peer {
     // gaining full control.
     bool          grantInput     = true;
     bool          grantClipboard = true;
+    bool          grantAudio     = true;   // VIV-65 — host audio to this peer
     bool          grantFile      = false;
 };
 
@@ -84,7 +85,7 @@ public:
     // Store the capability grant last chosen for a peer (VIV-60), so a
     // trusted peer's auto-accept reuses it.  No-op if pubkey not in book.
     void setGrantByPubkey(const QString& pubkeyHex,
-                          bool input, bool clipboard, bool file);
+                          bool input, bool clipboard, bool audio, bool file);
 
     // For C++ callers (AppController, primarily).
     const Peer* findByPubkey(const QString& pubkeyHex) const;

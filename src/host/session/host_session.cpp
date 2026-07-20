@@ -234,14 +234,18 @@ void HostSession::poll() {
                 client.approved = true;
                 client.grant = approval_gate_->get_grant(key);   // VIV-60
                 log::info("HostSession",
-                    "Client approved (input=%d clipboard=%d file=%d)",
+                    "Client approved (input=%d clipboard=%d audio=%d file=%d)",
                     client.grant.input, client.grant.clipboard,
-                    client.grant.file_transfer);
+                    client.grant.audio, client.grant.file_transfer);
                 client.idr_needed = true;   // fresh stream → start with keyframe
                 new_client_flag_ = true;    // host_loop fires the IDR encode
                 // Register the audio destination that was stashed at
                 // handshake completion but held back pending approval.
-                if (audio_sender_ && client.audio_port_pending != 0
+                // VIV-65: skip registration entirely when the audio grant is
+                // off — the viewer's destination never enters AudioSender's
+                // list, so no host audio is ever sent to it.
+                if (audio_sender_ && client.grant.audio
+                    && client.audio_port_pending != 0
                     && !client.audio_registered) {
                     client.audio_dest.ip   = addr.ip;
                     client.audio_dest.port = client.audio_port_pending;
@@ -908,7 +912,11 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     // keep it approved and skip the popup (VIV-92).
     if (!approval_gate_ || dev_auto || prior_approved) {
         client.approved = true;
-        if (audio_sender_ && client_audio_port != 0) {
+        // VIV-65: honour the audio grant here too.  For a CLI/dev host with
+        // no gate the grant defaults to audio=true; on a prior_approved
+        // re-handshake client.grant carries the previously chosen value, so
+        // a viewer approved with audio OFF stays muted across reconnects.
+        if (audio_sender_ && client.grant.audio && client_audio_port != 0) {
             client.audio_dest.ip   = sender.ip;
             client.audio_dest.port = client_audio_port;
             audio_sender_->add_destination(client.audio_dest, &client.audio_send_cs);

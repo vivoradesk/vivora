@@ -140,8 +140,10 @@ ApplicationWindow {
             seenCount:   approvalLoader.current.seenCount
             deviceName:  approvalLoader.current.deviceName
             morePending: approvalLoader.queue.length
-            onApproved: (key, remember, gInput, gClip, gFile) => {
-                App.approveConnection(key, remember, gInput, gClip, gFile)
+            // Seed the Audio toggle from the global default (VIV-65).
+            audioDefaultOn: App.settings.audioGrantDefault
+            onApproved: (key, remember, gInput, gClip, gAudio, gFile) => {
+                App.approveConnection(key, remember, gInput, gClip, gAudio, gFile)
                 approvalLoader.advance()
             }
             onDeclined: (key) => { App.rejectConnection(key); approvalLoader.advance() }

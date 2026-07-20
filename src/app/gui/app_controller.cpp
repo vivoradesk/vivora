@@ -82,8 +82,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                 // default for a freshly auto-accepted known peer.
                 const bool gi = peer ? peer->grantInput     : true;
                 const bool gc = peer ? peer->grantClipboard : true;
+                const bool ga = peer ? peer->grantAudio     : true;
                 const bool gf = peer ? peer->grantFile      : false;
-                approveConnection(k, false, gi, gc, gf);
+                approveConnection(k, false, gi, gc, ga, gf);
                 return;
             }
             // System notification so the user notices the prompt when the
@@ -435,15 +436,15 @@ void AppController::showMainWindow() {
 
 void AppController::approveConnection(const QString& key, bool remember,
                                       bool input, bool clipboard,
-                                      bool fileTransfer) {
+                                      bool audio, bool fileTransfer) {
     if (!approvalGate_) return;
     bool ok = false;
     uint64_t k = key.toULongLong(&ok);
     if (!ok) return;
     // Record the capability grant before flipping to Approved so HostSession
-    // reads the right grant on the transition (VIV-60).
+    // reads the right grant on the transition (VIV-60/VIV-65).
     approvalGate_->set_grant(k, vivora::host::CapabilityGrant{
-        input, clipboard, fileTransfer});
+        input, clipboard, audio, fileTransfer});
     approvalGate_->set_state(k, vivora::host::ApprovalState::Approved);
 
     // Record the viewer in the address book (seen++, surfaces under Recent
@@ -456,15 +457,15 @@ void AppController::approveConnection(const QString& key, bool remember,
         const QString pcode  = it.value().second;
         if (peers_ && !pubkey.isEmpty()) {
             peers_->touchIncoming(pubkey, pcode);
-            peers_->setGrantByPubkey(pubkey, input, clipboard, fileTransfer);
+            peers_->setGrantByPubkey(pubkey, input, clipboard, audio, fileTransfer);
             if (remember) peers_->setTrustedByPubkey(pubkey, true);
         }
         pendingApprovals_.erase(it);
     }
     log::info("AppController",
-              "Approved key=%llu remember=%d input=%d clip=%d file=%d",
+              "Approved key=%llu remember=%d input=%d clip=%d audio=%d file=%d",
               static_cast<unsigned long long>(k), remember ? 1 : 0,
-              input, clipboard, fileTransfer);
+              input, clipboard, audio, fileTransfer);
 }
 
 void AppController::rejectConnection(const QString& key) {

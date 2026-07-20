@@ -24,6 +24,7 @@ constexpr const char* K_MIN_TO_TRAY        = "general/minimizeToTray";
 constexpr const char* K_START_AT_LOGIN     = "general/startAtLogin";
 constexpr const char* K_APPROVAL_MODE      = "security/approvalMode";
 constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
+constexpr const char* K_AUDIO_GRANT_DEFAULT= "security/audioGrantDefault";
 constexpr const char* K_THEME              = "appearance/theme";
 constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
 constexpr const char* K_HOST_FPS           = "capture/hostFps";
@@ -59,6 +60,7 @@ constexpr bool  DEF_MIN_TO_TRAY      = true;
 constexpr bool  DEF_START_AT_LOGIN   = false;
 constexpr int   DEF_APPROVAL_MODE    = 0;   // always_prompt — safest default
 constexpr bool  DEF_SINGLE_SESSION   = false;
+constexpr bool  DEF_AUDIO_GRANT      = true;   // VIV-65 — audio on by default
 constexpr int   DEF_THEME            = 0;   // light
 constexpr bool  DEF_HDR_PASSTHROUGH  = true;
 constexpr int   DEF_HOST_FPS         = 60;   // VIV-67 stream framerate cap
@@ -154,6 +156,9 @@ void Settings::setApprovalMode(int v)         { if (v != approvalMode()) { q_.se
 
 bool Settings::singleSessionLock() const      { return q_.value(K_SINGLE_SESSION, DEF_SINGLE_SESSION).toBool(); }
 void Settings::setSingleSessionLock(bool v)   { if (v != singleSessionLock()) { q_.setValue(K_SINGLE_SESSION, v); emit changed(); } }
+
+bool Settings::audioGrantDefault() const      { return q_.value(K_AUDIO_GRANT_DEFAULT, DEF_AUDIO_GRANT).toBool(); }
+void Settings::setAudioGrantDefault(bool v)   { if (v != audioGrantDefault()) { q_.setValue(K_AUDIO_GRANT_DEFAULT, v); emit changed(); } }
 
 int Settings::theme() const                   { return q_.value(K_THEME, DEF_THEME).toInt(); }
 void Settings::setTheme(int v)                { if (v != theme()) { q_.setValue(K_THEME, v); emit changed(); } }

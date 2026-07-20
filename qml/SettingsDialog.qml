@@ -796,6 +796,14 @@ Window {
                         }
                     }
                     Field {
+                        title: "Audio on by default"
+                        help: "Pre-select the Audio grant when approving a new connection."
+                        CreamSwitch {
+                            checked: App.settings.audioGrantDefault
+                            onToggled: App.settings.audioGrantDefault = checked
+                        }
+                    }
+                    Field {
                         title: "Idle disconnect"
                         help: "Disconnect viewers after this many minutes of no input."
                         CreamSpin {

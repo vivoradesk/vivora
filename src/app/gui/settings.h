@@ -41,6 +41,9 @@ class Settings : public QObject {
     // is live.
     Q_PROPERTY(int     approvalMode    READ approvalMode    WRITE setApprovalMode    NOTIFY changed)
     Q_PROPERTY(bool    singleSessionLock READ singleSessionLock WRITE setSingleSessionLock NOTIFY changed)
+    // VIV-65: initial value of the approval dialog's Audio grant toggle.
+    // When on, freshly prompted connections default to receiving host audio.
+    Q_PROPERTY(bool    audioGrantDefault READ audioGrantDefault WRITE setAudioGrantDefault NOTIFY changed)
     // Appearance.  theme: 0=light, 1=dark, 2=system.  Stored now; the
     // app is light-only today, dark/system land with the theme engine.
     Q_PROPERTY(int     theme           READ theme           WRITE setTheme           NOTIFY changed)
@@ -77,6 +80,7 @@ public:
     bool    startAtLoginSupported() const;
     int     approvalMode() const;        void setApprovalMode(int);
     bool    singleSessionLock() const;   void setSingleSessionLock(bool);
+    bool    audioGrantDefault() const;   void setAudioGrantDefault(bool);
     int     theme() const;               void setTheme(int);
     bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
     int     hostFps() const;             void setHostFps(int);

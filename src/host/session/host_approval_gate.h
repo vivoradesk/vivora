@@ -16,13 +16,17 @@ enum class ApprovalState : int {
 
 // Per-connection capabilities granted when the user accepts (VIV-60).
 //   input         — inject keyboard/mouse from this viewer (else view-only)
-//   clipboard     — sync clipboard with this viewer (honoured once VIV-22 lands)
+//   clipboard     — sync clipboard with this viewer (enforced, VIV-22)
+//   audio         — stream host audio to this viewer (enforced, VIV-65 —
+//                   when false the viewer's audio destination is never
+//                   registered with AudioSender, so no audio is sent)
 //   file_transfer — accept file-transfer offers (honoured once VIV-39 lands)
-// input is enforced today; clipboard/file_transfer flags are carried + stored
-// so the features can gate on them when implemented.
+// input/clipboard/audio are enforced today; file_transfer flag is carried +
+// stored so the feature can gate on it when implemented.
 struct CapabilityGrant {
     bool input         = true;
     bool clipboard     = true;
+    bool audio         = true;
     bool file_transfer = false;
 };
 

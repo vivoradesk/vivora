@@ -39,20 +39,26 @@ Dialog {
     // back on approve so the host pins the viewer as trusted.
     property bool   trustChecked: false
 
-    // GRANT ON ACCEPT toggles (VIV-60).  input and clipboard are enforced
-    // (view-only when input is off; clipboard sync blocked both directions
-    // when clipboard is off).  File transfer stays a disabled placeholder
-    // until the feature ships (VIV-39) — showing it ON would imply a
-    // capability that doesn't exist.
+    // GRANT ON ACCEPT toggles (VIV-60).  input, clipboard and audio are
+    // enforced (view-only when input is off; clipboard sync blocked both
+    // directions when clipboard is off; no host audio sent when audio is
+    // off — VIV-65).  File transfer stays a disabled placeholder until the
+    // feature ships (VIV-39) — showing it ON would imply a capability that
+    // doesn't exist.
     property bool   grantInput:     true
     property bool   grantClipboard: true
+    property bool   grantAudio:     true
     property bool   grantFile:      false
+
+    // Initial state of the Audio toggle when a new peer is prompted, fed by
+    // the "Audio on by default" setting (VIV-65).  Defaults ON.
+    property bool   audioDefaultOn: true
 
     readonly property int totalSeconds: 30
     property int    secondsRemaining: 30
 
     signal approved(string key, bool remember,
-                    bool input, bool clipboard, bool fileTransfer)
+                    bool input, bool clipboard, bool audio, bool fileTransfer)
     // NB: named `declined`, not `rejected` — QtQuick.Controls Dialog already
     // declares a built-in rejected() signal, and overriding it with a
     // different signature is an error ("Duplicate signal name").
@@ -65,6 +71,8 @@ Dialog {
         dialog.trustChecked = false
         dialog.grantInput = true
         dialog.grantClipboard = true
+        // Audio defaults from the "Audio on by default" setting (VIV-65).
+        dialog.grantAudio = dialog.audioDefaultOn
         dialog.grantFile = false
     }
 
@@ -277,8 +285,8 @@ Dialog {
         }
 
         // ── GRANT ON ACCEPT (VIV-60) ─────────────────────────────────
-        // Keyboard & mouse control and Clipboard sync are live toggles.
-        // File transfer is shown disabled until the feature exists
+        // Keyboard & mouse control, Clipboard sync and Audio are live
+        // toggles.  File transfer is shown disabled until the feature exists
         // (VIV-39); its grant flag still rides along.
         ColumnLayout {
             Layout.fillWidth: true
@@ -300,6 +308,11 @@ Dialog {
                 glyph: "⧉"; label: "Clipboard sync"
                 on: dialog.grantClipboard
                 onToggled: dialog.grantClipboard = !dialog.grantClipboard
+            }
+            GrantRow {
+                glyph: "♪"; label: "Audio"
+                on: dialog.grantAudio
+                onToggled: dialog.grantAudio = !dialog.grantAudio
             }
             GrantRow {
                 glyph: "🗀"; label: "File transfer"
@@ -390,7 +403,7 @@ Dialog {
                 Layout.fillWidth: true
                 onClicked: dialog.approved(dialog.approvalKey, dialog.trustChecked,
                                            dialog.grantInput, dialog.grantClipboard,
-                                           dialog.grantFile)
+                                           dialog.grantAudio, dialog.grantFile)
             }
         }
     }
