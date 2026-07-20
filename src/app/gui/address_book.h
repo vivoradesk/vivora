@@ -38,6 +38,8 @@ struct Peer {
     bool          grantClipboard = true;
     bool          grantAudio     = true;   // VIV-65 — host audio to this peer
     bool          grantFile      = false;
+    // Pinned entries float to the top of the Recent list (VIV-64).
+    bool          pinned         = false;
 };
 
 class AddressBook : public QAbstractListModel {
@@ -51,6 +53,7 @@ public:
         DirectionRole,
         SeenRole,
         TrustedRole,
+        PinnedRole,
     };
 
     explicit AddressBook(QObject* parent = nullptr);
@@ -82,6 +85,10 @@ public:
     // auto-accept).  Persists.
     Q_INVOKABLE void setTrusted(int row, bool trusted);
 
+    // Pin/unpin the entry at this row for the Recent context menu (VIV-64).
+    // Pinned entries sort to the top of the list.  Persists.
+    Q_INVOKABLE void setPinned(int row, bool pinned);
+
     // Store the capability grant last chosen for a peer (VIV-60), so a
     // trusted peer's auto-accept reuses it.  No-op if pubkey not in book.
     void setGrantByPubkey(const QString& pubkeyHex,
@@ -96,6 +103,10 @@ private:
     // == Unknown leaves an existing entry's direction untouched.
     void applyTouch(const QString& pubkeyHex, const QString& lastPeerCode,
                     PeerDirection dir);
+    // Orders peers_ in place: pinned first, then most-recently-seen first,
+    // stable within each group.  Emits no model signals — callers that
+    // mutate visible order wrap this in begin/endResetModel().
+    void sortPeers();
     void load();
     void save() const;
     QString filePath() const;

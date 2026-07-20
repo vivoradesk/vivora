@@ -303,6 +303,7 @@ ListView {
         property int    roleDirection: model.direction || 0  // 0=unknown 1=out 2=in
         property var    roleLastSeen:  model.lastSeen
         property bool   roleTrusted:   model.trusted || false
+        property bool   rolePinned:    model.pinned || false
         property string displayLabel: roleAlias.length > 0 ? roleAlias : roleCode
 
         RowLayout {
@@ -336,6 +337,15 @@ ListView {
                 color: "#6f6b60"
                 font.family: list.monoFont
                 font.pointSize: 8
+            }
+            // Pin marker: flat accent glyph shown only on pinned rows,
+            // matching the ⇡ glyph used by the Pin/Unpin menu action.
+            Label {
+                text: "⇡"
+                visible: row.rolePinned
+                color: "#3D6BFA"
+                font.pixelSize: 12
+                Layout.alignment: Qt.AlignVCenter
             }
             // Direction arrow: ↑ outgoing, ↓ incoming, blank for
             // unknown / legacy entries.
@@ -497,12 +507,12 @@ ListView {
                 enabled: row.rolePubkey.length > 0
                 onTriggered: App.peers.setTrusted(index, !row.roleTrusted)
             }
-            // Pin/unpin lands with the address-book pin feature; drawn
-            // disabled until the model gains a `pinned` field.
+            // Pin/unpin — pinned peers float to the top of the Recent list.
             MItem {
-                text: "Unpin"
+                text: row.rolePinned ? "Unpin" : "Pin"
                 glyph: "⇡"
-                enabled: false
+                enabled: row.rolePubkey.length > 0
+                onTriggered: App.peers.setPinned(index, !row.rolePinned)
             }
 
             MenuSeparator {

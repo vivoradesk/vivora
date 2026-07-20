@@ -9,6 +9,8 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
+#include <algorithm>
+
 namespace vivora::gui {
 
 AddressBook::AddressBook(QObject* parent) : QAbstractListModel(parent) {
@@ -31,6 +33,7 @@ QVariant AddressBook::data(const QModelIndex& idx, int role) const {
     case DirectionRole: return static_cast<int>(p.lastDirection);
     case SeenRole:     return p.seen;
     case TrustedRole:  return p.trusted;
+    case PinnedRole:   return p.pinned;
     case Qt::DisplayRole: return p.alias.isEmpty() ? p.lastPeerCode : p.alias;
     default: return {};
     }
@@ -45,21 +48,36 @@ QHash<int, QByteArray> AddressBook::roleNames() const {
         {DirectionRole, "direction"},
         {SeenRole,      "seen"},
         {TrustedRole,   "trusted"},
+        {PinnedRole,    "pinned"},
     };
+}
+
+void AddressBook::sortPeers() {
+    // Pinned entries first; within each pinned/unpinned group the most
+    // recently seen entry floats to the top.  stable_sort keeps the prior
+    // relative order for entries with equal lastSeen.
+    std::stable_sort(peers_.begin(), peers_.end(),
+                     [](const Peer& a, const Peer& b) {
+                         if (a.pinned != b.pinned) return a.pinned;
+                         return a.lastSeen > b.lastSeen;
+                     });
 }
 
 void AddressBook::applyTouch(const QString& pubkeyHex,
                              const QString& lastPeerCode,
                              PeerDirection dir) {
     if (pubkeyHex.isEmpty()) return;
+    // Touching an entry bumps its lastSeen, which can change its position in
+    // the sorted list, so both branches re-sort inside a model reset.
     for (int i = 0; i < peers_.size(); ++i) {
         if (peers_[i].pubkeyHex == pubkeyHex) {
+            beginResetModel();
             peers_[i].lastPeerCode = lastPeerCode;
             peers_[i].lastSeen     = QDateTime::currentDateTimeUtc();
             peers_[i].seen        += 1;
             if (dir != PeerDirection::Unknown) peers_[i].lastDirection = dir;
-            emit dataChanged(index(i), index(i),
-                {CodeRole, LastSeenRole, DirectionRole, SeenRole, Qt::DisplayRole});
+            sortPeers();
+            endResetModel();
             save();
             return;
         }
@@ -70,9 +88,10 @@ void AddressBook::applyTouch(const QString& pubkeyHex,
     p.lastSeen      = QDateTime::currentDateTimeUtc();
     p.lastDirection = dir;
     p.seen          = 1;
-    beginInsertRows({}, peers_.size(), peers_.size());
+    beginResetModel();
     peers_.push_back(p);
-    endInsertRows();
+    sortPeers();
+    endResetModel();
     save();
 }
 
@@ -129,6 +148,17 @@ void AddressBook::setTrusted(int row, bool trusted) {
     if (peers_[row].trusted == trusted) return;
     peers_[row].trusted = trusted;
     emit dataChanged(index(row), index(row), {TrustedRole});
+    save();
+}
+
+void AddressBook::setPinned(int row, bool pinned) {
+    if (row < 0 || row >= peers_.size()) return;
+    if (peers_[row].pinned == pinned) return;
+    // Toggling pinned changes the row's sort group, so re-sort under a reset.
+    beginResetModel();
+    peers_[row].pinned = pinned;
+    sortPeers();
+    endResetModel();
     save();
 }
 
@@ -189,8 +219,12 @@ void AddressBook::load() {
         // host audio (as before this grant existed) until re-approved.
         p.grantAudio     = o.value("grantAudio").toBool(true);
         p.grantFile      = o.value("grantFile").toBool(false);
+        p.pinned         = o.value("pinned").toBool(false);
         if (!p.pubkeyHex.isEmpty()) peers_.push_back(p);
     }
+    // Establish the pinned-first / most-recent-first order up front.  Called
+    // from the constructor, so no model-reset signals are needed here.
+    sortPeers();
 }
 
 void AddressBook::save() const {
@@ -208,6 +242,7 @@ void AddressBook::save() const {
         o["grantClipboard"] = p.grantClipboard;
         o["grantAudio"]     = p.grantAudio;
         o["grantFile"]      = p.grantFile;
+        o["pinned"]         = p.pinned;
         arr.append(o);
     }
     QFile f(filePath());
