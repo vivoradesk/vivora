@@ -19,8 +19,11 @@ bool MacHostPlatform::init(uint32_t display_index,
     // doesn't create a UI, so make sure the singleton exists.
     [NSApplication sharedApplication];
 
-    if (codec != vivora::VideoCodec::HEVC) {
-        vivora::log::warn("HOST", "macOS VideoToolbox currently supports HEVC only; --codec=h264 ignored");
+    // Remember the negotiated codec; start_encoder() builds the VideoToolbox
+    // session for it lazily when a viewer attaches (VIV-7).
+    codec_ = codec;
+    if (codec == vivora::VideoCodec::H264) {
+        vivora::log::info("HOST", "Negotiated H.264 (SDR fallback) for the macOS host encoder");
     }
     auto displays = vivora::host::MacScreenCapture::enumerate_displays();
     if (displays.empty()) {
@@ -87,14 +90,19 @@ bool MacHostPlatform::start_encoder() {
     ecfg.bitrate_bps = bitrate;
     // Keep the keyframe interval at ~2s worth of frames (120 @ 60fps).
     ecfg.idr_period = 2u * stream_fps_;
-    ecfg.hdr = capture_.hdr_active();
+    ecfg.codec = codec_;   // VIV-7: honour the negotiated H.264/HEVC choice
+    // H.264 is SDR-only; the encoder ignores hdr for H.264 but keep the config
+    // honest so the log reflects reality.
+    ecfg.hdr = (codec_ != vivora::VideoCodec::H264) && capture_.hdr_active();
     if (!encoder_.init(ecfg)) {
         vivora::log::error("HOST", "Failed to init encoder");
         return false;
     }
     encoder_live_     = true;
     live_bitrate_bps_ = bitrate;
-    vivora::log::info("HOST", "Encoder started (hevc, %u kbps)", bitrate / 1000);
+    vivora::log::info("HOST", "Encoder started (%s, %u kbps)",
+                      codec_ == vivora::VideoCodec::H264 ? "h264" : "hevc",
+                      bitrate / 1000);
     return true;
 }
 

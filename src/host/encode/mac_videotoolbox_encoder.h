@@ -3,6 +3,7 @@
 #ifdef VIVORA_MACOS
 
 #include "common/utils/types.h"
+#include "common/codec/video_codec.h"
 #include <CoreVideo/CoreVideo.h>
 
 #include <cstdint>
@@ -16,16 +17,20 @@ struct MacEncoderConfig {
     uint32_t fps = 60;
     uint32_t bitrate_bps = 15'000'000;
     uint32_t idr_period = 120;   // max keyframe interval, frames
-    bool hdr = false;            // HEVC Main10 + BT.2020/PQ
+    bool hdr = false;            // HEVC Main10 + BT.2020/PQ (HEVC only; H.264 is always SDR 8-bit)
+    // Negotiated wire codec. HEVC is the default; H.264 is the fallback for
+    // viewers whose decoder can't init HEVC (VIV-7). H.264 is SDR 8-bit only,
+    // so `hdr` is ignored when codec == H264.
+    vivora::VideoCodec codec = vivora::VideoCodec::HEVC;
 };
 
 struct MacEncodedPacket {
-    std::vector<uint8_t> data;   // HEVC Annex-B (VPS/SPS/PPS prepended on keyframes)
+    std::vector<uint8_t> data;   // Annex-B; on keyframes VPS/SPS/PPS (HEVC) or SPS/PPS (H.264) are prepended
     uint64_t pts = 0;            // microseconds
     bool keyframe = false;
 };
 
-// HEVC hardware encoder via VideoToolbox.
+// Hardware video encoder via VideoToolbox (HEVC default, H.264 fallback).
 class MacVideoToolboxEncoder {
 public:
     MacVideoToolboxEncoder();

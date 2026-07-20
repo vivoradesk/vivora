@@ -24,6 +24,12 @@ public:
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
 
+    // Report the codec the VideoToolbox session actually emits so host_loop
+    // can advertise it to the viewer. HEVC by default; H.264 when negotiated
+    // as the fallback (VIV-7). This mirrors what the encoder was built with,
+    // not a re-negotiation.
+    vivora::VideoCodec actual_codec() const override { return codec_; }
+
     // Monitor selection (VIV-50).  ScreenCaptureKit enumerates displays
     // directly (unlike the Linux portal), so this mirrors the Windows path:
     // stop capture+encoder, re-init capture on the new SCDisplay, rebuild the
@@ -61,6 +67,9 @@ private:
     uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
     uint32_t manual_bitrate_bps_    = 0;     // user-pinned bitrate (0 = auto)
     uint16_t stream_fps_            = 60;    // VIV-67 framerate cap
+    // Negotiated wire codec (VIV-7). HEVC by default; a viewer whose decoder
+    // can't init HEVC negotiates H.264, and start_encoder() honours it.
+    vivora::VideoCodec codec_       = vivora::VideoCodec::HEVC;
     // Lazy-encoder state (VIV-12).  encoder_live_ mirrors whether the VT
     // session exists; live_bitrate_bps_ caches the last set_bitrate() so a
     // stop/start cycle resumes at the adaptive controller's last rate.

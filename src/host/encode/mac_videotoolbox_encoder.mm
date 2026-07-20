@@ -42,8 +42,27 @@ static bool append_param_sets_hevc(CMFormatDescriptionRef fmt, std::vector<uint8
     return true;
 }
 
+// Extract SPS/PPS from an H.264 CMFormatDescription and append as Annex-B (VIV-7).
+static bool append_param_sets_h264(CMFormatDescriptionRef fmt, std::vector<uint8_t>& out) {
+    size_t count = 0;
+    int nal_hdr_len = 0;
+    OSStatus st = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+        fmt, 0, nullptr, nullptr, &count, &nal_hdr_len);
+    if (st != noErr || count == 0) return false;
+
+    for (size_t i = 0; i < count; ++i) {
+        const uint8_t* ps = nullptr;
+        size_t ps_len = 0;
+        st = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            fmt, i, &ps, &ps_len, nullptr, nullptr);
+        if (st != noErr) return false;
+        append_annexb(out, ps, ps_len);
+    }
+    return true;
+}
+
 // Convert a length-prefixed (AVCC-style) CMBlockBuffer to Annex-B.
-// HEVC uses 4-byte length prefixes by default in CoreMedia.
+// Both HEVC and H.264 use 4-byte length prefixes by default in CoreMedia.
 static bool append_avcc_to_annexb(CMBlockBufferRef bb, std::vector<uint8_t>& out) {
     size_t total = CMBlockBufferGetDataLength(bb);
     size_t offset = 0;
@@ -82,6 +101,10 @@ struct MacVideoToolboxEncoder::Impl {
     VTCompressionSessionRef session = nullptr;
     std::mutex mutex;
     std::deque<MacEncodedPacket> queue;
+    // Which parameter-set layout the output callback should extract on
+    // keyframes (VPS/SPS/PPS for HEVC vs SPS/PPS for H.264). Set once in
+    // init() before the session starts emitting frames (VIV-7).
+    bool is_hevc = true;
 };
 
 static void vt_output_callback(void* outputCallbackRefCon,
@@ -104,11 +127,17 @@ static void vt_output_callback(void* outputCallbackRefCon,
     CMTime pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
     pkt.pts = CMTIME_IS_VALID(pts) ? (uint64_t)(CMTimeGetSeconds(pts) * 1'000'000.0) : 0;
 
-    // On keyframes, prepend VPS/SPS/PPS as Annex-B.
+    // On keyframes, prepend the parameter sets as Annex-B: VPS/SPS/PPS for
+    // HEVC, SPS/PPS for H.264 (VIV-7).
     if (keyframe) {
         CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(sampleBuffer);
-        if (fmt && !append_param_sets_hevc(fmt, pkt.data)) {
-            vivora::log::warn(TAG, "Failed to extract HEVC parameter sets");
+        if (fmt) {
+            bool ok = impl->is_hevc ? append_param_sets_hevc(fmt, pkt.data)
+                                    : append_param_sets_h264(fmt, pkt.data);
+            if (!ok) {
+                vivora::log::warn(TAG, "Failed to extract %s parameter sets",
+                                  impl->is_hevc ? "HEVC" : "H.264");
+            }
         }
     }
 
@@ -143,6 +172,14 @@ static void set_prop_int(VTCompressionSessionRef s, CFStringRef key, int32_t val
 bool MacVideoToolboxEncoder::init(const MacEncoderConfig& config) {
     config_ = config;
 
+    const bool is_hevc = (config.codec != vivora::VideoCodec::H264);
+    // H.264 is our SDR 8-bit fallback path — HDR (Main10/BT.2020/PQ) is HEVC
+    // only, so ignore the hdr flag when encoding H.264 (VIV-7).
+    const bool hdr = is_hevc && config.hdr;
+    impl_->is_hevc = is_hevc;
+    const CMVideoCodecType codec_type = is_hevc ? kCMVideoCodecType_HEVC
+                                                : kCMVideoCodecType_H264;
+
     CFMutableDictionaryRef encoder_specs = nullptr;
 #if TARGET_OS_OSX
     encoder_specs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
@@ -159,7 +196,7 @@ bool MacVideoToolboxEncoder::init(const MacEncoderConfig& config) {
         kCFAllocatorDefault,
         (int32_t)config.width,
         (int32_t)config.height,
-        kCMVideoCodecType_HEVC,
+        codec_type,
         encoder_specs,
         nullptr, // source pixel buffer attributes (nil = accept what we give)
         nullptr,
@@ -182,7 +219,26 @@ bool MacVideoToolboxEncoder::init(const MacEncoderConfig& config) {
     }
 
     // Profile / color.
-    if (config.hdr) {
+    if (!is_hevc) {
+        // H.264 SDR 8-bit fallback (VIV-7). High profile with auto level; the
+        // AVC High profile allows CABAC, which the SDR 709 property set below
+        // pairs with for a small bitrate win. Baseline-only decoders won't
+        // reach this path (they'd have negotiated a different stream), but the
+        // entropy-mode set is best-effort anyway — VideoToolbox silently keeps
+        // CAVLC if the chosen profile can't do CABAC.
+        VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_ProfileLevel,
+                             kVTProfileLevel_H264_High_AutoLevel);
+        if (@available(macOS 10.9, *)) {
+            VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_H264EntropyMode,
+                                 kVTH264EntropyMode_CABAC);
+        }
+        VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_ColorPrimaries,
+                             kCVImageBufferColorPrimaries_ITU_R_709_2);
+        VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_TransferFunction,
+                             kCVImageBufferTransferFunction_ITU_R_709_2);
+        VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_YCbCrMatrix,
+                             kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+    } else if (hdr) {
         VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_ProfileLevel,
                              kVTProfileLevel_HEVC_Main10_AutoLevel);
         VTSessionSetProperty(impl_->session, kVTCompressionPropertyKey_ColorPrimaries,
@@ -233,7 +289,8 @@ bool MacVideoToolboxEncoder::init(const MacEncoderConfig& config) {
 
     log::info(TAG, "Encoder ready: %ux%u @ %u fps, %u bps, %s",
               config.width, config.height, config.fps, config.bitrate_bps,
-              config.hdr ? "HDR10 (Main10)" : "SDR (Main)");
+              is_hevc ? (hdr ? "HEVC HDR10 (Main10)" : "HEVC SDR (Main)")
+                      : "H.264 SDR (High)");
     return true;
 }
 
