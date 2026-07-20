@@ -28,6 +28,10 @@ class Settings : public QObject {
     Q_PROPERTY(int     hostPort        READ hostPort        WRITE setHostPort        NOTIFY changed)
     Q_PROPERTY(int     idleTimeoutMin  READ idleTimeoutMin  WRITE setIdleTimeoutMin  NOTIFY changed)
     Q_PROPERTY(int     idleWarningSec  READ idleWarningSec  WRITE setIdleWarningSec  NOTIFY changed)
+    // VIV-54: how long the client keeps the stream window open and retries the
+    // handshake after the host drops, in minutes (0 = give up immediately).
+    Q_PROPERTY(int     clientReconnectTimeoutMin READ clientReconnectTimeoutMin
+                                                 WRITE setClientReconnectTimeoutMin NOTIFY changed)
     Q_PROPERTY(bool    startSharingOnLaunch READ startSharingOnLaunch
                                             WRITE setStartSharingOnLaunch NOTIFY changed)
     Q_PROPERTY(bool    minimizeToTray  READ minimizeToTray  WRITE setMinimizeToTray  NOTIFY changed)
@@ -74,6 +78,7 @@ public:
     int     hostPort() const;            void setHostPort(int);
     int     idleTimeoutMin() const;      void setIdleTimeoutMin(int);
     int     idleWarningSec() const;      void setIdleWarningSec(int);
+    int     clientReconnectTimeoutMin() const; void setClientReconnectTimeoutMin(int);
     bool    startSharingOnLaunch() const;void setStartSharingOnLaunch(bool);
     bool    minimizeToTray() const;      void setMinimizeToTray(bool);
     bool    startAtLogin() const;        void setStartAtLogin(bool);

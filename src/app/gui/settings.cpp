@@ -19,6 +19,7 @@ constexpr const char* K_DISPLAY            = "capture/displayIndex";
 constexpr const char* K_HOST_PORT          = "network/hostPort";
 constexpr const char* K_IDLE_TIMEOUT_MIN   = "idle/timeoutMin";
 constexpr const char* K_IDLE_WARNING_SEC   = "idle/warningSec";
+constexpr const char* K_RECONNECT_TIMEOUT  = "network/clientReconnectTimeoutMin";
 constexpr const char* K_START_SHARING      = "general/startSharingOnLaunch";
 constexpr const char* K_MIN_TO_TRAY        = "general/minimizeToTray";
 constexpr const char* K_START_AT_LOGIN     = "general/startAtLogin";
@@ -54,6 +55,8 @@ constexpr int   DEF_DISPLAY          = 0;
 // the UI for users with a port conflict on the new default.
 constexpr int   DEF_HOST_PORT        = 9900;
 constexpr int   DEF_IDLE_TIMEOUT_MIN = 10;
+// VIV-54: keep retrying for 5 minutes by default when the host drops.
+constexpr int   DEF_RECONNECT_TIMEOUT = 5;
 constexpr int   DEF_IDLE_WARNING_SEC = 30;
 constexpr bool  DEF_START_SHARING    = false;
 constexpr bool  DEF_MIN_TO_TRAY      = true;
@@ -137,6 +140,8 @@ void Settings::setHostPort(int v)             { if (v != hostPort()) { q_.setVal
 
 int Settings::idleTimeoutMin() const          { return q_.value(K_IDLE_TIMEOUT_MIN, DEF_IDLE_TIMEOUT_MIN).toInt(); }
 void Settings::setIdleTimeoutMin(int v)       { if (v != idleTimeoutMin()) { q_.setValue(K_IDLE_TIMEOUT_MIN, v); emit changed(); } }
+int Settings::clientReconnectTimeoutMin() const    { return q_.value(K_RECONNECT_TIMEOUT, DEF_RECONNECT_TIMEOUT).toInt(); }
+void Settings::setClientReconnectTimeoutMin(int v) { if (v != clientReconnectTimeoutMin()) { q_.setValue(K_RECONNECT_TIMEOUT, v); emit changed(); } }
 
 int Settings::idleWarningSec() const          { return q_.value(K_IDLE_WARNING_SEC, DEF_IDLE_WARNING_SEC).toInt(); }
 void Settings::setIdleWarningSec(int v)       { if (v != idleWarningSec()) { q_.setValue(K_IDLE_WARNING_SEC, v); emit changed(); } }

@@ -22,7 +22,12 @@
 
 namespace vivora::client {
 
-enum class SessionState { Disconnected, Connecting, Connected };
+// Reconnecting sits between Connected and Disconnected (VIV-54): a live
+// session whose host went silent past the timeout keeps the window + audio
+// socket, retries the handshake against the same peer config with
+// exponential backoff, and only falls through to Disconnected when the user
+// cancels or the overall reconnect deadline expires.
+enum class SessionState { Disconnected, Connecting, Connected, Reconnecting };
 
 // VIV-23: why start() stopped for a TOFU trust decision.  Filled by the
 // session when interactive-trust mode is on and the persisted pin either
@@ -47,6 +52,21 @@ public:
     // through the relay path.  Leaves ~2 s of CONNECT_TIMEOUT_MS budget
     // for the relay attempt before we give up entirely.
     static constexpr int64_t RELAY_FALLBACK_MS = 3000;
+    // Auto-reconnect backoff bounds (VIV-54).  First retry after the min,
+    // doubling each attempt up to the cap: 1s, 2s, 4s, 8s, 16s, 30s, 30s…
+    static constexpr int64_t RECONNECT_BACKOFF_MIN_MS = 1000;
+    static constexpr int64_t RECONNECT_BACKOFF_MAX_MS = 30000;
+
+    // Overall auto-reconnect budget (VIV-54).  0 disables reconnect entirely
+    // (Connected → Disconnected on timeout, the legacy behaviour used by the
+    // CLI and unit tests).  The GUI sets this from the client_reconnect_timeout
+    // setting (default 5 min).
+    void set_reconnect_timeout_ms(int64_t ms) { max_reconnect_ms_ = ms; }
+    // Banner accessors for the view layer (VIV-54).  attempt is the number of
+    // full handshake re-establishes tried this reconnect; seconds is the time
+    // elapsed since the host went silent.
+    int    reconnect_attempt() const { return reconnect_attempt_; }
+    double reconnect_seconds() const;
 
     // Pin the host's long-term Curve25519 public key. MUST be called before
     // start() — Noise_NK refuses to run without a known responder static.
@@ -232,6 +252,14 @@ public:
 
 private:
     void handle_packet(const uint8_t* data, size_t len);
+    // Bring the transport up against the stored peer config: (re)bind/reuse the
+    // socket, run the rendezvous lookup / same-NAT / relay path, prime a fresh
+    // Noise handshake and send the first HELLO.  Shared by start() (initial
+    // connect) and the reconnect path (VIV-54).  On reconnect the audio socket
+    // is preserved so the host can keep delivering to the same audio port.
+    bool establish(bool is_reconnect);
+    // Enter the Reconnecting state after a Connected-side timeout (VIV-54).
+    void begin_reconnect();
     void handle_control(const uint8_t* payload, size_t len);
     // Seal a plaintext wire with send_cs_ and push it to the host.  Returns
     // true on success.  All post-handshake send paths funnel through this.
@@ -260,6 +288,25 @@ private:
     SessionState state_ = SessionState::Disconnected;
     VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};
+
+    // Stored connect target so a reconnect can re-run establish() without the
+    // caller (VIV-54).  Everything else the reconnect needs (host key, peer
+    // code, rendezvous/relay endpoints) is already held in the setters below.
+    std::string host_ip_;
+    uint16_t    port_ = 0;
+
+    // Auto-reconnect state (VIV-54).  max_reconnect_ms_ == 0 keeps the legacy
+    // Connected → Disconnected behaviour.  reconnect_start_ stamps entry into
+    // Reconnecting (drives the banner countdown + the overall deadline);
+    // next_reestablish_at_ / reconnect_backoff_ms_ pace the exponential
+    // backoff of full handshake re-establishes; reconnect_saw_packet_ is the
+    // pre-emptive shortcut flag set when any host packet lands mid-reconnect.
+    int64_t   max_reconnect_ms_       = 0;
+    TimePoint reconnect_start_{};
+    TimePoint next_reestablish_at_{};
+    int64_t   reconnect_backoff_ms_   = RECONNECT_BACKOFF_MIN_MS;
+    int       reconnect_attempt_      = 0;
+    bool      reconnect_saw_packet_   = false;
 
     // Pinned host static pubkey + handshake state.  The handshake object is
     // live from start() until we process msg2, at which point finalize()

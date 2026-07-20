@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdlib>
 #include "app/gui/app_controller.h"
 
@@ -320,10 +321,26 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     vc.license_file       = settings_->licenseFile().toStdString();
     vc.view_fps_cap       = settings_->viewFpsCap();
     vc.view_max_kbps      = settings_->viewMaxKbps();
+    // VIV-54: keep the stream window open and auto-reconnect for up to the
+    // configured budget when the host drops (minutes → ms; 0 = disabled).
+    vc.reconnect_timeout_ms = static_cast<uint32_t>(
+        std::max(0, settings_->clientReconnectTimeoutMin()) * 60 * 1000);
 
     auto vs = std::make_unique<ViewSession>(this);
     ViewSession* vs_ptr = vs.get();
-    connect(vs_ptr, &ViewSession::finished, this, [this, vs_ptr] {
+    connect(vs_ptr, &ViewSession::finished, this,
+            [this, vs_ptr, dial = peerCodeOrHex] {
+        // VIV-54: capture a pending TOFU trust question (host key changed during
+        // an auto-reconnect) BEFORE the session is destroyed by erase().
+        const bool trustBroken = vs_ptr->trustPromptPending();
+        QString code, newHex, oldHex;
+        bool    mismatch = false;
+        if (trustBroken) {
+            code     = vs_ptr->trustPeerCode();
+            newHex   = vs_ptr->trustNewPubkeyHex();
+            oldHex   = vs_ptr->trustOldPubkeyHex();
+            mismatch = vs_ptr->trustMismatch();
+        }
         for (auto it = viewSessions_.begin(); it != viewSessions_.end(); ++it) {
             if (it->get() == vs_ptr) {
                 viewSessions_.erase(it);
@@ -333,6 +350,19 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
             }
         }
         log::info("AppController", "View session ended (%d remaining)", activeViews_);
+        // Raise the same VIV-23 dialog the initial-connect path uses; on
+        // consent resolveTrustPrompt() re-pins and re-dials `dial`.
+        if (trustBroken) {
+            trustDial_   = dial;
+            trustCode_   = code;
+            trustNewHex_ = newHex;
+            const QString newFp = QString::fromStdString(
+                crypto::key_fingerprint_hex(newHex.toStdString()));
+            const QString oldFp = QString::fromStdString(
+                crypto::key_fingerprint_hex(oldHex.toStdString()));
+            emit trustPromptRequested(code, newFp, oldFp, mismatch);
+            emit showWindowRequested();
+        }
     });
     if (!vs->start(vc)) {
         // VIV-23: not an error when the connect paused on a TOFU trust

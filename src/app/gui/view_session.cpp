@@ -93,6 +93,9 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     // Viewing caps (Settings → Viewing, 0 = none).
     loop_cfg_.view_fps_cap  = static_cast<uint16_t>(std::max(0, cfg_.view_fps_cap));
     loop_cfg_.view_max_kbps = static_cast<uint32_t>(std::max(0, cfg_.view_max_kbps));
+    // VIV-54: auto-reconnect budget (the loop derives the banner peer label
+    // from peer_pubkey_hex, so no separate label plumbing is needed).
+    loop_cfg_.reconnect_timeout_ms = cfg_.reconnect_timeout_ms;
 
     // VIV-22: clipboard sync client-side.  ClipboardSync watches QClipboard
     // on this (GUI) thread; the loop drains/fills the bridge every iter().
@@ -136,6 +139,20 @@ void ViewSession::onTick() {
     if (!loop_) return;
     const bool keep_going = loop_->iter();
     if (!keep_going) {
+        // VIV-54: a live session can end mid-flight because the host's key
+        // changed during an auto-reconnect (possible MITM).  Capture the
+        // pending TOFU trust question before the loop is destroyed so
+        // AppController can raise the same VIV-23 dialog it uses on connect.
+        vivora::client::TrustPending tp;
+        if (loop_->trust_pending(tp)) {
+            trustPending_  = true;
+            trustMismatch_ = tp.mismatch;
+            trustPeerCode_ = QString::fromStdString(tp.code);
+            trustNewHex_   = QString::fromStdString(tp.pubkey_hex);
+            trustOldHex_   = QString::fromStdString(tp.stored_hex);
+            log::info("ViewSession", "Reconnect stopped: host key changed for '%s'",
+                      tp.code.c_str());
+        }
         tick_.stop();
         loop_.reset();
         platform_.reset();

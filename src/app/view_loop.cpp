@@ -41,6 +41,40 @@ void ViewLoopState::update_status(const char* text) {
     if (platform_) platform_->set_status(text);
 }
 
+bool ViewLoopState::handle_reconnect_ui() {
+    const auto st = session_.state();
+
+    // Resume edge: the reconnect just succeeded.  The host restarted its stream
+    // with a fresh keyframe, so the decoder's reference chain is stale — drop it
+    // and pull a clean IDR so rendering resumes without artefacts (VIV-54).
+    if (prev_state_ == client::SessionState::Reconnecting
+        && st == client::SessionState::Connected) {
+        log::info("VIEW", "Reconnected — dropping stale refs, requesting IDR");
+        got_keyframe_ = false;                                    // legacy path
+        decode_needs_idr_.store(true, std::memory_order_release); // threaded path
+        session_.reset_video_stream();
+        session_.request_idr();
+        last_idr_request_ = Clock::now();
+        if (platform_) platform_->flush_decoder();
+    }
+    prev_state_ = st;
+
+    if (st != client::SessionState::Reconnecting) return false;
+
+    // Banner: reuse the VIV-62 status overlay (set_status) rather than invent a
+    // new widget.  Cancel affordances already exist — closing the window
+    // (pump_events → clean teardown) or the in-stream menu's Disconnect both end
+    // the loop, so the banner just points the user at the window control.
+    char buf[192];
+    const char* who = peer_label_.empty() ? "the host" : peer_label_.c_str();
+    std::snprintf(buf, sizeof(buf),
+                  "Reconnecting to %s — attempt %d (%ds)…   Close the window to cancel",
+                  who, session_.reconnect_attempt(),
+                  static_cast<int>(session_.reconnect_seconds()));
+    update_status(buf);
+    return true;
+}
+
 void ViewLoopState::teardown() {
     if (torn_down_) return;
     torn_down_ = true;
@@ -196,6 +230,13 @@ bool ViewLoopState::iter_threaded() {
     }
     if (!platform.pump_events()) return false;
     session.poll();
+
+    // VIV-54: while reconnecting, show the banner and hold the window open,
+    // skipping normal frame handling.  Also fires the resume IDR on success.
+    if (handle_reconnect_ui()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return true;
+    }
 
     // Lazy init once Connected: pipeline decoder + decode thread, audio, clock.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
@@ -559,6 +600,22 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     // User-configured viewing caps (Settings → Viewing, 0 = none).
     session_.set_fps_cap(cfg.view_fps_cap);
     session_.set_bitrate_cap_kbps(cfg.view_max_kbps);
+    // VIV-54 auto-reconnect budget (0 = disabled, legacy behaviour).
+    session_.set_reconnect_timeout_ms(cfg.reconnect_timeout_ms);
+    // Human-readable peer label for the reconnect banner: prefer the caller's
+    // label, else derive a memorable code from a hex --peer, else the code as
+    // given.
+    if (cfg.peer_label && *cfg.peer_label) {
+        peer_label_ = cfg.peer_label;
+    } else if (cfg.peer_pubkey_hex && *cfg.peer_pubkey_hex) {
+        if (peer_code::looks_like_hex_pubkey(cfg.peer_pubkey_hex)) {
+            uint8_t pk[32];
+            if (crypto::hex_decode_32(cfg.peer_pubkey_hex, pk))
+                peer_label_ = peer_code::encode(pk);
+        } else {
+            peer_label_ = cfg.peer_pubkey_hex;  // already an adjective-noun code
+        }
+    }
     if (!session_.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
         if (session_.has_trust_pending()) {
             // Not an error — the GUI shows the trust dialog and re-dials.
@@ -656,6 +713,13 @@ bool ViewLoopState::iter() {
     if (!platform.pump_events()) return false;
 
     session.poll();
+
+    // VIV-54: while reconnecting, show the banner and hold the window open,
+    // skipping normal frame handling.  Also fires the resume IDR on success.
+    if (handle_reconnect_ui()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return true;
+    }
 
     // Once the handshake completes we know the host codec — spin up
     // the decoder now, and also open the audio output device.  Both

@@ -32,6 +32,8 @@ struct GuiViewConfig {
     // User viewing caps from Settings (0 = none).
     int view_fps_cap  = 0;
     int view_max_kbps = 0;
+    // VIV-54 auto-reconnect budget in ms (client_reconnect_timeout; 0 = off).
+    uint32_t reconnect_timeout_ms = 0;
 };
 
 // One active "Connect to peer" session in the GUI.

@@ -9,6 +9,7 @@
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/packet.h"
 #include "common/utils/log.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
@@ -73,6 +74,40 @@ void ClientSession::set_relay_license(const uint8_t token[95]) {
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
+    // Remember the target so a reconnect can re-run establish() without the
+    // caller re-supplying it (VIV-54).
+    host_ip_ = host_ip ? host_ip : "";
+    port_    = port;
+    if (!establish(/*is_reconnect=*/false)) return false;
+    state_ = SessionState::Connecting;
+    return true;
+}
+
+double ClientSession::reconnect_seconds() const {
+    if (reconnect_start_.time_since_epoch().count() == 0) return 0.0;
+    return std::chrono::duration<double>(Clock::now() - reconnect_start_).count();
+}
+
+void ClientSession::begin_reconnect() {
+    // Connected → Reconnecting (VIV-54).  The socket, audio socket and async
+    // receive thread all stay alive: cheap HELLO probes ride the existing
+    // socket and a returning host keeps hitting the same audio port.  The
+    // stream ciphers are stale until the next handshake, so drop
+    // handshake_complete_ and let a fresh msg2 re-key us.
+    state_                = SessionState::Reconnecting;
+    handshake_complete_   = false;
+    reconnect_start_      = Clock::now();
+    reconnect_attempt_    = 1;   // banner counts from 1 (probing phase)
+    reconnect_backoff_ms_ = RECONNECT_BACKOFF_MIN_MS;
+    reconnect_saw_packet_ = false;
+    // First full re-establish (which re-runs the rendezvous lookup) after the
+    // initial backoff; until then poll() sends cheap HELLO probes to host_addr_.
+    next_reestablish_at_  = Clock::now() + std::chrono::milliseconds(reconnect_backoff_ms_);
+    last_hello_time_      = {};
+    log::warn("ClientSession", "Host went silent — reconnecting (window stays open)");
+}
+
+bool ClientSession::establish(bool is_reconnect) {
     // Stale-state guard: a re-dial on a fresh attempt must not report the
     // previous attempt's trust question (VIV-23).
     trust_pending_active_ = false;
@@ -87,20 +122,37 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
         return false;
     }
 
-    socket_ = net::IUdpSocket::create();
+    // A reconnect reuses the existing UDP socket (keeping the same source port
+    // keeps any host-side NAT pinhole warm) but must first stop the async
+    // receive thread so the synchronous rendezvous lookup / relay BIND below
+    // can read the socket exclusively (VIV-54).
+    if (recv_running_.exchange(false)) {
+        if (recv_thread_.joinable()) recv_thread_.join();
+    }
+    recv_ring_.reset();
+
+    if (!is_reconnect) {
+        socket_ = net::IUdpSocket::create();
+        if (!socket_) return false;
+
+        // Bind to any port
+        if (!socket_->bind(0)) {
+            log::error("ClientSession", "Failed to bind");
+            return false;
+        }
+
+        socket_->set_nonblocking(true);
+        socket_->set_recvbuf(8 * 1024 * 1024);  // 8MB — absorb decode-spike backlog (VIV-82)
+    }
     if (!socket_) return false;
 
-    // Bind to any port
-    if (!socket_->bind(0)) {
-        log::error("ClientSession", "Failed to bind");
-        return false;
-    }
+    // Re-evaluate the relay path from scratch each attempt; a reconnect that
+    // had been on the relay re-BINDs once the socket is ready (below).
+    const bool was_relay_active = relay_active_;
+    relay_active_ = false;
 
-    socket_->set_nonblocking(true);
-    socket_->set_recvbuf(8 * 1024 * 1024);  // 8MB — absorb decode-spike backlog (VIV-82)
-
-    host_addr_.ip = net::parse_ip(host_ip);
-    host_addr_.port = port;
+    host_addr_.ip = net::parse_ip(host_ip_.c_str());
+    host_addr_.port = port_;
 
     // STUN before the rendezvous lookup so we have our own reflexive in
     // hand for same-NAT detection (compare against host's reflexive that
@@ -211,7 +263,7 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     }
 
     if (host_addr_.ip == 0) {
-        log::error("ClientSession", "Invalid host IP: %s", host_ip);
+        log::error("ClientSession", "Invalid host IP: %s", host_ip_.c_str());
         return false;
     }
     if (!host_key_set_) {
@@ -222,17 +274,22 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
 
     receiver_ = std::make_unique<VideoReceiver>(*socket_);
 
-    // Audio socket: ephemeral port. Used to receive PacketType::Audio.
-    audio_socket_ = net::IUdpSocket::create();
-    if (audio_socket_ && audio_socket_->bind(0)) {
-        audio_socket_->set_nonblocking(true);
-        audio_socket_->set_recvbuf(256 * 1024);
-        audio_local_port_ = audio_socket_->local_port();
-        log::info("ClientSession", "Audio socket bound to port %u", audio_local_port_);
-    } else {
-        log::warn("ClientSession", "Failed to bind audio socket — audio disabled");
-        audio_socket_.reset();
-        audio_local_port_ = 0;
+    // Audio socket: ephemeral port. Used to receive PacketType::Audio.  On a
+    // reconnect we deliberately keep the already-bound audio socket (and its
+    // port) so the host can keep delivering audio to the same endpoint across
+    // the dropout (VIV-54) — only bind it on the initial connect.
+    if (!is_reconnect || !audio_socket_) {
+        audio_socket_ = net::IUdpSocket::create();
+        if (audio_socket_ && audio_socket_->bind(0)) {
+            audio_socket_->set_nonblocking(true);
+            audio_socket_->set_recvbuf(256 * 1024);
+            audio_local_port_ = audio_socket_->local_port();
+            log::info("ClientSession", "Audio socket bound to port %u", audio_local_port_);
+        } else {
+            log::warn("ClientSession", "Failed to bind audio socket — audio disabled");
+            audio_socket_.reset();
+            audio_local_port_ = 0;
+        }
     }
 
     // Relay is configured (--relay) but we don't BIND yet.  The auto-
@@ -283,6 +340,18 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     // Prime a fresh Noise_NK handshake.  send_hello() will write msg1 into
     // the wire; handle_control() processes msg2.  init_initiator() re-runs
     // InitializeSymmetric internally, so calling it is equivalent to a reset.
+    // A reconnect that had been running over the relay re-BINDs to refresh the
+    // (likely expired) allocation before the first HELLO (VIV-54).  Direct
+    // reconnects skip this and try P2P first, exactly like the initial connect.
+    if (is_reconnect && was_relay_active
+        && relay_session_set_ && relay_addr_.ip != 0) {
+        if (relay_bind_blocking()) {
+            log::info("ClientSession", "Reconnect: relay re-bound");
+        } else {
+            log::warn("ClientSession", "Reconnect: relay re-BIND failed — trying direct");
+        }
+    }
+
     if (!ensure_client_identity()) return false;
     if (!handshake_.init_initiator(host_static_pk_, client_identity_)) {
         log::error("ClientSession", "Noise init_initiator failed");
@@ -290,7 +359,8 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     }
     handshake_complete_ = false;
 
-    state_ = SessionState::Connecting;
+    // Caller sets the visible state (Connecting for a fresh start(),
+    // Reconnecting is kept across an attempt) — establish() only primes timers.
     connect_start_ = Clock::now();
     last_hello_time_ = {};
     last_recv_time_ = Clock::now();
@@ -426,6 +496,7 @@ void ClientSession::poll() {
         while (recv_ring_->try_pop(pkt)) {
             if (pkt.len <= 0) continue;
             last_recv_time_ = Clock::now();
+            if (state_ == SessionState::Reconnecting) reconnect_saw_packet_ = true;
             bytes_received_ += static_cast<uint64_t>(pkt.len);
             handle_packet(pkt.data, static_cast<size_t>(pkt.len));
         }
@@ -435,6 +506,7 @@ void ClientSession::poll() {
             int n = socket_->recv_from(buf, sizeof(buf), sender);
             if (n <= 0) break;
             last_recv_time_ = Clock::now();
+            if (state_ == SessionState::Reconnecting) reconnect_saw_packet_ = true;
             bytes_received_ += static_cast<uint64_t>(n);
             handle_packet(buf, static_cast<size_t>(n));
         }
@@ -558,12 +630,77 @@ void ClientSession::poll() {
         }
     }
 
+    // Reconnecting (VIV-54): retry the handshake against the same peer config
+    // with exponential backoff until the host returns, the user cancels, or the
+    // overall deadline expires.  Kept between Connected and Disconnected so the
+    // window (and audio socket) stay alive across the dropout.
+    if (state_ == SessionState::Reconnecting) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - reconnect_start_).count();
+        if (max_reconnect_ms_ > 0 && elapsed > max_reconnect_ms_) {
+            log::warn("ClientSession",
+                "Reconnect gave up after %llds — closing",
+                static_cast<long long>(elapsed / 1000));
+            state_ = SessionState::Disconnected;
+            return;
+        }
+
+        // Full re-establish on the backoff boundary: re-runs the (blocking)
+        // rendezvous lookup / same-NAT / relay path so a host that came back at
+        // a *different* address is found again.  Cheap HELLO probes to the
+        // last-known address run in between, so the common case (host returns at
+        // the same endpoint) reconnects within ~1 RTT without a re-lookup.
+        if (now >= next_reestablish_at_) {
+            log::info("ClientSession",
+                "Reconnect attempt %d re-establish (%llds elapsed)",
+                reconnect_attempt_, static_cast<long long>(elapsed / 1000));
+            if (!establish(/*is_reconnect=*/true) && trust_pending_active_) {
+                // Host pubkey changed during the dropout (possible MITM): do
+                // NOT silently reconnect.  Drop to Disconnected; the view layer
+                // surfaces the existing VIV-23 trust dialog via trust_pending().
+                log::warn("ClientSession",
+                    "Host key changed on reconnect — stopping for trust decision");
+                state_ = SessionState::Disconnected;
+                return;
+            }
+            // Schedule the next full re-establish, grow the backoff, and count
+            // the next window as a new attempt.  A transient miss (host still
+            // down) just waits out the next gap.
+            next_reestablish_at_ = Clock::now()
+                + std::chrono::milliseconds(reconnect_backoff_ms_);
+            reconnect_backoff_ms_ = std::min<int64_t>(
+                reconnect_backoff_ms_ * 2, RECONNECT_BACKOFF_MAX_MS);
+            ++reconnect_attempt_;
+            reconnect_saw_packet_ = false;
+            last_hello_time_ = Clock::now();  // establish() already sent a HELLO
+        } else {
+            // Cheap probe: on the HELLO retry cadence, or immediately when the
+            // host sends us anything (pre-emptive shortcut).  Re-inits the
+            // handshake and re-sends msg1 to the last-known address — no
+            // blocking lookup, so it's safe to run every tick.
+            const bool preempt = reconnect_saw_packet_;
+            const auto since_hello = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_hello_time_).count();
+            if (preempt || last_hello_time_.time_since_epoch().count() == 0
+                || since_hello > HELLO_RETRY_MS) {
+                reconnect_saw_packet_ = false;
+                send_hello();
+            }
+        }
+        return;
+    }
+
     if (state_ == SessionState::Connected) {
         auto since_recv = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_recv_time_).count();
         if (since_recv > DISCONNECT_TIMEOUT_MS) {
-            log::warn("ClientSession", "Host timed out");
-            state_ = SessionState::Disconnected;
+            if (max_reconnect_ms_ > 0) {
+                // Keep the window open and start retrying (VIV-54).
+                begin_reconnect();
+            } else {
+                log::warn("ClientSession", "Host timed out");
+                state_ = SessionState::Disconnected;
+            }
             return;
         }
 
@@ -819,13 +956,21 @@ void ClientSession::handle_control(const uint8_t* payload, size_t len) {
     }
     handshake_complete_ = true;
 
-    if (state_ == SessionState::Connecting) {
+    if (state_ == SessionState::Connecting || state_ == SessionState::Reconnecting) {
+        const bool was_reconnect = (state_ == SessionState::Reconnecting);
         state_ = SessionState::Connected;
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - connect_start_).count();
         log::info("ClientSession",
-                  "Connected (handshake took %lldms, host codec=%s)",
+                  "%s (handshake took %lldms, host codec=%s)",
+                  was_reconnect ? "Reconnected" : "Connected",
                   elapsed, host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
+        // Reset reconnect bookkeeping so a future dropout starts a fresh backoff
+        // ladder (VIV-54).  The view layer notices the Reconnecting → Connected
+        // edge and requests an IDR to resume rendering.
+        reconnect_attempt_    = 0;
+        reconnect_backoff_ms_ = RECONNECT_BACKOFF_MIN_MS;
+        reconnect_saw_packet_ = false;
     }
 }
 

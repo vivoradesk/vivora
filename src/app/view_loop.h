@@ -53,6 +53,13 @@ struct ViewLoopConfig {
     // forwarded to the host inside PerfReport as a hard controller clamp.
     uint16_t view_fps_cap  = 0;
     uint32_t view_max_kbps = 0;
+    // VIV-54 auto-reconnect budget in milliseconds (client_reconnect_timeout).
+    // 0 = disabled (Connected → Disconnected on host timeout, the legacy CLI
+    // behaviour).  The GUI populates this from Settings (default 5 min).
+    uint32_t reconnect_timeout_ms = 0;
+    // Display label for the reconnect banner ("Reconnecting to <peer>…").
+    // Empty falls back to a generic wording.
+    const char* peer_label = nullptr;
 };
 
 // Iterable view-loop state machine.  Split out of the legacy
@@ -148,6 +155,17 @@ private:
     TimePoint   disconnect_at_{};
     static constexpr int DISCONNECT_LINGER_MS = 1800;
     void update_status(const char* text);
+
+    // VIV-54 auto-reconnect UI driving.  peer_label_ backs the banner text;
+    // prev_state_ lets iter() spot the Reconnecting → Connected edge so it can
+    // drop the stale reference chain and request an IDR to resume rendering.
+    std::string          peer_label_;
+    client::SessionState prev_state_ = client::SessionState::Disconnected;
+    // Push the "Reconnecting to <peer> — attempt N (Ns)…" banner and, on the
+    // resume edge, request the IDR.  Returns true while the loop should keep
+    // the window open and skip normal frame processing (i.e. we're mid-
+    // reconnect).  Shared by iter() and iter_threaded().
+    bool handle_reconnect_ui();
 
     // ---- Threaded pipeline (VIV-81; VIVORA_PIPELINE=threaded) -------------
     // When on, a decode thread pulls compressed frames from q1_, runs them

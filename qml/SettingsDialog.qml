@@ -693,6 +693,15 @@ Window {
                             }
                         }
                     }
+                    Field {
+                        title: "Reconnect timeout"
+                        help: "When a stream drops, keep the window open and keep retrying for up to this many minutes before closing. 0 closes immediately."
+                        CreamSpin {
+                            from: 0; to: 60
+                            value: App.settings.clientReconnectTimeoutMin
+                            onModified: (v) => App.settings.clientReconnectTimeoutMin = v
+                        }
+                    }
                 }
 
                 // ── 4: Hosting ───────────────────────────────────────
