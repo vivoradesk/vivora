@@ -1,61 +1,92 @@
 import QtQuick
 
 // ===========================================================================
-//  ISOLATED MOCK — front-end ahead of backend.
+//  Device-mesh provider (VIV-52).
 //
-//  The personal device-mesh backend (account-linked device sync, presence,
-//  remote rename/remove) does NOT exist yet — that is the cloud side of
-//  VIV-52.  This component is the ONE place that fabricates device data and
-//  the entitlement tier so the "My Devices" UI can be built and previewed now.
+//  Selects between the REAL account device list (App.myDevices, a C++
+//  DeviceMeshModel populated from /devices/me) and the isolated MOCK data
+//  below, then exposes ONE uniform surface the "My Devices" UI binds to:
+//    · variant      "pro" | "trial" | "free" | "empty" | "cached"
+//    · tier         "pro" | "trial" | "free"
+//    · model        main-window list (roles: devId, devName, os, online,
+//                   current, warned, seen, peerCode, host)
+//    · settingsModel settings-table list (same roles + host)
+//    · renameMain(id,name) / removeMain(id)
 //
-//  To wire the REAL backend later, this is the only file that changes:
-//    1. Replace `listModel` / `settingsModel` with a C++ QAbstractListModel
-//       exposed as e.g. App.myDevices (same role names: devId, devName, os,
-//       online, current, warned, seen, peerCode, host).
-//    2. Drive `variant` from the real entitlement instead of the env var —
-//       e.g. App.deviceMeshTier ("pro" | "trial" | "free") plus a "cached"
-//       flag while a refresh is in flight and an "empty" case for a lone
-//       device.
-//  No other My Devices component references anything but this object's
-//  `variant`, `tier`, `model`, and `settingsModel`.
+//  Selection:
+//    · VIVORA_DEVICES_VARIANT env var set  → PREVIEW: force that variant +
+//      mock data, so every visual state renders in a build with no account
+//      (keeps the screenshot workflow working).
+//    · else signed in                      → REAL: App.myDevices, variant from
+//      App.deviceMeshTier (+ meshRefreshing → "cached", + lone/empty device
+//      list → "empty").
+//    · else (signed out, no preview)       → "free" gate with mock data behind
+//      the ProGate.
+//
+//  The type is still named DeviceMockModel so MyDevicesBlock / MyDevicesSettings
+//  need no edits (they declare `property DeviceMockModel mock`).
 // ===========================================================================
 Item {
-    id: mock
+    id: provider
 
-    // variant: "pro" | "trial" | "free" | "empty" | "cached"
-    // Read once from VIVORA_DEVICES_VARIANT (surfaced as a context property by
-    // gui_main.cpp) so every state is previewable from a live build; defaults
-    // to "pro" (the design's default) when unset or unrecognised.
-    property string variant: {
+    // Preview override: read once from VIVORA_DEVICES_VARIANT (surfaced as a
+    // context property by gui_main.cpp).  Empty string = not previewing.
+    readonly property string _envVariant: {
         var v = (typeof VivoraDevicesVariant !== "undefined") ? String(VivoraDevicesVariant) : ""
         v = v.toLowerCase()
         return (v === "pro" || v === "trial" || v === "free" || v === "empty" || v === "cached")
-               ? v : "pro"
+               ? v : ""
+    }
+    readonly property bool _preview: _envVariant.length > 0
+    readonly property bool _real: !_preview && (typeof App !== "undefined") && App.accountLoggedIn
+
+    // Number of OTHER devices (real path) — drives the empty state.
+    function _nonCurrentCount() {
+        if (typeof App === "undefined" || !App.myDevices) return 0
+        var m = App.myDevices, n = 0
+        for (var i = 0; i < m.count; ++i) {
+            var d = m.get(i)
+            if (!d.current) n++
+        }
+        return n
     }
 
-    // Coarse entitlement derived from the variant.  Later: App.deviceMeshTier.
-    readonly property string tier: variant === "trial" ? "trial"
-                                  : variant === "free"  ? "free"
-                                  : "pro"
-    // Placeholder for the real Pro entitlement gate (later: App.licensePro or a
-    // mesh-specific flag).  When false the surfaces show the ProGate.
-    readonly property bool hasProEntitlement: variant !== "free"
+    // variant: "pro" | "trial" | "free" | "empty" | "cached"
+    property string variant: {
+        if (_preview) return _envVariant
+        if (typeof App === "undefined" || !App.accountLoggedIn) return "free"
+        if (App.deviceMeshTier !== "pro") return "free"
+        // Reading .count here binds the variant to model changes.
+        var total = App.myDevices ? App.myDevices.count : 0
+        if (App.meshRefreshing && total > 0) return "cached"
+        if (_nonCurrentCount() === 0) return "empty"
+        return "pro"
+    }
+
+    // Coarse entitlement for the Settings surface.
+    readonly property string tier: {
+        if (_preview) return _envVariant === "trial" ? "trial"
+                            : _envVariant === "free"  ? "free" : "pro"
+        if (typeof App === "undefined" || !App.accountLoggedIn) return "free"
+        return App.deviceMeshTier === "pro" ? "pro" : "free"
+    }
+    readonly property bool hasProEntitlement: tier !== "free"
 
     // Current device's OS, so "this device" reflects the running platform.
     readonly property string platform: Qt.platform.os === "osx" ? "mac"
                                      : Qt.platform.os === "windows" ? "win"
                                      : "linux"
 
-    property alias model: listModel
-    property alias settingsModel: settingsModel_
+    // Uniform model handles: real C++ model when signed in (both surfaces read
+    // the same account list), mock ListModels in preview / signed-out.
+    readonly property var model: (!_preview && _real) ? App.myDevices : mockList
+    readonly property var settingsModel: (!_preview && _real) ? App.myDevices : mockSettings
 
-    // Main-window list (devices.jsx buildDevices): current + a couple of peers.
-    ListModel { id: listModel }
-    // Settings table (devices.jsx buildSettingsDevices): richer host column.
-    ListModel { id: settingsModel_ }
+    // --- Mock data (preview / signed-out) --------------------------------
+    ListModel { id: mockList }
+    ListModel { id: mockSettings }
 
-    Component.onCompleted: _rebuild()
-    onVariantChanged: _rebuild()
+    Component.onCompleted: _rebuildMock()
 
     function _thisName() {
         return platform === "mac" ? "maxim-mbp"
@@ -63,39 +94,45 @@ Item {
              : "maxim-desktop"
     }
 
-    function _rebuild() {
-        listModel.clear()
-        settingsModel_.clear()
-        if (variant === "empty")
+    // Seed the mock lists.  Only meaningful in preview / signed-out; the "empty"
+    // preview variant intentionally leaves them cleared.
+    function _rebuildMock() {
+        mockList.clear()
+        mockSettings.clear()
+        if (_preview && _envVariant === "empty")
             return
 
-        // --- main-window seed (sorted: current, then online, then offline) ---
         var main = [
             { devId: "this", devName: _thisName(), os: platform, online: true,  current: true,  warned: false, seen: "now",    peerCode: "swift-tiger-4271" },
             { devId: "d2",   devName: "Office desktop", os: "win",   online: true,  current: false, warned: false, seen: "now",    peerCode: "brave-otter-8823" },
             { devId: "d3",   devName: "Render box",     os: "linux", online: false, current: false, warned: true,  seen: "3h ago", peerCode: "calm-eagle-5190" }
         ]
         for (var i = 0; i < main.length; ++i)
-            listModel.append(main[i])
+            mockList.append(main[i])
 
-        // --- settings-table seed (extra rows + host column) ---
         var tbl = [
-            { devId: "this", devName: _thisName(),        os: platform, online: true,  current: true,  warned: false, seen: "now",       host: "10.42.0.3 · this device" },
-            { devId: "d2",   devName: "Office desktop",   os: "win",    online: true,  current: false, warned: false, seen: "now",       host: "10.42.0.8 · Berlin" },
-            { devId: "d3",   devName: "Render box",       os: "linux",  online: false, current: false, warned: true,  seen: "3h ago",    host: "10.42.0.11 · datacenter" },
-            { devId: "d4",   devName: "John's MacBook Pro", os: "mac",  online: true,  current: false, warned: false, seen: "now",       host: "10.42.0.5 · home" },
-            { devId: "d5",   devName: "Backup NAS",       os: "linux",  online: true,  current: false, warned: false, seen: "now",       host: "10.42.0.20 · closet" },
-            { devId: "d6",   devName: "Gaming rig",       os: "win",    online: false, current: false, warned: false, seen: "Yesterday", host: "10.42.0.14 · home" },
-            { devId: "d7",   devName: "Studio iMac",      os: "mac",    online: false, current: false, warned: false, seen: "2d ago",    host: "10.42.0.9 · studio" }
+            { devId: "this", devName: _thisName(),        os: platform, online: true,  current: true,  warned: false, seen: "now",       host: "swift-tiger-4271 · this device" },
+            { devId: "d2",   devName: "Office desktop",   os: "win",    online: true,  current: false, warned: false, seen: "now",       host: "brave-otter-8823" },
+            { devId: "d3",   devName: "Render box",       os: "linux",  online: false, current: false, warned: true,  seen: "3h ago",    host: "calm-eagle-5190" },
+            { devId: "d4",   devName: "John's MacBook Pro", os: "mac",  online: true,  current: false, warned: false, seen: "now",       host: "gentle-lynx-3372" },
+            { devId: "d5",   devName: "Backup NAS",       os: "linux",  online: true,  current: false, warned: false, seen: "now",       host: "quiet-heron-6690" },
+            { devId: "d6",   devName: "Gaming rig",       os: "win",    online: false, current: false, warned: false, seen: "Yesterday", host: "bold-marten-1147" },
+            { devId: "d7",   devName: "Studio iMac",      os: "mac",    online: false, current: false, warned: false, seen: "2d ago",    host: "still-osprey-9021" }
         ]
         for (var j = 0; j < tbl.length; ++j)
-            settingsModel_.append(tbl[j])
+            mockSettings.append(tbl[j])
     }
 
-    // Local (visual-only) mutations so rename / remove feel live in the mock.
-    // Once the backend lands these become calls into App.myDevices.
-    function renameMain(devId, newName) { _rename(listModel, devId, newName); _rename(settingsModel_, devId, newName) }
-    function removeMain(devId)          { _remove(listModel, devId);          _remove(settingsModel_, devId) }
+    // rename / remove.  Real path calls the backend (App.myDevices re-fetches
+    // via SSE); preview path mutates the mock lists locally so it feels live.
+    function renameMain(devId, newName) {
+        if (!_preview && _real) { App.myDevices.rename(devId, newName); return }
+        _rename(mockList, devId, newName); _rename(mockSettings, devId, newName)
+    }
+    function removeMain(devId) {
+        if (!_preview && _real) { App.myDevices.remove(devId); return }
+        _remove(mockList, devId); _remove(mockSettings, devId)
+    }
 
     function _rename(m, devId, newName) {
         for (var i = 0; i < m.count; ++i)

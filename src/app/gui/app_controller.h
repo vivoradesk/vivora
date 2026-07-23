@@ -4,6 +4,7 @@
 #include "app/gui/address_book.h"
 #include "app/gui/announcements_client.h"
 #include "app/gui/cloud_client.h"
+#include "app/gui/device_mesh_model.h"
 #include "app/gui/polls_client.h"
 #include "app/gui/settings.h"
 #include "app/gui/update_checker.h"
@@ -56,6 +57,13 @@ class AppController : public QObject {
     // is fetched from the cloud automatically once signed in.
     Q_PROPERTY(QString accountEmail    READ accountEmail    NOTIFY accountChanged)
     Q_PROPERTY(bool    accountLoggedIn READ accountLoggedIn NOTIFY accountChanged)
+    // VIV-52 device mesh.  myDevices is the account's live device list; the
+    // "My Devices" UI binds to it when signed in.  deviceMeshTier gates the
+    // surface ("pro" when Pro-licensed, else "free"); meshRefreshing drives the
+    // cached/UPDATING… state while a /devices/me fetch is in flight.
+    Q_PROPERTY(vivora::gui::DeviceMeshModel* myDevices READ myDevices CONSTANT)
+    Q_PROPERTY(QString deviceMeshTier  READ deviceMeshTier  NOTIFY meshChanged)
+    Q_PROPERTY(bool    meshRefreshing  READ meshRefreshing  NOTIFY meshRefreshingChanged)
     // VIV-69 update check: a build newer than VIVORA_VERSION is published.
     Q_PROPERTY(bool    updateAvailable READ updateAvailable NOTIFY updateChanged)
     Q_PROPERTY(QString updateVersion   READ updateVersion   NOTIFY updateChanged)
@@ -97,6 +105,15 @@ public:
 
     QString accountEmail()    const { return accountEmail_; }
     bool    accountLoggedIn() const { return !accountEmail_.isEmpty(); }
+
+    DeviceMeshModel* myDevices() const { return myDevices_.get(); }
+    // "pro" when Pro-licensed (trial folded into pro until VIV-108), else "free".
+    // Not signed in also gates to "free".
+    QString deviceMeshTier() const {
+        return (accountLoggedIn() && licensePro_) ? QStringLiteral("pro")
+                                                  : QStringLiteral("free");
+    }
+    bool    meshRefreshing()  const { return meshRefreshing_; }
 
     bool    updateAvailable() const { return updateAvailable_; }
     QString updateVersion()   const { return updateVersion_; }
@@ -203,6 +220,9 @@ signals:
     void licenseChanged();
     // Account state changed (signed in / out).
     void accountChanged();
+    // VIV-52: device-mesh tier changed / a refresh started or finished.
+    void meshChanged();
+    void meshRefreshingChanged();
     // A newer build is available (VIV-69) — QML shows the update banner.
     void updateChanged();
     // An announcement is ready to show / was dismissed (VIV-70).
@@ -291,6 +311,20 @@ private:
     QString     accountEmail_;
     QString     accountUserId_;
     void        wireCloud();
+
+    // VIV-52 device mesh.  The model is owned here and exposed as App.myDevices;
+    // the heartbeat timer keeps this install marked online; the SSE stream (in
+    // CloudClient) pushes devicesChanged, which triggers a debounced re-fetch.
+    std::unique_ptr<DeviceMeshModel> myDevices_;
+    QTimer  meshHeartbeatTimer_;   // 60s presence ping while signed in
+    QTimer  meshRefreshDebounce_;  // coalesce SSE/register/delete → one fetch
+    bool    meshRefreshing_ = false;
+    void    wireDeviceMesh();
+    void    startDeviceMesh();     // register + heartbeat + stream + first fetch
+    void    stopDeviceMesh();      // on sign-out
+    void    refreshDevices();      // GET /devices/me (sets meshRefreshing_)
+    QString meshDeviceName() const;
+    QString meshDeviceOs() const;
 
     // VIV-69 update check (notify-only).
     UpdateChecker update_;

@@ -118,6 +118,7 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/settings.cpp
         gui/address_book.cpp
         gui/cloud_client.cpp
+        gui/device_mesh_model.cpp
         gui/update_checker.cpp
         gui/announcements_client.cpp
         gui/polls_client.cpp

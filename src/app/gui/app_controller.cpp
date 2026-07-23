@@ -28,6 +28,7 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QUrl>
 
 namespace vivora::gui {
@@ -36,6 +37,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     settings_   = std::make_unique<Settings>(this);
     peers_      = std::make_unique<AddressBook>(this);
     hostWorker_ = std::make_unique<HostWorker>(this);
+    myDevices_  = std::make_unique<DeviceMeshModel>(this);   // VIV-52
 
     // VIV-53 approval gate.  Lives here (shared_ptr) and gets handed
     // to the worker via HostWorkerConfig.  The callback runs on the
@@ -158,6 +160,10 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     refreshLicense();
     if (settings_) connect(settings_.get(), &Settings::changed,
                            this, &AppController::refreshLicense);
+
+    // VIV-52: wire the device mesh (model + heartbeat + SSE) BEFORE wireCloud,
+    // which resumes a saved session and will kick off registration.
+    wireDeviceMesh();
 
     // VIV-31: wire the cloud client + resume any saved account session.
     wireCloud();
@@ -638,6 +644,7 @@ void AppController::wireCloud() {
         emit accountChanged();
         log::info("AppController", "Signed in as %s", email.toUtf8().constData());
         cloud_.fetchLicense();   // pull the license right after sign-in
+        startDeviceMesh();       // VIV-52: register + stream + fetch this device
     });
     connect(&cloud_, &CloudClient::authFailed, this,
             [this](const QString& msg) { emit accountError(msg); });
@@ -670,6 +677,7 @@ void AppController::wireCloud() {
         cloud_.setToken(token);
         emit accountChanged();
         cloud_.fetchLicense();
+        startDeviceMesh();       // VIV-52: resume mesh presence + stream
     }
 }
 
@@ -684,6 +692,7 @@ void AppController::logIn(const QString& email, const QString& password) {
 }
 
 void AppController::logOut() {
+    stopDeviceMesh();            // VIV-52: drop presence + stream first
     settings_->setAccountToken("");
     settings_->setAccountEmail("");
     settings_->setAccountUserId("");
@@ -715,6 +724,100 @@ void AppController::openUpgradePage() {
     // Web checkout / account page: login → Paddle checkout (VIV-31).  The page
     // signs the user in itself, so no uid is passed.
     QDesktopServices::openUrl(QUrl("https://vivora.dev/upgrade"));
+}
+
+// ── Device mesh (VIV-52) ────────────────────────────────────────────────────
+
+QString AppController::meshDeviceName() const {
+    // Human-friendly default label for this install: the machine hostname.
+    QString host = QSysInfo::machineHostName();
+    return host.isEmpty() ? QStringLiteral("This device") : host;
+}
+
+QString AppController::meshDeviceOs() const {
+#if defined(VIVORA_WINDOWS)
+    return QStringLiteral("win");
+#elif defined(VIVORA_MACOS)
+    return QStringLiteral("mac");
+#else
+    return QStringLiteral("linux");
+#endif
+}
+
+void AppController::wireDeviceMesh() {
+    myDevices_->setCloud(&cloud_);
+
+    // /devices/me arrived → rebuild the model and clear the refreshing flag.
+    connect(&cloud_, &CloudClient::devicesFetched, this,
+            [this](const QJsonArray& devices) {
+        myDevices_->setDevices(devices);
+        if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
+    });
+    connect(&cloud_, &CloudClient::devicesError, this, [this](const QString& msg) {
+        if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
+        log::warn("AppController", "device fetch: %s", msg.toUtf8().constData());
+    });
+
+    // Any change the server pushes (SSE), or a completed register/delete of our
+    // own, funnels into one debounced re-fetch so bursts collapse to a single GET.
+    meshRefreshDebounce_.setSingleShot(true);
+    meshRefreshDebounce_.setInterval(300);
+    connect(&meshRefreshDebounce_, &QTimer::timeout, this,
+            &AppController::refreshDevices);
+    auto scheduleRefresh = [this] {
+        if (cloud_.hasToken()) meshRefreshDebounce_.start();
+    };
+    connect(&cloud_, &CloudClient::devicesChanged,   this, scheduleRefresh);
+    connect(&cloud_, &CloudClient::deviceRegistered, this,
+            [scheduleRefresh](const QString&, bool) { scheduleRefresh(); });
+    connect(&cloud_, &CloudClient::deviceDeleted, this,
+            [scheduleRefresh](const QString&) { scheduleRefresh(); });
+    // Heartbeat 404 → the server forgot us: re-register this install.
+    connect(&cloud_, &CloudClient::deviceUnknown, this, [this] {
+        if (cloud_.hasToken())
+            cloud_.registerDevice(settings_->clientId(), meshDeviceName(),
+                                  meshDeviceOs(), myPubkeyHex_, myPeerCode_);
+    });
+
+    // 60s presence ping while signed in.
+    meshHeartbeatTimer_.setInterval(60'000);
+    connect(&meshHeartbeatTimer_, &QTimer::timeout, this, [this] {
+        if (cloud_.hasToken())
+            cloud_.heartbeat(settings_->clientId(), myPeerCode_);
+    });
+
+    // deviceMeshTier depends on both the account session and the license tier,
+    // so keep the QML binding live when either changes.
+    connect(this, &AppController::accountChanged, this, &AppController::meshChanged);
+    connect(this, &AppController::licenseChanged, this, &AppController::meshChanged);
+}
+
+void AppController::startDeviceMesh() {
+    if (!settings_ || !cloud_.hasToken()) return;
+    const QString id = settings_->clientId();
+    log::info("AppController", "Device mesh: registering %s (%s)",
+              id.toUtf8().constData(), meshDeviceOs().toUtf8().constData());
+    cloud_.registerDevice(id, meshDeviceName(), meshDeviceOs(),
+                          myPubkeyHex_, myPeerCode_);
+    cloud_.startDeviceStream();
+    meshHeartbeatTimer_.start();
+    refreshDevices();
+    emit meshChanged();
+}
+
+void AppController::stopDeviceMesh() {
+    meshHeartbeatTimer_.stop();
+    meshRefreshDebounce_.stop();
+    cloud_.stopDeviceStream();
+    myDevices_->clear();
+    if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
+    emit meshChanged();
+}
+
+void AppController::refreshDevices() {
+    if (!cloud_.hasToken()) return;
+    if (!meshRefreshing_) { meshRefreshing_ = true; emit meshRefreshingChanged(); }
+    cloud_.fetchDevices(settings_->clientId());
 }
 
 void AppController::openDownloadPage() {

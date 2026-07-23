@@ -7,6 +7,9 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSslSocket>
+#include <QUrl>
+
+#include <algorithm>
 
 namespace vivora::gui {
 
@@ -17,6 +20,22 @@ CloudClient::CloudClient(QObject* parent) : QObject(parent) {
               QSslSocket::activeBackend().toUtf8().constData(),
               QSslSocket::availableBackends().join(',').toUtf8().constData(),
               QSslSocket::sslLibraryVersionString().toUtf8().constData());
+
+    // SSE reconnect timer: single-shot, re-armed by scheduleDeviceStreamReconnect.
+    sseReconnect_.setSingleShot(true);
+    connect(&sseReconnect_, &QTimer::timeout, this, [this] {
+        if (sseWanted_) openDeviceStream();
+    });
+}
+
+CloudClient::~CloudClient() {
+    // Drop the streaming reply without emitting a reconnect.
+    sseWanted_ = false;
+    if (sseReply_) {
+        sseReply_->abort();
+        sseReply_->deleteLater();
+        sseReply_ = nullptr;
+    }
 }
 
 void CloudClient::setBaseUrl(const QString& url) {
@@ -101,6 +120,210 @@ void CloudClient::fetchLicense() {
                                          : reply->errorString());
         }
     });
+}
+
+// ── Device mesh (VIV-52) ─────────────────────────────────────────────────────
+
+void CloudClient::registerDevice(const QString& deviceId, const QString& name,
+                                 const QString& os, const QString& pubkeyHex,
+                                 const QString& peerCode) {
+    if (token_.isEmpty() || baseUrl_.isEmpty()) {
+        emit deviceError("Not signed in");
+        return;
+    }
+    QJsonObject body;
+    body["device_id"] = deviceId;
+    body["name"]      = name;
+    body["os"]        = os;
+    body["pubkey"]    = pubkeyHex;
+    body["peer_code"] = peerCode;
+
+    QNetworkRequest req{QUrl(baseUrl_ + "/devices/register")};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+
+    QNetworkReply* reply = nam_.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray data = reply->readAll();
+        if (status == 200 || status == 201) {
+            const QJsonObject obj = QJsonDocument::fromJson(data).object();
+            emit deviceRegistered(obj.value("device_id").toString(),
+                                  obj.value("key_changed").toBool());
+        } else {
+            log::warn("Cloud", "registerDevice failed: status=%d", status);
+            emit deviceError(status > 0 ? QString("server error (%1)").arg(status)
+                                        : reply->errorString());
+        }
+    });
+}
+
+void CloudClient::heartbeat(const QString& deviceId, const QString& peerCode) {
+    if (token_.isEmpty() || baseUrl_.isEmpty()) return;
+    QJsonObject body;
+    body["device_id"] = deviceId;
+    body["peer_code"] = peerCode;
+
+    QNetworkRequest req{QUrl(baseUrl_ + "/devices/heartbeat")};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+
+    QNetworkReply* reply = nam_.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        // 404 = the server no longer knows this install → re-register.
+        if (status == 404) emit deviceUnknown();
+    });
+}
+
+void CloudClient::fetchDevices(const QString& selfDeviceId) {
+    if (token_.isEmpty() || baseUrl_.isEmpty()) {
+        emit devicesError("Not signed in");
+        return;
+    }
+    QUrl url(baseUrl_ + "/devices/me");
+    if (!selfDeviceId.isEmpty()) url.setQuery("device_id=" + selfDeviceId);
+
+    QNetworkRequest req{url};
+    req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+
+    QNetworkReply* reply = nam_.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray data = reply->readAll();
+        if (status == 200) {
+            const QJsonObject obj = QJsonDocument::fromJson(data).object();
+            emit devicesFetched(obj.value("devices").toArray());
+        } else {
+            log::warn("Cloud", "fetchDevices failed: status=%d", status);
+            emit devicesError(status > 0 ? QString("server error (%1)").arg(status)
+                                         : reply->errorString());
+        }
+    });
+}
+
+void CloudClient::deleteDevice(const QString& deviceId) {
+    if (token_.isEmpty() || baseUrl_.isEmpty()) {
+        emit deviceError("Not signed in");
+        return;
+    }
+    QNetworkRequest req{QUrl(baseUrl_ + "/devices/" + deviceId)};
+    req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+
+    QNetworkReply* reply = nam_.deleteResource(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, deviceId]() {
+        reply->deleteLater();
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 204 || status == 404) {
+            emit deviceDeleted(deviceId);   // 404 = already gone; treat as success
+        } else {
+            log::warn("Cloud", "deleteDevice failed: status=%d", status);
+            emit deviceError(status > 0 ? QString("server error (%1)").arg(status)
+                                        : reply->errorString());
+        }
+    });
+}
+
+// ── Device stream (Server-Sent Events) ───────────────────────────────────────
+//
+// A single long-lived GET to /devices/stream.  The server pushes
+//   data: {"type":"devices_changed","reason":"..."}\n\n
+// on any change to this account's device list, and ": keepalive\n" comments
+// every ~25s.  We keep the QNetworkReply alive, accumulate readyRead into
+// sseBuffer_, split on the blank-line event boundary, and parse each event's
+// `data:` lines.  On any drop we reconnect with capped exponential backoff.
+
+void CloudClient::startDeviceStream() {
+    if (token_.isEmpty() || baseUrl_.isEmpty()) return;
+    if (sseWanted_ && sseReply_) return;   // already streaming
+    sseWanted_    = true;
+    sseBackoffMs_ = 1000;
+    openDeviceStream();
+}
+
+void CloudClient::stopDeviceStream() {
+    sseWanted_ = false;
+    sseReconnect_.stop();
+    if (sseReply_) {
+        QNetworkReply* r = sseReply_;
+        sseReply_ = nullptr;
+        r->abort();
+        r->deleteLater();
+    }
+    sseBuffer_.clear();
+}
+
+void CloudClient::openDeviceStream() {
+    if (!sseWanted_ || token_.isEmpty() || baseUrl_.isEmpty()) return;
+    if (sseReply_) return;                 // a reply is already live
+
+    QNetworkRequest req{QUrl(baseUrl_ + "/devices/stream")};
+    req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+    req.setRawHeader("Accept", "text/event-stream");
+    // Long-poll: no reply timeout, and don't let the manager buffer the whole
+    // (never-ending) body before delivering readyRead.
+    req.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                     QNetworkRequest::AlwaysNetwork);
+
+    sseBuffer_.clear();
+    sseReply_ = nam_.get(req);
+    log::info("Cloud", "device stream: connecting");
+    connect(sseReply_, &QNetworkReply::readyRead, this,
+            &CloudClient::onDeviceStreamData);
+    connect(sseReply_, &QNetworkReply::finished, this, [this] {
+        // The stream ended (server closed, network dropped, or we aborted).
+        if (sseReply_) { sseReply_->deleteLater(); sseReply_ = nullptr; }
+        if (sseWanted_) scheduleDeviceStreamReconnect();
+    });
+}
+
+void CloudClient::onDeviceStreamData() {
+    if (!sseReply_) return;
+    // First bytes arrived → the connection is healthy; reset the backoff.
+    sseBackoffMs_ = 1000;
+    sseBuffer_.append(sseReply_->readAll());
+
+    // Events are separated by a blank line.  Normalise CRLF so the split is
+    // uniform, then process every complete event left in the buffer.
+    sseBuffer_.replace("\r\n", "\n");
+    int sep;
+    while ((sep = sseBuffer_.indexOf("\n\n")) >= 0) {
+        const QByteArray event = sseBuffer_.left(sep);
+        sseBuffer_.remove(0, sep + 2);
+
+        // Concatenate the payload of all `data:` lines (SSE allows several).
+        QByteArray payload;
+        for (const QByteArray& line : event.split('\n')) {
+            if (line.startsWith(':')) continue;               // keepalive comment
+            if (line.startsWith("data:")) {
+                QByteArray v = line.mid(5);
+                if (v.startsWith(' ')) v.remove(0, 1);
+                payload.append(v);
+            }
+        }
+        if (payload.isEmpty()) continue;
+        const QJsonObject obj = QJsonDocument::fromJson(payload).object();
+        if (obj.value("type").toString() == "devices_changed") {
+            log::info("Cloud", "device stream: devices_changed (%s)",
+                      obj.value("reason").toString().toUtf8().constData());
+            emit devicesChanged();
+        }
+    }
+}
+
+void CloudClient::scheduleDeviceStreamReconnect() {
+    if (!sseWanted_) return;
+    const int delay = sseBackoffMs_;
+    sseBackoffMs_ = std::min(sseBackoffMs_ * 2, sseBackoffMaxMs_);
+    log::info("Cloud", "device stream: reconnecting in %dms", delay);
+    sseReconnect_.start(delay);
 }
 
 } // namespace vivora::gui
