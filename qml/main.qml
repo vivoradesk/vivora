@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtQuick.Shapes
 
 ApplicationWindow {
     id: window
@@ -12,7 +13,17 @@ ApplicationWindow {
     visible: true
     title: "Vivora"
 
-    color: "#efece3"
+    color: "#f6f4ef"   // paper — matches the design handoff surface
+
+    // ── Derived launcher state (label + colour for the header state-pill
+    // and brand mark).  Mapped straight onto the existing host-state
+    // sources — no separate state machine.  Blue = waiting/idle, green =
+    // live/connected, grey = paused.
+    readonly property color statePillColor: !App.sharing ? theme.inkFaint
+            : (App.clientCount > 0 ? theme.green : theme.blue)
+    readonly property string statePillLabel: !App.sharing ? "PAUSED"
+            : (App.clientCount > 0 ? "LIVE" : "WAITING")
+    readonly property bool statePulsing: App.sharing
 
     // The app stays running in the tray; closing the window only hides it.
     onClosing: (close) => {
@@ -167,6 +178,153 @@ ApplicationWindow {
         readonly property color error:     "#dc3545"   // red
         readonly property color selected:  "#ded8c8"   // subtle active/selected fill
         readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+
+        // ── Design-handoff tokens (used by the restyled launcher) ──────
+        readonly property color paper:      "#f6f4ef"
+        readonly property color paperSoft:  "#efece4"
+        readonly property color paperDeep:  "#e7e3d8"
+        readonly property color ink:        "#111114"
+        readonly property color inkSoft:    "#2a2a2e"
+        readonly property color inkMid:     "#5e5e63"
+        readonly property color inkFaint:   "#8a8a90"
+        readonly property color hair:       Qt.rgba(0.067, 0.067, 0.078, 0.10)
+        readonly property color hairStrong: Qt.rgba(0.067, 0.067, 0.078, 0.16)
+        readonly property color blue:       "#3D6BFA"
+        readonly property color green:      "#1FA463"
+        readonly property color red:        "#E5484D"
+        readonly property color online:     "#3ddc84"
+    }
+
+    // ── Brand mark ─────────────────────────────────────────────────────
+    // The two-curve + three-dot logo from the design handoff, rebuilt with
+    // QtQuick.Shapes so it scales crisply.  The lower dot takes the current
+    // state accent colour.
+    component BrandMark: Item {
+        id: bm
+        property real size: 22
+        property color markColor: theme.ink
+        property color accentColor: theme.blue
+        implicitWidth: size
+        implicitHeight: size
+        width: size
+        height: size
+
+        Shape {
+            width: 32; height: 32
+            antialiasing: true
+            transform: Scale {
+                origin.x: 0; origin.y: 0
+                xScale: bm.size / 32
+                yScale: bm.size / 32
+            }
+            ShapePath {
+                strokeColor: bm.markColor
+                strokeWidth: 3
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 5 5 Q 2 10 8 14 Q 14 19 16 24" }
+            }
+            ShapePath {
+                strokeColor: bm.markColor
+                strokeWidth: 3
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                joinStyle: ShapePath.RoundJoin
+                PathSvg { path: "M 27 5 Q 30 10 24 14 Q 18 19 16 24" }
+            }
+        }
+        Rectangle {
+            width: bm.size * (5.0 / 32); height: width; radius: width / 2
+            color: bm.markColor
+            x: bm.size * (5.0 / 32) - width / 2
+            y: bm.size * (5.0 / 32) - height / 2
+        }
+        Rectangle {
+            width: bm.size * (5.0 / 32); height: width; radius: width / 2
+            color: bm.markColor
+            x: bm.size * (27.0 / 32) - width / 2
+            y: bm.size * (5.0 / 32) - height / 2
+        }
+        Rectangle {
+            width: bm.size * (8.0 / 32); height: width; radius: width / 2
+            color: bm.accentColor
+            x: bm.size * (16.0 / 32) - width / 2
+            y: bm.size * (25.5 / 32) - height / 2
+        }
+    }
+
+    // A status dot with an optional expanding-ring pulse (matches the
+    // design's `pulse` keyframe on the header / sharing status dots).
+    component PulseDot: Item {
+        id: pd
+        property color dotColor: theme.blue
+        property bool pulsing: true
+        property real dotSize: 7
+        implicitWidth: dotSize
+        implicitHeight: dotSize
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: pd.dotSize; height: pd.dotSize; radius: width / 2
+            color: "transparent"
+            border.color: pd.dotColor
+            border.width: 1
+            visible: pd.pulsing
+            SequentialAnimation on scale {
+                running: pd.pulsing; loops: Animation.Infinite
+                NumberAnimation { from: 1.0; to: 2.6; duration: 1600; easing.type: Easing.OutQuad }
+            }
+            SequentialAnimation on opacity {
+                running: pd.pulsing; loops: Animation.Infinite
+                NumberAnimation { from: 0.38; to: 0.0; duration: 1600; easing.type: Easing.OutQuad }
+            }
+        }
+        Rectangle {
+            anchors.centerIn: parent
+            width: pd.dotSize; height: pd.dotSize; radius: width / 2
+            color: pd.dotColor
+        }
+    }
+
+    // Soft, low-emphasis action button (design `.btn.btn-soft.btn-sm`).
+    // `active: false` renders it as a visibly-inert placeholder for
+    // features whose backend hasn't landed yet.
+    component SoftButton: Rectangle {
+        id: sb
+        property string iconName: ""
+        property string label: ""
+        property bool active: true
+        signal clicked
+        implicitHeight: 30
+        radius: 6
+        color: (active && sbArea.containsMouse) ? theme.paperDeep : theme.paperSoft
+        border.color: theme.hair
+        border.width: 1
+        opacity: active ? 1.0 : 0.5
+        RowLayout {
+            anchors.centerIn: parent
+            spacing: 6
+            Glyph {
+                name: sb.iconName
+                visible: sb.iconName.length > 0
+                size: 13
+                color: theme.inkSoft
+            }
+            Label {
+                text: sb.label
+                visible: sb.label.length > 0
+                color: theme.inkSoft
+                font.pixelSize: 12
+            }
+        }
+        MouseArea {
+            id: sbArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: sb.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: sb.clicked()
+        }
     }
 
     // Reusable component: a flat button with custom Rectangle background
@@ -265,21 +423,50 @@ ApplicationWindow {
             }
         }
 
-        // ── Header: logo + name + status badge ───────────────────────
+        // ── Header: brand mark + wordmark + state pill ───────────────
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            Image {
-                source: "qrc:/icons/app/32.png"
-                sourceSize.width: 22; sourceSize.height: 22
-                Layout.preferredWidth: 22; Layout.preferredHeight: 22
+            BrandMark {
+                size: 22
+                markColor: theme.ink
+                accentColor: window.statePillColor
             }
             Label {
                 text: "Vivora"
-                font.pixelSize: 18
+                font.pixelSize: 16
                 font.bold: true
-                color: theme.text
+                font.letterSpacing: -0.2
+                color: theme.ink
+            }
+            // State pill — subtle rounded chip; the coloured dot (+ pulse)
+            // carries the state, the label is neutral ink.
+            Rectangle {
+                Layout.preferredHeight: 22
+                Layout.preferredWidth: pillRow.implicitWidth + 18
+                radius: height / 2
+                color: theme.paperSoft
+                border.color: theme.hair
+                border.width: 1
+                RowLayout {
+                    id: pillRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    PulseDot {
+                        dotSize: 7
+                        dotColor: window.statePillColor
+                        pulsing: window.statePulsing
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+                    Label {
+                        text: window.statePillLabel
+                        color: theme.inkMid
+                        font.family: theme.monoFont
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.5
+                    }
+                }
             }
             Item { Layout.fillWidth: true }
             // Pro badge (VIV-29) — shown when a valid Pro license is loaded.
@@ -299,230 +486,229 @@ ApplicationWindow {
                     color: "#ffffff"
                 }
             }
-            Rectangle {
-                visible: App.sharing
-                radius: height / 2
-                color: theme.selected
-                border.color: theme.border
-                Layout.preferredHeight: 22
-                Layout.preferredWidth: badge.implicitWidth + 18
-                RowLayout {
-                    id: badge
-                    anchors.centerIn: parent
-                    spacing: 5
-                    Rectangle {
-                        width: 7; height: 7; radius: 4
-                        color: theme.accent
-                    }
-                    Label {
-                        text: "SHARING"
-                        font.pixelSize: 10
-                        font.bold: true
-                        font.letterSpacing: 1
-                        color: theme.accent
-                    }
-                }
-            }
         }
 
         // ── Sharing section ──────────────────────────────────────────
-        // Wrapper Rectangle gives the "host card" its own subtly darker
-        // background so it reads as a distinct zone from the "connect
-        // to a peer" half below.
+        // The host card (paper-soft) sets the sharing zone apart from the
+        // "connect to a peer" half below.  sec-h header · codechip · pubkey
+        // row · soft action row, per the design handoff.
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: hostCard.implicitHeight + 24
+            Layout.preferredHeight: hostCard.implicitHeight + 28
             visible: App.sharing
-            color: theme.hostBg
+            color: theme.paperSoft
             radius: 10
+            border.color: theme.hair
+            border.width: 1
 
             ColumnLayout {
                 id: hostCard
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
+                anchors.margins: 14
+                spacing: 10
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                Label {
-                    text: "⇡"
-                    color: theme.textMuted
-                    font.pixelSize: 12
-                }
-                Label {
-                    text: "SHARING THIS DESKTOP"
-                    color: theme.textMuted
-                    font.pixelSize: 11
-                    font.letterSpacing: 1
-                    font.bold: true
-                }
-                Item { Layout.fillWidth: true }
-                // "WAITING" badge — no countdown until ephemeral code
-                // rotation lands server-side (VIV-XX).  For now just
-                // indicates that we're listening with no client.
+                // sec-h header: upload glyph + label · pulsing status dot + text
                 RowLayout {
-                    visible: App.sharing && App.clientCount === 0
-                    spacing: 5
-                    Rectangle {
-                        width: 6; height: 6; radius: 3
-                        color: theme.accent
-                    }
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Glyph { name: "upload"; size: 13; color: theme.inkMid }
                     Label {
-                        text: "WAITING"
-                        color: theme.text
-                        font.pixelSize: 10
-                        font.letterSpacing: 1
-                        font.bold: true
-                    }
-                }
-                RowLayout {
-                    visible: App.sharing && App.clientCount > 0
-                    spacing: 5
-                    Rectangle {
-                        width: 6; height: 6; radius: 3
-                        color: theme.sharing
-                    }
-                    Label {
-                        text: App.clientCount === 1 ? "1 CLIENT" : App.clientCount + " CLIENTS"
-                        color: theme.sharing
-                        font.pixelSize: 10
-                        font.letterSpacing: 1
-                        font.bold: true
-                    }
-                }
-            }
-
-            // Peer code pill
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: codeRow.implicitHeight + 22
-                visible: App.sharing
-                color: theme.pillBg
-                radius: 10
-                RowLayout {
-                    id: codeRow
-                    anchors.fill: parent
-                    anchors.margins: 11
-                    spacing: 8
-                    Label {
-                        text: App.myPeerCode || "…"
-                        color: theme.pillFg
+                        text: "SHARING THIS DESKTOP"
+                        color: theme.inkMid
                         font.family: theme.monoFont
-                        font.pixelSize: 17
-                        font.bold: true
-                        wrapMode: Text.WrapAnywhere
-                        Layout.fillWidth: true
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.6
                     }
-                    Rectangle {
-                        Layout.preferredWidth: 30; Layout.preferredHeight: 30
-                        radius: 6
-                        color: copyCodeArea.containsMouse ? "#2a2a32" : "transparent"
-                        Label {
-                            anchors.centerIn: parent
-                            text: "⧉"
-                            color: theme.pillFg
-                            font.pixelSize: 14
+                    Item { Layout.fillWidth: true }
+                    RowLayout {
+                        spacing: 5
+                        PulseDot {
+                            dotSize: 7
+                            dotColor: App.clientCount > 0 ? theme.green : theme.blue
+                            pulsing: true
+                            Layout.alignment: Qt.AlignVCenter
                         }
-                        MouseArea {
-                            id: copyCodeArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                clipboardHelper.copy(App.myPeerCode)
-                                window.showToast("Code copied")
+                        Label {
+                            text: App.clientCount > 0
+                                  ? (App.clientCount === 1 ? "Live · 1 peer"
+                                                           : "Live · " + App.clientCount + " peers")
+                                  : "Waiting"
+                            color: theme.inkMid
+                            font.family: theme.monoFont
+                            font.pixelSize: 10
+                        }
+                    }
+                }
+
+                // codechip — mono peer code + copy button
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: codeRow.implicitHeight + 24
+                    color: theme.ink
+                    radius: 10
+                    RowLayout {
+                        id: codeRow
+                        anchors.fill: parent
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 12
+                        spacing: 10
+                        Label {
+                            text: App.myPeerCode || "…"
+                            color: "#ffffff"
+                            font.family: theme.monoFont
+                            font.pixelSize: 15
+                            font.bold: true
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                        }
+                        Rectangle {
+                            Layout.preferredWidth: 32; Layout.preferredHeight: 32
+                            radius: 7
+                            color: copyCodeArea.containsMouse ? Qt.rgba(1, 1, 1, 0.16)
+                                                              : Qt.rgba(1, 1, 1, 0.08)
+                            Glyph { anchors.centerIn: parent; name: "copy"; size: 14; color: "#ffffff" }
+                            MouseArea {
+                                id: copyCodeArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    clipboardHelper.copy(App.myPeerCode)
+                                    window.showToast("Code copied")
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Pubkey fingerprint row
-            RowLayout {
-                Layout.fillWidth: true
-                visible: App.sharing
-                Label {
-                    text: "PUBKEY"
-                    color: theme.textMuted
-                    font.pixelSize: 10
-                    font.letterSpacing: 1
-                    font.bold: true
-                }
-                Item { Layout.fillWidth: true }
-                Label {
-                    text: formatFingerprint(App.myPubkeyHex)
-                    color: theme.text
-                    font.family: theme.monoFont
-                    font.pixelSize: 12
-                }
-                Rectangle {
-                    Layout.preferredWidth: 24; Layout.preferredHeight: 22
-                    radius: 5
-                    color: copyKeyArea.containsMouse ? theme.hoverBg : "transparent"
-                    Label { anchors.centerIn: parent; text: "⧉"; color: theme.textMuted; font.pixelSize: 12 }
-                    MouseArea {
-                        id: copyKeyArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            clipboardHelper.copy(App.myPubkeyHex)
-                            window.showToast("Pubkey copied")
+                // Pubkey fingerprint row — label · mono fingerprint · copy
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 2
+                    Label {
+                        text: "PUBKEY"
+                        color: theme.inkMid
+                        font.family: theme.monoFont
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.6
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: formatFingerprint(App.myPubkeyHex)
+                        color: theme.ink
+                        font.family: theme.monoFont
+                        font.pixelSize: 11
+                    }
+                    Rectangle {
+                        Layout.preferredWidth: 22; Layout.preferredHeight: 22
+                        radius: 5
+                        color: copyKeyArea.containsMouse ? theme.paperDeep : "transparent"
+                        Glyph { anchors.centerIn: parent; name: "copy"; size: 12; color: theme.inkMid }
+                        MouseArea {
+                            id: copyKeyArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                clipboardHelper.copy(App.myPubkeyHex)
+                                window.showToast("Pubkey copied")
+                            }
                         }
                     }
                 }
-            }
 
-            // Pause button.  Link (needs web + vivora:// deeplink) and QR
-            // (needs the mobile client + feature/qr-overlay merge) are
-            // deferred — shipping dead buttons confuses users, so the
-            // action row is just Pause until those backends land.
-            AppButton {
-                Layout.fillWidth: true
-                visible: App.sharing
-                glyph: "⏸"
-                label: "Pause sharing"
-                onClicked: App.stopSharing()
-            }
-
+                // Soft action row.  Pause is live (App.stopSharing).  Link /
+                // QR / regenerate have no backend yet — rendered as inert
+                // placeholders (dimmed, non-actioning) so they don't fake a
+                // working feature.
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    spacing: 6
+                    SoftButton {
+                        Layout.fillWidth: true
+                        iconName: "link"; label: "Link"; active: false
+                        onClicked: window.showToast("Invite links are coming soon")
+                    }
+                    SoftButton {
+                        Layout.fillWidth: true
+                        iconName: "qr"; label: "QR"; active: false
+                        onClicked: window.showToast("QR sharing is coming soon")
+                    }
+                    SoftButton {
+                        Layout.preferredWidth: 42
+                        iconName: "refresh"; active: false
+                        onClicked: window.showToast("Code regeneration is coming soon")
+                    }
+                    SoftButton {
+                        Layout.preferredWidth: 42
+                        iconName: "pause"; active: true
+                        onClicked: App.stopSharing()
+                    }
+                }
             }  // hostCard ColumnLayout
         }      // Sharing card Rectangle
 
-        // Paused-state CTA — host starts at launch (always-available
-        // model), so App.sharing=false only happens when the user hit
-        // the Pause button in the sharing card or stopped via tray.
-        // Resume re-registers with rendezvous + spins the host loop
-        // back up using the same identity.
+        // Paused-state card — host starts at launch (always-available
+        // model), so App.sharing=false only happens when the user hit the
+        // Pause button in the sharing card or stopped via tray.  Resume
+        // re-registers with rendezvous + spins the host loop back up using
+        // the same identity.
         Rectangle {
             visible: !App.sharing
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
-            color: theme.hostBg
+            Layout.preferredHeight: pausedCol.implicitHeight + 28
+            color: theme.paperSoft
             radius: 10
+            border.color: theme.hair
+            border.width: 1
             ColumnLayout {
-                anchors.centerIn: parent
-                spacing: 4
-                Label {
-                    text: "Sharing paused"
-                    color: theme.text
-                    font.bold: true
-                    Layout.alignment: Qt.AlignHCenter
+                id: pausedCol
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 10
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Glyph { name: "upload"; size: 13; color: theme.inkMid }
+                    Label {
+                        text: "SHARING THIS DESKTOP"
+                        color: theme.inkMid
+                        font.family: theme.monoFont
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.6
+                    }
+                    Item { Layout.fillWidth: true }
+                    RowLayout {
+                        spacing: 5
+                        Rectangle {
+                            width: 7; height: 7; radius: 3.5
+                            color: theme.inkFaint
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                        Label {
+                            text: "PAUSED"
+                            color: theme.inkMid
+                            font.family: theme.monoFont
+                            font.pixelSize: 10
+                        }
+                    }
                 }
                 Label {
-                    text: "Click below to start receiving connections again"
-                    color: theme.textMuted
-                    font.pixelSize: 11
-                    Layout.alignment: Qt.AlignHCenter
+                    text: "Sharing is paused — resume to let peers connect to this desktop again."
+                    color: theme.inkMid
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                AppButton {
+                    Layout.fillWidth: true
+                    glyph: "▶"
+                    label: "Resume sharing"
+                    primary: true
+                    onClicked: App.startSharing()
                 }
             }
-        }
-        AppButton {
-            visible: !App.sharing
-            Layout.fillWidth: true
-            label: "▶  Resume sharing"
-            primary: true
-            onClicked: App.startSharing()
         }
 
         // Subtle divider
@@ -558,24 +744,27 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
-            Label { text: "⇣"; color: theme.textMuted; font.pixelSize: 12 }
+            Glyph { name: "download"; size: 13; color: theme.inkMid }
             Label {
                 text: "CONNECT TO A PEER"
-                color: theme.textMuted
-                font.pixelSize: 11
-                font.letterSpacing: 1
-                font.bold: true
+                color: theme.inkMid
+                font.family: theme.monoFont
+                font.pixelSize: 10
+                font.letterSpacing: 0.6
             }
         }
 
         TextField {
             id: peerInput
             Layout.fillWidth: true
+            Layout.preferredHeight: 36
+            leftPadding: 12
+            rightPadding: 12
             placeholderText: "peer code (e.g. swift-tiger-4271)"
-            placeholderTextColor: theme.textMuted
+            placeholderTextColor: theme.inkFaint
             font.family: theme.monoFont
             font.pixelSize: 13
-            color: theme.text
+            color: theme.ink
             // selectByMouse + selectionColor → keep selection legible on
             // the warm-bg theme (default Qt palette picks blue that
             // clashes).
@@ -583,10 +772,10 @@ ApplicationWindow {
             selectionColor: theme.accent
             selectedTextColor: "#ffffff"
             background: Rectangle {
-                color: theme.bg
-                border.color: peerInput.activeFocus ? theme.accent : theme.border
+                color: theme.paper
+                border.color: peerInput.activeFocus ? theme.ink : theme.hairStrong
                 border.width: 1
-                radius: 7
+                radius: 8
             }
             onAccepted: {
                 if (text.length > 0) {
@@ -606,22 +795,23 @@ ApplicationWindow {
             visible: App.peers.rowCount() > 0
         }
 
-        // Recent label + count
+        // Recent label + count badge
         RowLayout {
             Layout.fillWidth: true
             visible: App.peers.rowCount() > 0
             Label {
                 text: "RECENT"
-                color: theme.textMuted
-                font.pixelSize: 11
-                font.letterSpacing: 1
-                font.bold: true
+                color: theme.inkMid
+                font.family: theme.monoFont
+                font.pixelSize: 10
+                font.letterSpacing: 0.6
             }
             Item { Layout.fillWidth: true }
             Label {
                 text: App.peers.rowCount()
-                color: theme.textMuted
-                font.pixelSize: 11
+                color: theme.inkFaint
+                font.family: theme.monoFont
+                font.pixelSize: 10
             }
         }
 
@@ -636,16 +826,18 @@ ApplicationWindow {
         // ── Footer ───────────────────────────────────────────────────
         RowLayout {
             Layout.fillWidth: true
-            AppButton {
-                glyph: "⚙"
+            SoftButton {
+                iconName: "gear"
                 label: "Settings"
-                Layout.preferredWidth: 100
+                Layout.preferredWidth: 104
+                Layout.preferredHeight: 32
                 onClicked: App.openSettings()
             }
             Item { Layout.fillWidth: true }
-            AppButton {
+            SoftButton {
                 label: "Hide"
                 Layout.preferredWidth: 80
+                Layout.preferredHeight: 32
                 onClicked: window.hide()
             }
         }

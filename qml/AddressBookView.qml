@@ -313,11 +313,12 @@ ListView {
             anchors.rightMargin: 32
             spacing: 8
 
-            // Status dot (mirrors the mockup) — neutral grey for now;
-            // an "online" indicator hooks in once presence lands.
+            // Status dot (mirrors the mockup).  Pinned rows take the brand
+            // blue (per the design's `.row.pinned .dot`); others stay a
+            // neutral grey until an "online" presence indicator lands.
             Rectangle {
                 width: 7; height: 7; radius: 4
-                color: "#9b9686"
+                color: row.rolePinned ? "#3D6BFA" : "#9b9686"
                 Layout.alignment: Qt.AlignVCenter
             }
 
@@ -337,6 +338,16 @@ ListView {
                 color: "#6f6b60"
                 font.family: list.monoFont
                 font.pointSize: 8
+            }
+            // Relative "last seen" — the design's `.when` column, right
+            // of the code, mono + faint.
+            Label {
+                text: list.relTime(row.roleLastSeen)
+                visible: text.length > 0
+                color: "#8a8a90"
+                font.family: list.monoFont
+                font.pixelSize: 10
+                Layout.alignment: Qt.AlignVCenter
             }
             // Pin marker: flat accent glyph shown only on pinned rows,
             // matching the ⇡ glyph used by the Pin/Unpin menu action.

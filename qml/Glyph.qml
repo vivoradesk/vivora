@@ -63,6 +63,27 @@ Item {
         case "refresh":
             return { vb: 16, filled: false, sw: 1.4,
                 d: "M14 8 a6 6 0 1 0 -1.76 4.24 M14 4 L14 8 L10 8" }
+        case "upload":
+            return { vb: 16, filled: false, sw: 1.5,
+                d: "M8 11 V3 M4 7 L8 3 L12 7 M2 13 H14" }
+        case "download":
+            return { vb: 16, filled: false, sw: 1.5,
+                d: "M8 3 V11 M4 7 L8 11 L12 7 M2 13 H14" }
+        case "link":
+            return { vb: 16, filled: false, sw: 1.5,
+                d: "M6 10 a2.83 2.83 0 0 0 4 0 L13 7 a2.83 2.83 0 0 0 -4 -4 L8.5 3.5 M10 6 a2.83 2.83 0 0 0 -4 0 L3 9 a2.83 2.83 0 0 0 4 4 L7.5 12.5" }
+        case "qr":
+            return { vb: 16, filled: true, sw: 0,
+                d: "M2 2h4v4H2V2zm1 1v2h2V3H3zm7-1h4v4h-4V2zm1 1v2h2V3h-2zM2 10h4v4H2v-4zm1 1v2h2v-2H3zm7-1h2v1h-1v1h-1v-2zm3 0h1v2h-1v-2zm-3 2h1v1h-1v-1zm2 1h2v1h-2v-1zm-2 1h1v1h-1v-1z" }
+        case "pause":
+            return { vb: 16, filled: true, sw: 0,
+                d: "M4 3 H6.5 V13 H4 Z M9.5 3 H12 V13 H9.5 Z" }
+        case "pin":
+            return { vb: 16, filled: false, sw: 1.4,
+                d: "M8 11 V14 M5 7 H11 L9 3 H7 L5 7 Z M4 7 H12" }
+        case "gear":
+            return { vb: 16, filled: false, sw: 1.4,
+                d: "M8 6 a2 2 0 1 0 0.001 0 Z M8 1.6 V3.4 M8 12.6 V14.4 M14.4 8 H12.6 M3.4 8 H1.6 M12.1 3.9 L10.9 5.1 M5.1 10.9 L3.9 12.1 M12.1 12.1 L10.9 10.9 M5.1 5.1 L3.9 3.9" }
 
         // ---- devices (stroke, 24 viewBox) ----
         case "devices":
