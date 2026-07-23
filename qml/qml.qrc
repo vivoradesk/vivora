@@ -7,6 +7,17 @@
         <file>AddPeerDialog.qml</file>
         <file>ConnectionApprovalDialog.qml</file>
         <file>TrustPromptDialog.qml</file>
+        <file>DevicePalette.qml</file>
+        <file>Glyph.qml</file>
+        <file>DeviceAvatar.qml</file>
+        <file>DeviceRowMenu.qml</file>
+        <file>DeviceRow.qml</file>
+        <file>TierBadge.qml</file>
+        <file>ProGate.qml</file>
+        <file>DeviceMockModel.qml</file>
+        <file>MyDevicesBlock.qml</file>
+        <file>SettingsDeviceRow.qml</file>
+        <file>MyDevicesSettings.qml</file>
     </qresource>
     <qresource prefix="/icons">
         <file alias="app/16.png">../icons/win/vivora-16.png</file>

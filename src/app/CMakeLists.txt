@@ -167,6 +167,10 @@ if(WIN32)
         "${_VIVORA_QT_DECL_DIR}/qmlmodels/CMakeFiles/QmlModels_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_Models_init.cpp.obj"
         "${_VIVORA_QT_DECL_DIR}/qmlworkerscript/CMakeFiles/QmlWorkerScript_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_WorkerScript_init.cpp.obj"
         "${_VIVORA_QT_DECL_DIR}/quick/window/CMakeFiles/quickwindow_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Window_init.cpp.obj"
+        # QtQuick.Shapes (VIV-52: My Devices vector glyphs via PathSvg) — module
+        # qmldir/qmltypes + its shader resources, same manual-link rule as above.
+        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Shapes_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_2.dir/Release/.qt/rcc/qrc_qtquickshapes_shaders_init.cpp.obj"
         "${_VIVORA_QT_DECL_DIR}/quicklayouts/CMakeFiles/QuickLayouts_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Layouts_init.cpp.obj"
         "${_VIVORA_QT_DECL_DIR}/quicktemplates/CMakeFiles/QuickTemplates2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Templates_init.cpp.obj"
         "${_VIVORA_QT_DECL_DIR}/quickcontrols/CMakeFiles/QuickControls2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_init.cpp.obj"
@@ -194,6 +198,7 @@ if(WIN32)
         "${_VIVORA_QT_QML_DIR}/QtQml/WorkerScript/workerscriptplugin.lib"
         "${_VIVORA_QT_QML_DIR}/QtQuick/qtquick2plugin.lib"
         "${_VIVORA_QT_QML_DIR}/QtQuick/Window/quickwindowplugin.lib"
+        "${_VIVORA_QT_QML_DIR}/QtQuick/Shapes/qmlshapesplugin.lib"
         "${_VIVORA_QT_QML_DIR}/QtQuick/Layouts/qquicklayoutsplugin.lib"
         "${_VIVORA_QT_QML_DIR}/QtQuick/Templates/qtquicktemplates2plugin.lib"
         "${_VIVORA_QT_QML_DIR}/QtQuick/Controls/qtquickcontrols2plugin.lib"
@@ -206,6 +211,7 @@ if(WIN32)
         "${_VIVORA_QT_LIB_DIR}/Qt6QmlModels.lib"
         "${_VIVORA_QT_LIB_DIR}/Qt6QmlWorkerScript.lib"
         "${_VIVORA_QT_LIB_DIR}/Qt6QuickLayouts.lib"
+        "${_VIVORA_QT_LIB_DIR}/Qt6QuickShapes.lib"
         "${_VIVORA_QT_LIB_DIR}/Qt6QuickTemplates2.lib"
         "${_VIVORA_QT_LIB_DIR}/Qt6QuickControls2.lib"
         "${_VIVORA_QT_LIB_DIR}/Qt6QuickControls2Impl.lib"

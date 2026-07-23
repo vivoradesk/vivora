@@ -610,6 +610,29 @@ Window {
                             }
                         }
                     }
+
+                    // Divider before the My Devices preview.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 22
+                        Layout.bottomMargin: 22
+                        Layout.preferredHeight: 1
+                        color: theme.border
+                    }
+
+                    // ── My Devices (personal mesh) ───────────────────
+                    // Front-end-ahead-of-backend preview driven by the isolated
+                    // DeviceMockModel; account name/email come from the real
+                    // signed-in identity when available.  Preview tiers with the
+                    // VIVORA_DEVICES_VARIANT env var (pro | trial | free).
+                    MyDevicesSettings {
+                        Layout.fillWidth: true
+                        accountName: App.accountLoggedIn && App.accountEmail.length > 0
+                                     ? App.accountEmail.split("@")[0] : "Maxim Kozlov"
+                        accountEmail: App.accountLoggedIn && App.accountEmail.length > 0
+                                      ? App.accountEmail : "maxim@vivora.dev"
+                        onUpgradeRequested: App.openUpgradePage()
+                    }
                 }
 
                 // ── 1: Appearance ────────────────────────────────────

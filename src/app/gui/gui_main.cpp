@@ -44,6 +44,8 @@ Q_IMPORT_PLUGIN(QtQmlModelsPlugin)
 Q_IMPORT_PLUGIN(QtQmlWorkerScriptPlugin)
 Q_IMPORT_PLUGIN(QtQuick2Plugin)
 Q_IMPORT_PLUGIN(QtQuick_WindowPlugin)
+// QtQuick.Shapes — vector glyph rendering for the My Devices UI (VIV-52).
+Q_IMPORT_PLUGIN(QmlShapesPlugin)
 Q_IMPORT_PLUGIN(QtQuickLayoutsPlugin)
 Q_IMPORT_PLUGIN(QtQuickTemplates2Plugin)
 Q_IMPORT_PLUGIN(QtQuickControls2Plugin)
@@ -253,6 +255,13 @@ int run_gui(int argc, char** argv) {
     // proper qmlRegisterSingletonInstance for one object; a context property
     // does the same thing with less ceremony.
     engine.rootContext()->setContextProperty("App", &controller);
+    // Front-end-ahead-of-backend preview switch for the My Devices UI (VIV-52):
+    // the device-mesh backend does not exist yet, so the isolated QML mock
+    // reads this to render a given state.  Empty unless the env var is set.
+    //   VIVORA_DEVICES_VARIANT = pro | trial | free | empty | cached
+    engine.rootContext()->setContextProperty(
+        "VivoraDevicesVariant",
+        qEnvironmentVariable("VIVORA_DEVICES_VARIANT"));
     engine.load(QUrl("qrc:/qml/main.qml"));
     if (engine.rootObjects().isEmpty()) {
         log::error("GUI", "Failed to load main.qml");

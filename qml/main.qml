@@ -532,6 +532,28 @@ ApplicationWindow {
             color: theme.border
         }
 
+        // ── My Devices (personal mesh) ───────────────────────────────
+        // Front-end-ahead-of-backend: driven by the isolated DeviceMockModel
+        // (inside MyDevicesBlock).  Renders the device list / empty state /
+        // Pro gate per the mock's variant.  Preview any state with the
+        // VIVORA_DEVICES_VARIANT env var (pro | trial | free | empty | cached).
+        MyDevicesBlock {
+            Layout.fillWidth: true
+            onConnectRequested: (devName) => window.showToast("Connecting to " + devName + "…")
+            onCopyPeerCode: (code, devName) => {
+                clipboardHelper.copy(code)
+                window.showToast("Peer code copied")
+            }
+            onNotify: (message) => window.showToast(message)
+        }
+
+        // Subtle divider below My Devices
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            color: theme.border
+        }
+
         // ── Connect section ──────────────────────────────────────────
         RowLayout {
             Layout.fillWidth: true
