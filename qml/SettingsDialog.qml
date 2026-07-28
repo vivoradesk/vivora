@@ -500,6 +500,7 @@ Window {
                             placeholderText: "Password"
                             echoMode: TextInput.Password
                             onAccepted: if (!accountSection.busy && text.length > 0) {
+                                accountSection.accountErr = ""
                                 accountSection.busy = true
                                 App.logIn(emailField.text.trim(), pwField.text)
                             }
@@ -523,7 +524,8 @@ Window {
                                         color: "#ffffff"; font.pixelSize: 13; font.bold: true }
                                 MouseArea { anchors.fill: parent; enabled: !accountSection.busy
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: { accountSection.busy = true
+                                    onClicked: { accountSection.accountErr = ""
+                                                 accountSection.busy = true
                                                  App.logIn(emailField.text.trim(), pwField.text) } }
                             }
                             Rectangle {
@@ -536,7 +538,8 @@ Window {
                                         color: theme.text; font.pixelSize: 13 }
                                 MouseArea { anchors.fill: parent; enabled: !accountSection.busy
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: { accountSection.busy = true
+                                    onClicked: { accountSection.accountErr = ""
+                                                 accountSection.busy = true
                                                  App.signUp(emailField.text.trim(), pwField.text) } }
                             }
                             BusyIndicator {
@@ -544,6 +547,13 @@ Window {
                                 visible: accountSection.busy
                                 Layout.preferredHeight: 26
                                 Layout.preferredWidth: 26
+                            }
+                            Label {
+                                visible: accountSection.busy
+                                text: "Signing in…"
+                                color: theme.textMuted
+                                font.pixelSize: 12
+                                Layout.alignment: Qt.AlignVCenter
                             }
                         }
                     }
