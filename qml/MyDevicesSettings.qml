@@ -164,9 +164,13 @@ ColumnLayout {
         border.color: pane.pal.hair
         clip: true
 
-        readonly property real osCol: 150
-        readonly property real statusCol: 150
-        readonly property real actionsCol: 96
+        // Column widths sized to fit the Settings pane without horizontal
+        // overflow (Device takes the flexible remainder).  Actions is wide
+        // enough for the Rename + Remove buttons so they never spill past the
+        // pane edge or collide with the Status column.
+        readonly property real osCol: 120
+        readonly property real statusCol: 84
+        readonly property real actionsCol: 128
 
         ColumnLayout {
             id: tableCol
@@ -183,12 +187,15 @@ ColumnLayout {
                     anchors.leftMargin: 14
                     anchors.rightMargin: 14
                     spacing: 12
-                    Label { text: "DEVICE"; Layout.fillWidth: true; color: pane.pal.inkMid
+                    Label { text: "DEVICE"; Layout.fillWidth: true; elide: Text.ElideRight
+                            color: pane.pal.inkMid
                             font.family: pane.pal.mono; font.pixelSize: 10; font.letterSpacing: 0.6 }
                     Label { text: "OPERATING SYSTEM"; Layout.preferredWidth: tableFrame.osCol
+                            elide: Text.ElideRight
                             color: pane.pal.inkMid; font.family: pane.pal.mono
                             font.pixelSize: 10; font.letterSpacing: 0.6 }
                     Label { text: "STATUS"; Layout.preferredWidth: tableFrame.statusCol
+                            elide: Text.ElideRight
                             color: pane.pal.inkMid; font.family: pane.pal.mono
                             font.pixelSize: 10; font.letterSpacing: 0.6 }
                     Label { text: "ACTIONS"; Layout.preferredWidth: tableFrame.actionsCol

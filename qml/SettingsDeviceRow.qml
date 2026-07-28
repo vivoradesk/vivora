@@ -17,10 +17,11 @@ Rectangle {
     property string seen: ""
     property string host: ""
 
-    // Column widths — mirror the CSS grid (1fr / 150 / 150 / 96).
-    property real osColWidth: 150
-    property real statusColWidth: 150
-    property real actionsColWidth: 96
+    // Column widths — fed by the parent table so header and rows line up.
+    // Defaults match MyDevicesSettings and are sized to fit the Settings pane.
+    property real osColWidth: 120
+    property real statusColWidth: 84
+    property real actionsColWidth: 128
 
     signal renameCommitted(string devId, string newName)
     signal removeRequested(string devId, string devName)
@@ -74,6 +75,9 @@ Rectangle {
                         font.pixelSize: 13
                         font.weight: Font.Medium
                         elide: Text.ElideRight
+                        // Fill the (narrow) Device column and elide so long
+                        // names never spill into the Operating-system column.
+                        Layout.fillWidth: true
                         Layout.maximumWidth: 150
                     }
                     Rectangle {
@@ -102,7 +106,6 @@ Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter }
                         }
                     }
-                    Item { Layout.fillWidth: true }
                 }
                 Rectangle {
                     visible: row.editing
@@ -149,6 +152,9 @@ Rectangle {
                 color: row.pal.inkSoft
                 font.family: row.pal.sans
                 font.pixelSize: 13
+                // Clip within the column instead of overflowing into Status.
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
         }
 
@@ -166,6 +172,9 @@ Rectangle {
                 color: row.pal.inkMid
                 font.family: row.pal.mono
                 font.pixelSize: 11
+                // Clip within the column so it never overlaps the actions.
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
         }
 

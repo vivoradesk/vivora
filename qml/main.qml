@@ -488,340 +488,351 @@ ApplicationWindow {
             }
         }
 
-        // ── Sharing section ──────────────────────────────────────────
-        // The host card (paper-soft) sets the sharing zone apart from the
-        // "connect to a peer" half below.  sec-h header · codechip · pubkey
-        // row · soft action row, per the design handoff.
-        Rectangle {
+        // ── Middle: the sharing card, My Devices, Connect and Recent scroll
+        // as one area between the pinned header and footer — so Recent keeps
+        // usable height and the Settings/Hide footer stays visible at the
+        // default window size.
+        Flickable {
+            id: middleFlick
             Layout.fillWidth: true
-            Layout.preferredHeight: hostCard.implicitHeight + 28
-            visible: App.sharing
-            color: theme.paperSoft
-            radius: 10
-            border.color: theme.hair
-            border.width: 1
+            Layout.fillHeight: true
+            contentWidth: width
+            contentHeight: middleCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             ColumnLayout {
-                id: hostCard
-                anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
+                id: middleCol
+                width: middleFlick.width
+                spacing: 14
 
-                // sec-h header: upload glyph + label · pulsing status dot + text
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Glyph { name: "upload"; size: 13; color: theme.inkMid }
-                    Label {
-                        text: "SHARING THIS DESKTOP"
-                        color: theme.inkMid
-                        font.family: theme.monoFont
-                        font.pixelSize: 10
-                        font.letterSpacing: 0.6
-                    }
-                    Item { Layout.fillWidth: true }
-                    RowLayout {
-                        spacing: 5
-                        PulseDot {
-                            dotSize: 7
-                            dotColor: App.clientCount > 0 ? theme.green : theme.blue
-                            pulsing: true
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Label {
-                            text: App.clientCount > 0
-                                  ? (App.clientCount === 1 ? "Live · 1 peer"
-                                                           : "Live · " + App.clientCount + " peers")
-                                  : "Waiting"
-                            color: theme.inkMid
-                            font.family: theme.monoFont
-                            font.pixelSize: 10
-                        }
-                    }
-                }
-
-                // codechip — mono peer code + copy button
+                // ── Sharing section ──────────────────────────────────────────
+                // Wrapper Rectangle gives the "host card" its own subtly darker
+                // background so it reads as a distinct zone from the "connect
+                // to a peer" half below.
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: codeRow.implicitHeight + 24
-                    color: theme.ink
+                    Layout.preferredHeight: hostCard.implicitHeight + 24
+                    visible: App.sharing
+                    color: theme.hostBg
                     radius: 10
-                    RowLayout {
-                        id: codeRow
+
+                    ColumnLayout {
+                        id: hostCard
                         anchors.fill: parent
-                        anchors.leftMargin: 14
-                        anchors.rightMargin: 12
-                        spacing: 10
+                        anchors.margins: 12
+                        spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
                         Label {
-                            text: App.myPeerCode || "…"
-                            color: "#ffffff"
-                            font.family: theme.monoFont
-                            font.pixelSize: 15
-                            font.bold: true
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
+                            text: "⇡"
+                            color: theme.textMuted
+                            font.pixelSize: 12
                         }
-                        Rectangle {
-                            Layout.preferredWidth: 32; Layout.preferredHeight: 32
-                            radius: 7
-                            color: copyCodeArea.containsMouse ? Qt.rgba(1, 1, 1, 0.16)
-                                                              : Qt.rgba(1, 1, 1, 0.08)
-                            Glyph { anchors.centerIn: parent; name: "copy"; size: 14; color: "#ffffff" }
-                            MouseArea {
-                                id: copyCodeArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    clipboardHelper.copy(App.myPeerCode)
-                                    window.showToast("Code copied")
+                        Label {
+                            text: "SHARING THIS DESKTOP"
+                            color: theme.textMuted
+                            font.pixelSize: 11
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                        Item { Layout.fillWidth: true }
+                        // "WAITING" badge — no countdown until ephemeral code
+                        // rotation lands server-side (VIV-XX).  For now just
+                        // indicates that we're listening with no client.
+                        RowLayout {
+                            visible: App.sharing && App.clientCount === 0
+                            spacing: 5
+                            Rectangle {
+                                width: 6; height: 6; radius: 3
+                                color: theme.accent
+                            }
+                            Label {
+                                text: "WAITING"
+                                color: theme.text
+                                font.pixelSize: 10
+                                font.letterSpacing: 1
+                                font.bold: true
+                            }
+                        }
+                        RowLayout {
+                            visible: App.sharing && App.clientCount > 0
+                            spacing: 5
+                            Rectangle {
+                                width: 6; height: 6; radius: 3
+                                color: theme.sharing
+                            }
+                            Label {
+                                text: App.clientCount === 1 ? "1 CLIENT" : App.clientCount + " CLIENTS"
+                                color: theme.sharing
+                                font.pixelSize: 10
+                                font.letterSpacing: 1
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // Peer code pill
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: codeRow.implicitHeight + 22
+                        visible: App.sharing
+                        color: theme.pillBg
+                        radius: 10
+                        RowLayout {
+                            id: codeRow
+                            anchors.fill: parent
+                            anchors.margins: 11
+                            spacing: 8
+                            Label {
+                                text: App.myPeerCode || "…"
+                                color: theme.pillFg
+                                font.family: theme.monoFont
+                                font.pixelSize: 17
+                                font.bold: true
+                                wrapMode: Text.WrapAnywhere
+                                Layout.fillWidth: true
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: 30; Layout.preferredHeight: 30
+                                radius: 6
+                                color: copyCodeArea.containsMouse ? "#2a2a32" : "transparent"
+                                Label {
+                                    anchors.centerIn: parent
+                                    text: "⧉"
+                                    color: theme.pillFg
+                                    font.pixelSize: 14
+                                }
+                                MouseArea {
+                                    id: copyCodeArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        clipboardHelper.copy(App.myPeerCode)
+                                        window.showToast("Code copied")
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Pubkey fingerprint row — label · mono fingerprint · copy
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 2
-                    Label {
-                        text: "PUBKEY"
-                        color: theme.inkMid
-                        font.family: theme.monoFont
-                        font.pixelSize: 10
-                        font.letterSpacing: 0.6
-                    }
-                    Item { Layout.fillWidth: true }
-                    Label {
-                        text: formatFingerprint(App.myPubkeyHex)
-                        color: theme.ink
-                        font.family: theme.monoFont
-                        font.pixelSize: 11
-                    }
-                    Rectangle {
-                        Layout.preferredWidth: 22; Layout.preferredHeight: 22
-                        radius: 5
-                        color: copyKeyArea.containsMouse ? theme.paperDeep : "transparent"
-                        Glyph { anchors.centerIn: parent; name: "copy"; size: 12; color: theme.inkMid }
-                        MouseArea {
-                            id: copyKeyArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                clipboardHelper.copy(App.myPubkeyHex)
-                                window.showToast("Pubkey copied")
+                    // Pubkey fingerprint row
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: App.sharing
+                        Label {
+                            text: "PUBKEY"
+                            color: theme.textMuted
+                            font.pixelSize: 10
+                            font.letterSpacing: 1
+                            font.bold: true
+                        }
+                        Item { Layout.fillWidth: true }
+                        Label {
+                            text: formatFingerprint(App.myPubkeyHex)
+                            color: theme.text
+                            font.family: theme.monoFont
+                            font.pixelSize: 12
+                        }
+                        Rectangle {
+                            Layout.preferredWidth: 24; Layout.preferredHeight: 22
+                            radius: 5
+                            color: copyKeyArea.containsMouse ? theme.hoverBg : "transparent"
+                            Label { anchors.centerIn: parent; text: "⧉"; color: theme.textMuted; font.pixelSize: 12 }
+                            MouseArea {
+                                id: copyKeyArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    clipboardHelper.copy(App.myPubkeyHex)
+                                    window.showToast("Pubkey copied")
+                                }
                             }
                         }
                     }
-                }
 
-                // Soft action row.  Pause is live (App.stopSharing).  Link /
-                // QR / regenerate have no backend yet — rendered as inert
-                // placeholders (dimmed, non-actioning) so they don't fake a
-                // working feature.
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 4
-                    spacing: 6
-                    SoftButton {
+                    // Pause button.  Link (needs web + vivora:// deeplink) and QR
+                    // (needs the mobile client + feature/qr-overlay merge) are
+                    // deferred — shipping dead buttons confuses users, so the
+                    // action row is just Pause until those backends land.
+                    AppButton {
                         Layout.fillWidth: true
-                        iconName: "link"; label: "Link"; active: false
-                        onClicked: window.showToast("Invite links are coming soon")
-                    }
-                    SoftButton {
-                        Layout.fillWidth: true
-                        iconName: "qr"; label: "QR"; active: false
-                        onClicked: window.showToast("QR sharing is coming soon")
-                    }
-                    SoftButton {
-                        Layout.preferredWidth: 42
-                        iconName: "refresh"; active: false
-                        onClicked: window.showToast("Code regeneration is coming soon")
-                    }
-                    SoftButton {
-                        Layout.preferredWidth: 42
-                        iconName: "pause"; active: true
+                        visible: App.sharing
+                        glyph: "⏸"
+                        label: "Pause sharing"
                         onClicked: App.stopSharing()
                     }
-                }
-            }  // hostCard ColumnLayout
-        }      // Sharing card Rectangle
 
-        // Paused-state card — host starts at launch (always-available
-        // model), so App.sharing=false only happens when the user hit the
-        // Pause button in the sharing card or stopped via tray.  Resume
-        // re-registers with rendezvous + spins the host loop back up using
-        // the same identity.
-        Rectangle {
-            visible: !App.sharing
-            Layout.fillWidth: true
-            Layout.preferredHeight: pausedCol.implicitHeight + 28
-            color: theme.paperSoft
-            radius: 10
-            border.color: theme.hair
-            border.width: 1
-            ColumnLayout {
-                id: pausedCol
-                anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
+                    }  // hostCard ColumnLayout
+                }      // Sharing card Rectangle
+
+                // Paused-state CTA — host starts at launch (always-available
+                // model), so App.sharing=false only happens when the user hit
+                // the Pause button in the sharing card or stopped via tray.
+                // Resume re-registers with rendezvous + spins the host loop
+                // back up using the same identity.
+                Rectangle {
+                    visible: !App.sharing
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 64
+                    color: theme.hostBg
+                    radius: 10
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        spacing: 4
+                        Label {
+                            text: "Sharing paused"
+                            color: theme.text
+                            font.bold: true
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+                        Label {
+                            text: "Click below to start receiving connections again"
+                            color: theme.textMuted
+                            font.pixelSize: 11
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+                    }
+                }
+                AppButton {
+                    visible: !App.sharing
+                    Layout.fillWidth: true
+                    label: "▶  Resume sharing"
+                    primary: true
+                    onClicked: App.startSharing()
+                }
+
+                // Subtle divider
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme.border
+                }
+
+                // ── My Devices (personal mesh) ───────────────────────────────
+                // Front-end-ahead-of-backend: driven by the isolated DeviceMockModel
+                // (inside MyDevicesBlock).  Renders the device list / empty state /
+                // Pro gate per the mock's variant.  Preview any state with the
+                // VIVORA_DEVICES_VARIANT env var (pro | trial | free | empty | cached).
+                MyDevicesBlock {
+                    Layout.fillWidth: true
+                    // Connect a mesh device through the same path as the manual
+                    // peer-code input — dial its peer code via App.connectToPeer.
+                    onConnectRequested: (peerCode, devName) => {
+                        if (peerCode.length > 0) {
+                            App.connectToPeer(peerCode)
+                            window.showToast("Connecting to " + devName + "…")
+                        } else {
+                            window.showToast("No peer code for " + devName)
+                        }
+                    }
+                    onCopyPeerCode: (code, devName) => {
+                        clipboardHelper.copy(code)
+                        window.showToast("Peer code copied")
+                    }
+                    onNotify: (message) => window.showToast(message)
+                }
+
+                // Subtle divider below My Devices
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme.border
+                }
+
+                // ── Connect section ──────────────────────────────────────────
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
-                    Glyph { name: "upload"; size: 13; color: theme.inkMid }
+                    Glyph { name: "download"; size: 13; color: theme.inkMid }
                     Label {
-                        text: "SHARING THIS DESKTOP"
+                        text: "CONNECT TO A PEER"
+                        color: theme.inkMid
+                        font.family: theme.monoFont
+                        font.pixelSize: 10
+                        font.letterSpacing: 0.6
+                    }
+                }
+
+                TextField {
+                    id: peerInput
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 36
+                    leftPadding: 12
+                    rightPadding: 12
+                    placeholderText: "peer code (e.g. swift-tiger-4271)"
+                    placeholderTextColor: theme.inkFaint
+                    font.family: theme.monoFont
+                    font.pixelSize: 13
+                    color: theme.ink
+                    // selectByMouse + selectionColor → keep selection legible on
+                    // the warm-bg theme (default Qt palette picks blue that
+                    // clashes).
+                    selectByMouse: true
+                    selectionColor: theme.accent
+                    selectedTextColor: "#ffffff"
+                    background: Rectangle {
+                        color: theme.paper
+                        border.color: peerInput.activeFocus ? theme.ink : theme.hairStrong
+                        border.width: 1
+                        radius: 8
+                    }
+                    onAccepted: {
+                        if (text.length > 0) {
+                            App.connectToPeer(text)
+                            text = ""
+                        }
+                    }
+                }
+
+                // Divider — sets the Recent list (which mixes outgoing ↑ and
+                // incoming ↓ peers) apart from the "connect to a peer" input above.
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    Layout.topMargin: 2
+                    color: theme.border
+                    visible: App.peers.rowCount() > 0
+                }
+
+                // Recent label + count badge
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: App.peers.rowCount() > 0
+                    Label {
+                        text: "RECENT"
                         color: theme.inkMid
                         font.family: theme.monoFont
                         font.pixelSize: 10
                         font.letterSpacing: 0.6
                     }
                     Item { Layout.fillWidth: true }
-                    RowLayout {
-                        spacing: 5
-                        Rectangle {
-                            width: 7; height: 7; radius: 3.5
-                            color: theme.inkFaint
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Label {
-                            text: "PAUSED"
-                            color: theme.inkMid
-                            font.family: theme.monoFont
-                            font.pixelSize: 10
-                        }
+                    Label {
+                        text: App.peers.rowCount()
+                        color: theme.inkFaint
+                        font.family: theme.monoFont
+                        font.pixelSize: 10
                     }
                 }
-                Label {
-                    text: "Sharing is paused — resume to let peers connect to this desktop again."
-                    color: theme.inkMid
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
+
+                // Recent list — sized to its content and non-interactive so
+                // the surrounding Flickable owns scrolling.
+                AddressBookView {
                     Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
+                    interactive: false
+                    onPeerActivated: (alias, pubkey, code) => {
+                        App.connectToPeer(pubkey.length > 0 ? pubkey : code)
+                    }
                 }
-                AppButton {
-                    Layout.fillWidth: true
-                    glyph: "▶"
-                    label: "Resume sharing"
-                    primary: true
-                    onClicked: App.startSharing()
-                }
-            }
-        }
 
-        // Subtle divider
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: theme.border
-        }
-
-        // ── My Devices (personal mesh) ───────────────────────────────
-        // Front-end-ahead-of-backend: driven by the isolated DeviceMockModel
-        // (inside MyDevicesBlock).  Renders the device list / empty state /
-        // Pro gate per the mock's variant.  Preview any state with the
-        // VIVORA_DEVICES_VARIANT env var (pro | trial | free | empty | cached).
-        MyDevicesBlock {
-            Layout.fillWidth: true
-            onConnectRequested: (devName) => window.showToast("Connecting to " + devName + "…")
-            onCopyPeerCode: (code, devName) => {
-                clipboardHelper.copy(code)
-                window.showToast("Peer code copied")
-            }
-            onNotify: (message) => window.showToast(message)
-        }
-
-        // Subtle divider below My Devices
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: theme.border
-        }
-
-        // ── Connect section ──────────────────────────────────────────
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 6
-            Glyph { name: "download"; size: 13; color: theme.inkMid }
-            Label {
-                text: "CONNECT TO A PEER"
-                color: theme.inkMid
-                font.family: theme.monoFont
-                font.pixelSize: 10
-                font.letterSpacing: 0.6
-            }
-        }
-
-        TextField {
-            id: peerInput
-            Layout.fillWidth: true
-            Layout.preferredHeight: 36
-            leftPadding: 12
-            rightPadding: 12
-            placeholderText: "peer code (e.g. swift-tiger-4271)"
-            placeholderTextColor: theme.inkFaint
-            font.family: theme.monoFont
-            font.pixelSize: 13
-            color: theme.ink
-            // selectByMouse + selectionColor → keep selection legible on
-            // the warm-bg theme (default Qt palette picks blue that
-            // clashes).
-            selectByMouse: true
-            selectionColor: theme.accent
-            selectedTextColor: "#ffffff"
-            background: Rectangle {
-                color: theme.paper
-                border.color: peerInput.activeFocus ? theme.ink : theme.hairStrong
-                border.width: 1
-                radius: 8
-            }
-            onAccepted: {
-                if (text.length > 0) {
-                    App.connectToPeer(text)
-                    text = ""
-                }
-            }
-        }
-
-        // Divider — sets the Recent list (which mixes outgoing ↑ and
-        // incoming ↓ peers) apart from the "connect to a peer" input above.
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            Layout.topMargin: 2
-            color: theme.border
-            visible: App.peers.rowCount() > 0
-        }
-
-        // Recent label + count badge
-        RowLayout {
-            Layout.fillWidth: true
-            visible: App.peers.rowCount() > 0
-            Label {
-                text: "RECENT"
-                color: theme.inkMid
-                font.family: theme.monoFont
-                font.pixelSize: 10
-                font.letterSpacing: 0.6
-            }
-            Item { Layout.fillWidth: true }
-            Label {
-                text: App.peers.rowCount()
-                color: theme.inkFaint
-                font.family: theme.monoFont
-                font.pixelSize: 10
-            }
-        }
-
-        AddressBookView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            onPeerActivated: (alias, pubkey, code) => {
-                App.connectToPeer(pubkey.length > 0 ? pubkey : code)
-            }
-        }
+            }   // middleCol
+        }       // middleFlick
 
         // ── Footer ───────────────────────────────────────────────────
         RowLayout {
