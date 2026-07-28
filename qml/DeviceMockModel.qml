@@ -102,10 +102,12 @@ Item {
         if (_preview && _envVariant === "empty")
             return
 
+        // pubkey is empty in the mock so a preview Connect tap falls through
+        // to the plain connectToPeer path (no real key to pre-pin).
         var main = [
-            { devId: "this", devName: _thisName(), os: platform, online: true,  current: true,  warned: false, seen: "now",    peerCode: "swift-tiger-4271" },
-            { devId: "d2",   devName: "Office desktop", os: "win",   online: true,  current: false, warned: false, seen: "now",    peerCode: "brave-otter-8823" },
-            { devId: "d3",   devName: "Render box",     os: "linux", online: false, current: false, warned: true,  seen: "3h ago", peerCode: "calm-eagle-5190" }
+            { devId: "this", devName: _thisName(), os: platform, online: true,  current: true,  warned: false, seen: "now",    peerCode: "swift-tiger-4271", pubkey: "" },
+            { devId: "d2",   devName: "Office desktop", os: "win",   online: true,  current: false, warned: false, seen: "now",    peerCode: "brave-otter-8823", pubkey: "" },
+            { devId: "d3",   devName: "Render box",     os: "linux", online: false, current: false, warned: true,  seen: "3h ago", peerCode: "calm-eagle-5190", pubkey: "" }
         ]
         for (var i = 0; i < main.length; ++i)
             mockList.append(main[i])

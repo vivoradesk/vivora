@@ -724,9 +724,12 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     // Connect a mesh device through the same path as the manual
                     // peer-code input — dial its peer code via App.connectToPeer.
-                    onConnectRequested: (peerCode, devName) => {
+                    onConnectRequested: (peerCode, pubkey, devName) => {
                         if (peerCode.length > 0) {
-                            App.connectToPeer(peerCode)
+                            // Own account device: pre-pin its mesh key so the
+                            // viewer skips the first-connect TOFU dialog.  Falls
+                            // back to a plain connect when the key is missing.
+                            App.connectToAccountDevice(peerCode, pubkey)
                             window.showToast("Connecting to " + devName + "…")
                         } else {
                             window.showToast("No peer code for " + devName)

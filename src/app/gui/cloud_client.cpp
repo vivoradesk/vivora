@@ -175,8 +175,11 @@ void CloudClient::heartbeat(const QString& deviceId, const QString& peerCode) {
         reply->deleteLater();
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        // 404 = the server no longer knows this install → re-register.
-        if (status == 404) emit deviceUnknown();
+        // 410 = this device was removed from the account (membership revoked)
+        // → sign out so the resurrect-on-404 loop never re-registers it.
+        // 404 = the server merely forgot this install → re-register.
+        if (status == 410)      emit deviceRevoked();
+        else if (status == 404) emit deviceUnknown();
     });
 }
 

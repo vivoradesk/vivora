@@ -232,6 +232,14 @@ public:
     // timeout from host_loop.
     void disconnect_all_clients();
 
+    // VIV-52: drop the single client whose authenticated static key matches
+    // `pubkey_hex` (case-insensitive), if one is attached.  Used to kick a
+    // viewer the instant its device loses account membership.  No-op when no
+    // attached client matches or the hex fails to decode.  Reuses the same
+    // teardown as a timed-out client (audio-destination eviction + approval-
+    // gate forget + erase from clients_).
+    void disconnect_client_by_pubkey(const std::string& pubkey_hex);
+
     // True if ANY client needs an IDR (new connect or explicit request).
     bool idr_needed() const;
     void clear_idr_needed();

@@ -5,6 +5,8 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace vivora::host {
 
@@ -120,10 +122,27 @@ public:
         grants_.erase(key);
     }
 
+    // VIV-52 immediate session kick.  The GUI thread queues the lowercase
+    // hex static pubkey of a device that just lost account membership; the
+    // host worker loop drains the queue each poll and drops any live viewer
+    // holding that key.  Keyed by pubkey (not the ip:port address key) so it
+    // works even when the kicked viewer's address isn't known GUI-side.
+    void request_kick(const std::string& pubkey_hex) {
+        std::lock_guard<std::mutex> lock(mu_);
+        kick_pubkeys_.insert(pubkey_hex);
+    }
+    std::vector<std::string> take_kicks() {
+        std::lock_guard<std::mutex> lock(mu_);
+        std::vector<std::string> out(kick_pubkeys_.begin(), kick_pubkeys_.end());
+        kick_pubkeys_.clear();
+        return out;
+    }
+
 private:
     mutable std::mutex mu_;
     std::unordered_map<uint64_t, ApprovalState> states_;
     std::unordered_map<uint64_t, CapabilityGrant> grants_;
+    std::unordered_set<std::string> kick_pubkeys_;
     OnPendingCallback cb_;
 };
 

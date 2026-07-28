@@ -17,7 +17,7 @@ ColumnLayout {
     // makes its own instance.  Both read the same env-driven variant.
     property DeviceMockModel mock: DeviceMockModel {}
 
-    signal connectRequested(string peerCode, string devName)
+    signal connectRequested(string peerCode, string pubkey, string devName)
     signal copyPeerCode(string code, string devName)
     signal notify(string message)
 
@@ -193,7 +193,7 @@ ColumnLayout {
             seen: model.seen
             peerCode: model.peerCode
 
-            onConnectRequested: (id, name) => block.connectRequested(model.peerCode, name)
+            onConnectRequested: (id, name) => block.connectRequested(model.peerCode, model.pubkey, name)
             onRenameCommitted:  (id, name) => block.mock.renameMain(id, name)
             onCopyCodeRequested: (id, name) => block.copyPeerCode(model.peerCode, name)
             onRemoveRequested:  (id, name) => { block.mock.removeMain(id); block.notify("Removed " + name) }

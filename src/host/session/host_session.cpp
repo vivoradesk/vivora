@@ -1250,6 +1250,43 @@ void HostSession::disconnect_all_clients() {
     // handle_hello and reconnect normally.
 }
 
+void HostSession::disconnect_client_by_pubkey(const std::string& pubkey_hex) {
+    // Decode the wanted key once and compare raw bytes — inherently
+    // case-insensitive and immune to any hex-formatting drift.
+    uint8_t want[32];
+    if (!crypto::hex_decode_32(pubkey_hex, want)) {
+        log::warn("HostSession", "Kick: bad pubkey hex, ignoring");
+        return;
+    }
+    for (auto it = clients_.begin(); it != clients_.end(); ++it) {
+        ClientInfo& client = it->second;
+        if (!client.has_static_pubkey) continue;
+        if (std::memcmp(client.static_pubkey, want, 32) != 0) continue;
+
+        const net::SocketAddr addr = it->first;
+        log::info("HostSession",
+            "Kicking client %u.%u.%u.%u:%u — device removed from account",
+            (addr.ip >> 0) & 0xFF, (addr.ip >> 8) & 0xFF,
+            (addr.ip >> 16) & 0xFF, (addr.ip >> 24) & 0xFF, addr.port);
+
+        // Same teardown as a timed-out client: evict the AudioSender
+        // destination (its pointer aliases this client's CipherState) and
+        // drop the approval-gate entry so a later reconnect starts fresh
+        // (as a non-member it will hit the normal prompt/TOFU path).  The
+        // viewer stops receiving frames immediately; it tears its own
+        // window down on the next recv timeout, exactly as a rejected
+        // client does today.
+        if (audio_sender_) audio_sender_->remove_destination(client.audio_dest);
+        if (approval_gate_)
+            approval_gate_->forget(host::HostApprovalGate::make_key(addr.ip, addr.port));
+        clients_.erase(it);
+
+        if (clients_.empty() && state_ == SessionState::Connected)
+            state_ = SessionState::Disconnected;
+        return;   // static keys are unique per client
+    }
+}
+
 std::string HostSession::host_public_key_hex() const {
     return crypto::hex_encode(host_identity_.public_key, 32);
 }

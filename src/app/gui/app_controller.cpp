@@ -72,22 +72,36 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             const bool trusted    = peer && peer->trusted;
             const int  mode       = settings_ ? settings_->approvalMode() : 0;
 
+            // VIV-52: the viewer's pubkey is a current member of THIS
+            // account's device list (and not key_changed).  Own devices
+            // skip the prompt in EVERY mode — account membership overrides
+            // approvalMode.  Empty pubkey / signed-out / empty mesh → false,
+            // so this never widens today's behaviour for non-account peers.
+            const bool accountDevice = myDevices_ && !pubkey.isEmpty()
+                                       && myDevices_->containsActivePubkey(pubkey);
+
             // Stash the identity so approve/reject can record + optionally
             // pin the viewer once the user (or the auto path) decides.
             pendingApprovals_.insert(k, qMakePair(pubkey, code));
 
-            const bool autoAccept = trusted
+            const bool autoAccept = accountDevice
+                || trusted
                 || (mode == 2 && recognized)
                 || (mode == 1 && recognized);
             if (autoAccept) {
-                // Reuse the grant last chosen for this peer (VIV-60) so a
-                // view-only trusted peer stays view-only; full access by
-                // default for a freshly auto-accepted known peer.
+                // An account device with no address-book row gets FULL
+                // control (input+clipboard+audio ON, file OFF) — the fixed
+                // product decision for own-device auto-accept.  If a peer row
+                // already exists, keep reusing its stored grant (VIV-60) so a
+                // view-only trusted peer stays view-only.
                 const bool gi = peer ? peer->grantInput     : true;
                 const bool gc = peer ? peer->grantClipboard : true;
                 const bool ga = peer ? peer->grantAudio     : true;
                 const bool gf = peer ? peer->grantFile      : false;
-                approveConnection(k, false, gi, gc, ga, gf);
+                if (accountDevice && !peer)
+                    approveConnection(k, false, true, true, true, false);
+                else
+                    approveConnection(k, false, gi, gc, ga, gf);
                 return;
             }
             // System notification so the user notices the prompt when the
@@ -417,6 +431,42 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     (void)peerCodeOrHex;
     log::warn("AppController", "Connect not yet implemented on this platform");
 #endif
+}
+
+void AppController::connectToAccountDevice(const QString& peerCode,
+                                           const QString& pubkeyHex) {
+    // VIV-52: connecting to one of our own account devices.  Pre-pin its
+    // known account key so the viewer skips the first-connect TOFU dialog —
+    // both ends already agree the key is a current member of the mesh.
+    //
+    // Any doubt falls back to the ordinary connectToPeer path (which raises
+    // the normal TOFU prompt): no pubkey, a key_changed device, a hex that
+    // won't decode, or a pin write that fails.  Never worse than today.
+    if (pubkeyHex.isEmpty()) {
+        connectToPeer(peerCode);
+        return;
+    }
+    if (myDevices_ && !myDevices_->containsActivePubkey(pubkeyHex)) {
+        // Not a current active member (e.g. key_changed / warned) — do NOT
+        // silently pin; let the user judge the key change via the dialog.
+        log::info("AppController",
+                  "Account connect: key not an active member — normal TOFU");
+        connectToPeer(peerCode);
+        return;
+    }
+    uint8_t pk[32];
+    if (!crypto::hex_decode_32(pubkeyHex.toStdString(), pk)) {
+        connectToPeer(peerCode);
+        return;
+    }
+    if (!crypto::pin_peer(peerCode.toStdString(), pk)) {
+        log::warn("AppController",
+                  "Account connect: could not pin key — falling back to TOFU");
+        connectToPeer(peerCode);
+        return;
+    }
+    log::info("AppController", "Pre-pinned account device key — connecting");
+    connectToPeer(peerCode);
 }
 
 void AppController::resolveTrustPrompt(bool trust) {
@@ -751,6 +801,24 @@ void AppController::wireDeviceMesh() {
     connect(&cloud_, &CloudClient::devicesFetched, this,
             [this](const QJsonArray& devices) {
         myDevices_->setDevices(devices);
+        // VIV-52: diff the account's active-membership set against the prior
+        // snapshot; any pubkey that LEFT (removed device, or one that just
+        // went key_changed) gets queued for an immediate session kick.  The
+        // host worker loop drains the queue and drops a matching live viewer;
+        // if none is attached it's a harmless no-op.
+        QSet<QString> nowActive;
+        for (int i = 0; i < myDevices_->count(); ++i) {
+            const QVariantMap d = myDevices_->get(i);
+            if (d.value("warned").toBool()) continue;      // key_changed → not active
+            const QString pk = d.value("pubkey").toString().toLower();
+            if (!pk.isEmpty()) nowActive.insert(pk);
+        }
+        if (approvalGate_) {
+            for (const QString& pk : meshActivePubkeys_)
+                if (!nowActive.contains(pk))
+                    approvalGate_->request_kick(pk.toStdString());
+        }
+        meshActivePubkeys_ = nowActive;
         if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
     });
     connect(&cloud_, &CloudClient::devicesError, this, [this](const QString& msg) {
@@ -778,6 +846,10 @@ void AppController::wireDeviceMesh() {
             cloud_.registerDevice(settings_->clientId(), meshDeviceName(),
                                   meshDeviceOs(), myPubkeyHex_, myPeerCode_);
     });
+    // VIV-52 heartbeat 410 → this device was removed from the account: sign
+    // out so we stop presence + drop the token, killing the resurrect loop
+    // (a plain 404 would otherwise re-register us right back in).
+    connect(&cloud_, &CloudClient::deviceRevoked, this, [this] { logOut(); });
 
     // 60s presence ping while signed in.
     meshHeartbeatTimer_.setInterval(60'000);
@@ -810,6 +882,7 @@ void AppController::stopDeviceMesh() {
     meshRefreshDebounce_.stop();
     cloud_.stopDeviceStream();
     myDevices_->clear();
+    meshActivePubkeys_.clear();   // VIV-52: drop the kick-diff snapshot
     if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
     emit meshChanged();
 }

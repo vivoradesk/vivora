@@ -255,6 +255,14 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             session.request_rendezvous_refresh();
         }
 
+        // VIV-52: kick any live viewer whose device just lost account
+        // membership.  The GUI thread queues its static pubkey on the shared
+        // approval gate when the mesh diff drops it; we drain + apply here.
+        if (cfg.approval_gate) {
+            for (const auto& hex : cfg.approval_gate->take_kicks())
+                session.disconnect_client_by_pubkey(hex);
+        }
+
         session.poll();
 
         // VIV-22 clipboard sync: GUI thread <-> session handoff via the

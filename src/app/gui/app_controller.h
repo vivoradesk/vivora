@@ -13,6 +13,7 @@
 #include <QHash>
 #include <QObject>
 #include <QPair>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 #include <memory>
@@ -142,6 +143,13 @@ public slots:
     void startSharing();
     void stopSharing();
     void connectToPeer(const QString& peerCodeOrHex);
+    // VIV-52: connect to one of our own account devices.  Pre-pins the
+    // device's known mesh key (when it's a current active member) so the
+    // viewer skips the first-connect TOFU dialog, then dials its peer code.
+    // Any doubt (empty/warned/undecodable key, pin failure) falls back to
+    // connectToPeer — the user just sees the normal TOFU prompt.
+    Q_INVOKABLE void connectToAccountDevice(const QString& peerCode,
+                                            const QString& pubkeyHex);
     void disconnectView(int viewId);
     void openSettings();
     // Asks for confirmation if there are active sessions, then exits the
@@ -319,6 +327,10 @@ private:
     QTimer  meshHeartbeatTimer_;   // 60s presence ping while signed in
     QTimer  meshRefreshDebounce_;  // coalesce SSE/register/delete → one fetch
     bool    meshRefreshing_ = false;
+    // VIV-52: snapshot of the account's active (non-warned) device pubkeys,
+    // lowercased, from the last /devices/me fetch.  Diffed on each refresh so
+    // a pubkey that leaves the set → an immediate kick request on the gate.
+    QSet<QString> meshActivePubkeys_;
     void    wireDeviceMesh();
     void    startDeviceMesh();     // register + heartbeat + stream + first fetch
     void    stopDeviceMesh();      // on sign-out

@@ -38,6 +38,7 @@ public:
         SeenRole,
         PeerCodeRole,
         HostRole,
+        PubkeyRole,
     };
 
     explicit DeviceMeshModel(QObject* parent = nullptr);
@@ -57,6 +58,13 @@ public:
     // Rebuild from a /devices/me `devices` array.
     void setDevices(const QJsonArray& devices);
     void clear();
+
+    // VIV-52 trust: true iff some entry's pubkey matches `pubkeyHex`
+    // (CASE-INSENSITIVE) AND that entry is not key_changed (`!warned`).
+    // Drives host-side auto-accept and viewer-side pre-pin — an account
+    // device whose key changed is deliberately excluded so it falls back to
+    // the normal approval / TOFU path.  Ignores online/current.
+    bool containsActivePubkey(const QString& pubkeyHex) const;
 
     // Rename is an upsert with the row's existing os/pubkey/peer_code so the
     // server keeps the same key (no key_changed).  Remove deletes remotely.

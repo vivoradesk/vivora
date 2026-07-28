@@ -65,6 +65,7 @@ signals:
     void deviceRegistered(const QString& deviceId, bool keyChanged);
     void deviceDeleted(const QString& deviceId);
     void deviceUnknown();                            // heartbeat 404 → re-register
+    void deviceRevoked();                            // heartbeat 410 → membership revoked → sign out
     void deviceError(const QString& message);        // register/delete failure
     void devicesChanged();                           // SSE "devices_changed"
 

@@ -30,6 +30,7 @@ QVariant DeviceMeshModel::data(const QModelIndex& index, int role) const {
         // No backend "host" field — surface the peer code (the Settings table
         // shows this instead of a fake IP).
         case HostRole:     return d.peerCode;
+        case PubkeyRole:   return d.pubkey;
         default:           return {};
     }
 }
@@ -45,6 +46,7 @@ QHash<int, QByteArray> DeviceMeshModel::roleNames() const {
         {SeenRole,     "seen"},
         {PeerCodeRole, "peerCode"},
         {HostRole,     "host"},
+        {PubkeyRole,   "pubkey"},
     };
 }
 
@@ -61,7 +63,18 @@ QVariantMap DeviceMeshModel::get(int row) const {
     m["seen"]     = d.seen;
     m["peerCode"] = d.peerCode;
     m["host"]     = d.peerCode;
+    m["pubkey"]   = d.pubkey;
     return m;
+}
+
+bool DeviceMeshModel::containsActivePubkey(const QString& pubkeyHex) const {
+    if (pubkeyHex.isEmpty()) return false;
+    for (const Device& d : devices_) {
+        if (d.warned) continue;                       // key_changed → not trusted
+        if (d.pubkey.compare(pubkeyHex, Qt::CaseInsensitive) == 0)
+            return true;
+    }
+    return false;
 }
 
 int DeviceMeshModel::indexOfId(const QString& deviceId) const {
