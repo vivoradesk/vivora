@@ -177,6 +177,7 @@ ApplicationWindow {
         readonly property color sharing:   "#22a85c"   // green for active session
         readonly property color error:     "#dc3545"   // red
         readonly property color selected:  "#ded8c8"   // subtle active/selected fill
+        readonly property color ctrlBg:     "#fbfaf5"   // near-white control fill (poll modal)
         readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
 
         // ── Design-handoff tokens (used by the restyled launcher) ──────
