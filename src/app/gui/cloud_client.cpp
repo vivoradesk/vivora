@@ -271,6 +271,13 @@ void CloudClient::openDeviceStream() {
     // (never-ending) body before delivering readyRead.
     req.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
                      QNetworkRequest::AlwaysNetwork);
+    // Force HTTP/1.1: Qt negotiates HTTP/2 with the TLS reverse proxy by
+    // default, and its h2 handling ends an endless SSE response almost
+    // immediately (server + proxy hold the stream open fine over 1.1 —
+    // confirmed by a raw client). Without this the reply finished ~1ms
+    // after the initial ": connected" comment, so the stream reconnected
+    // once per second instead of staying open.
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
     sseBuffer_.clear();
     sseReply_ = nam_.get(req);
