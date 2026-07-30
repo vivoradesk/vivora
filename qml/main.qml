@@ -501,11 +501,34 @@ ApplicationWindow {
             contentHeight: middleCol.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            // True when the content overflows the viewport — drives an
+            // always-visible bar (not the fading AsNeeded default).
+            readonly property bool scrollable:
+                contentHeight > height + 0.5
+            // Fixed gutter the content is inset by so the bar never draws on
+            // top of it.  A constant (not tied to `scrollable`) so toggling the
+            // bar can't reflow the column and feed a binding loop.
+            readonly property int scrollGutter: 12
+
+            ScrollBar.vertical: ScrollBar {
+                id: middleScroll
+                policy: middleFlick.scrollable ? ScrollBar.AlwaysOn
+                                               : ScrollBar.AlwaysOff
+                width: middleFlick.scrollGutter
+                contentItem: Rectangle {
+                    implicitWidth: 7
+                    radius: 3.5
+                    color: theme.textMuted
+                    opacity: (middleScroll.pressed || middleScroll.hovered)
+                             ? 1.0 : 0.7
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
+            }
 
             ColumnLayout {
                 id: middleCol
-                width: middleFlick.width
+                width: middleFlick.width - middleFlick.scrollGutter
                 spacing: 14
 
                 // ── Sharing section ──────────────────────────────────────────
