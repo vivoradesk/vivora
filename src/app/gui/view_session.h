@@ -26,6 +26,10 @@ struct GuiViewConfig {
     std::string host_key_hex;    // 64 hex; optional when peer code provided
     std::string rendezvous_server;
     std::string peer_pubkey_hex; // hex pubkey OR memorable code
+    // VIV-52: the account device's mesh pubkey when dialled from My Devices
+    // (empty for a plain peer-code connect).  Lets a later membership removal
+    // stop exactly the session viewing the removed device.
+    std::string account_pubkey_hex;
     std::string relay_server;
     std::string relay_session_hex;
     std::string license_file;
@@ -68,6 +72,13 @@ public:
     bool    trustPromptPending() const { return trustPending_; }
     bool    trustMismatch()      const { return trustMismatch_; }
     QString trustPeerCode()      const { return trustPeerCode_; }
+
+    // VIV-52: the mesh pubkey of the account device this session is viewing
+    // (empty for a plain peer-code connect).  Used to tear the session down
+    // when that device is removed from the account.
+    QString accountPubkeyHex() const {
+        return QString::fromStdString(cfg_.account_pubkey_hex);
+    }
     QString trustNewPubkeyHex()  const { return trustNewHex_; }
     QString trustOldPubkeyHex()  const { return trustOldHex_; }
 

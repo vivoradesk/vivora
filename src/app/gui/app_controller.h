@@ -142,7 +142,8 @@ public:
 public slots:
     void startSharing();
     void stopSharing();
-    void connectToPeer(const QString& peerCodeOrHex);
+    void connectToPeer(const QString& peerCodeOrHex,
+                       const QString& accountPubkeyHex = QString());
     // VIV-52: connect to one of our own account devices.  Pre-pins the
     // device's known mesh key (when it's a current active member) so the
     // viewer skips the first-connect TOFU dialog, then dials its peer code.

@@ -319,7 +319,8 @@ void AppController::stopSharing() {
     // sharing_/clientCount_ get reset on the worker's stopped() signal.
 }
 
-void AppController::connectToPeer(const QString& peerCodeOrHex) {
+void AppController::connectToPeer(const QString& peerCodeOrHex,
+                                 const QString& accountPubkeyHex) {
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
 #if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
@@ -329,6 +330,9 @@ void AppController::connectToPeer(const QString& peerCodeOrHex) {
     vc.stun_server        = settings_->stunServer().toStdString();
     vc.rendezvous_server  = settings_->rendezvous().toStdString();
     vc.peer_pubkey_hex    = peerCodeOrHex.toStdString();
+    // VIV-52: remember the account device's mesh key so a later removal can
+    // stop this exact session (see the devicesFetched membership diff).
+    vc.account_pubkey_hex = accountPubkeyHex.toLower().toStdString();
     {
         // VIV-29: managed relay is Pro-gated (see startSharing).
         const QString relay = settings_->relay();
@@ -466,7 +470,7 @@ void AppController::connectToAccountDevice(const QString& peerCode,
         return;
     }
     log::info("AppController", "Pre-pinned account device key — connecting");
-    connectToPeer(peerCode);
+    connectToPeer(peerCode, pubkeyHex);
 }
 
 void AppController::resolveTrustPrompt(bool trust) {
@@ -827,10 +831,33 @@ void AppController::wireDeviceMesh() {
             const QString pk = d.value("pubkey").toString().toLower();
             if (!pk.isEmpty()) nowActive.insert(pk);
         }
-        if (approvalGate_) {
-            for (const QString& pk : meshActivePubkeys_)
-                if (!nowActive.contains(pk))
+        // Every pubkey that just left the active set is a removed (or
+        // key_changed) device.  Two independent teardown directions:
+        //   host side — drop a live viewer we were serving (request_kick);
+        //   viewer side — stop a session in which WE are viewing that device,
+        //     otherwise the removed host merely drops us and VIV-54 keeps the
+        //     window open retrying to reconnect forever.
+        QStringList departed;
+        for (const QString& pk : meshActivePubkeys_)
+            if (!nowActive.contains(pk)) departed.append(pk);
+        if (!departed.isEmpty()) {
+            if (approvalGate_)
+                for (const QString& pk : departed)
                     approvalGate_->request_kick(pk.toStdString());
+            // Iterate a copy of the raw pointers: each stop() ultimately emits
+            // finished(), whose handler erases from viewSessions_.
+            std::vector<ViewSession*> toStop;
+            for (auto& vs : viewSessions_) {
+                if (!vs) continue;
+                const QString apk = vs->accountPubkeyHex().toLower();
+                if (!apk.isEmpty() && departed.contains(apk))
+                    toStop.push_back(vs.get());
+            }
+            for (ViewSession* vs : toStop) {
+                log::info("AppController",
+                    "Device removed from account — stopping its view session");
+                vs->stop();
+            }
         }
         meshActivePubkeys_ = nowActive;
         if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
