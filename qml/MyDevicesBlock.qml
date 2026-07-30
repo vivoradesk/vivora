@@ -196,8 +196,24 @@ ColumnLayout {
             onConnectRequested: (id, name) => block.connectRequested(model.peerCode, model.pubkey, name)
             onRenameCommitted:  (id, name) => block.mock.renameMain(id, name)
             onCopyCodeRequested: (id, name) => block.copyPeerCode(model.peerCode, name)
-            onRemoveRequested:  (id, name) => { block.mock.removeMain(id); block.notify("Removed " + name) }
+            // Removal is consequential (signs the device out + kicks live
+            // sessions) → confirm first, then remove on the dialog's OK.
+            onRemoveRequested:  (id, name) => {
+                removeConfirm.deviceId = id
+                removeConfirm.deviceName = name
+                removeConfirm.open()
+            }
             onVerifyRequested:  (id, name) => block.notify("Verifying " + name + "…")
+        }
+    }
+
+    // Confirm-before-remove (VIV-52).  Lives outside the ListView so it isn't
+    // torn down with the delegate that triggered it.
+    RemoveDeviceDialog {
+        id: removeConfirm
+        onConfirmed: {
+            block.mock.removeMain(removeConfirm.deviceId)
+            block.notify("Removed " + removeConfirm.deviceName)
         }
     }
 

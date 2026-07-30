@@ -16,6 +16,7 @@
         <file>ProGate.qml</file>
         <file>DeviceMockModel.qml</file>
         <file>MyDevicesBlock.qml</file>
+        <file>RemoveDeviceDialog.qml</file>
         <file>SettingsDeviceRow.qml</file>
         <file>MyDevicesSettings.qml</file>
     </qresource>

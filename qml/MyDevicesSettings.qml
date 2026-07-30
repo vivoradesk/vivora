@@ -224,7 +224,12 @@ ColumnLayout {
                     seen: model.seen
                     host: model.host
                     onRenameCommitted: (id, name) => pane.mock.renameMain(id, name)
-                    onRemoveRequested: (id, name) => { pane.mock.removeMain(id); pane.notify("Removed " + name) }
+                    // Confirm before the consequential remove (VIV-52).
+                    onRemoveRequested: (id, name) => {
+                        removeConfirm.deviceId = id
+                        removeConfirm.deviceName = name
+                        removeConfirm.open()
+                    }
                 }
             }
         }
@@ -241,5 +246,14 @@ ColumnLayout {
         font.pixelSize: 11
         wrapMode: Text.WordWrap
         lineHeight: 1.4
+    }
+
+    // Confirm-before-remove (VIV-52), shared by every row in the table.
+    RemoveDeviceDialog {
+        id: removeConfirm
+        onConfirmed: {
+            pane.mock.removeMain(removeConfirm.deviceId)
+            pane.notify("Removed " + removeConfirm.deviceName)
+        }
     }
 }
