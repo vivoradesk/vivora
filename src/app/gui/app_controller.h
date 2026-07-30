@@ -331,6 +331,11 @@ private:
     // lowercased, from the last /devices/me fetch.  Diffed on each refresh so
     // a pubkey that leaves the set → an immediate kick request on the gate.
     QSet<QString> meshActivePubkeys_;
+    // VIV-52: armed only after this install's first successful device register
+    // this session.  The self-logout-on-absence check is gated on it so the
+    // initial pre-register /devices/me fetch (which cannot yet contain our own
+    // row) does not mistake a normal login for a removal.  Reset on logOut().
+    bool    meshRegistered_ = false;
     void    wireDeviceMesh();
     void    startDeviceMesh();     // register + heartbeat + stream + first fetch
     void    stopDeviceMesh();      // on sign-out

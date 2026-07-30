@@ -842,7 +842,7 @@ void AppController::wireDeviceMesh() {
         // only while signed in, and only on a genuinely non-empty result — an
         // empty list is a transient/offline fetch, not a removal (the
         // heartbeat-410 path still covers the last-device-removed edge).
-        if (cloud_.hasToken() && !devices.isEmpty()
+        if (meshRegistered_ && cloud_.hasToken() && !devices.isEmpty()
             && !myDevices_->containsCurrent()) {
             log::info("AppController",
                 "This device is no longer in the account mesh — signing out");
@@ -865,7 +865,12 @@ void AppController::wireDeviceMesh() {
     };
     connect(&cloud_, &CloudClient::devicesChanged,   this, scheduleRefresh);
     connect(&cloud_, &CloudClient::deviceRegistered, this,
-            [scheduleRefresh](const QString&, bool) { scheduleRefresh(); });
+            [this, scheduleRefresh](const QString&, bool) {
+        // Our own row now exists server-side; arm the removal-detection check
+        // and re-fetch so is_current comes back true on the next /devices/me.
+        meshRegistered_ = true;
+        scheduleRefresh();
+    });
     connect(&cloud_, &CloudClient::deviceDeleted, this,
             [scheduleRefresh](const QString&) { scheduleRefresh(); });
     // Heartbeat 404 → the server forgot us: re-register this install.
@@ -911,6 +916,7 @@ void AppController::stopDeviceMesh() {
     cloud_.stopDeviceStream();
     myDevices_->clear();
     meshActivePubkeys_.clear();   // VIV-52: drop the kick-diff snapshot
+    meshRegistered_ = false;      // VIV-52: disarm removal-detection until re-register
     if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
     emit meshChanged();
 }
