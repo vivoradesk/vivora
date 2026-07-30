@@ -83,6 +83,23 @@ bool ClientSession::start(const char* host_ip, uint16_t port) {
     return true;
 }
 
+const char* ClientSession::disconnect_status_text() const {
+    // User-visible terminal messages (no ticket refs).  Unknown/forward-compat
+    // reasons fall through to a neutral wording — still a terminal, no-reconnect
+    // state (VIV-52).
+    if (!host_disconnected_) return "";
+    switch (disconnect_reason_) {
+        case protocol::DisconnectReason::Rejected:
+            return "Connection declined";
+        case protocol::DisconnectReason::Kicked:
+            return "Removed from your account";
+        case protocol::DisconnectReason::HostShutdown:
+            return "The host ended the session";
+        default:
+            return "Disconnected by host";
+    }
+}
+
 double ClientSession::reconnect_seconds() const {
     if (reconnect_start_.time_since_epoch().count() == 0) return 0.0;
     return std::chrono::duration<double>(Clock::now() - reconnect_start_).count();
@@ -694,7 +711,11 @@ void ClientSession::poll() {
         auto since_recv = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_recv_time_).count();
         if (since_recv > DISCONNECT_TIMEOUT_MS) {
-            if (max_reconnect_ms_ > 0) {
+            // VIV-52: an explicit host Disconnect already put us in Disconnected
+            // (handled below in the switch), so this branch normally won't run
+            // for a reject/kick.  Guard anyway: never auto-reconnect after an
+            // intentional teardown — only a silent link drop reconnects.
+            if (max_reconnect_ms_ > 0 && !host_disconnected_) {
                 // Keep the window open and start retrying (VIV-54).
                 begin_reconnect();
             } else {
@@ -876,6 +897,22 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
                 log::info("ClientSession", "Clipboard received from host (%zu bytes)",
                           pending_clipboard_.data.size());
             }
+            break;
+        }
+        case protocol::PacketType::Disconnect: {
+            // VIV-52: the host is intentionally ending this session (declined
+            // approval or removed device).  Latch the reason, go straight to
+            // Disconnected, and set host_disconnected_ so the auto-reconnect
+            // path stays down — a silent link drop (no packet) still reconnects.
+            protocol::DisconnectReason reason = protocol::DisconnectReason::HostShutdown;
+            if (payload_len >= 1)
+                reason = static_cast<protocol::DisconnectReason>(payload[0]);
+            disconnect_reason_ = reason;
+            host_disconnected_ = true;
+            state_             = SessionState::Disconnected;
+            log::info("ClientSession",
+                      "Host sent Disconnect (reason=%u) — ending session, no reconnect",
+                      static_cast<unsigned>(payload_len >= 1 ? payload[0] : 0));
             break;
         }
         case protocol::PacketType::HostStats:

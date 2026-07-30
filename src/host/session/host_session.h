@@ -362,6 +362,10 @@ private:
     void handle_input(const uint8_t* payload, size_t len);
     void handle_bw_probe_ack(const uint8_t* payload, size_t len, const net::SocketAddr& sender);
     void send_ping(ClientInfo& client);
+    // Seal + send a single-reason-byte Disconnect to `client` so the viewer
+    // tears down instantly and does NOT auto-reconnect (VIV-52).  Sent on the
+    // reject and kick paths only; a plain idle timeout stays silent.
+    void send_disconnect(ClientInfo& client, protocol::DisconnectReason reason);
     void send_bw_probe(ClientInfo& client);
 
     ClientInfo* find_client(const net::SocketAddr& addr);

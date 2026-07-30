@@ -77,6 +77,12 @@ bool DeviceMeshModel::containsActivePubkey(const QString& pubkeyHex) const {
     return false;
 }
 
+bool DeviceMeshModel::containsCurrent() const {
+    for (const Device& d : devices_)
+        if (d.current) return true;
+    return false;
+}
+
 int DeviceMeshModel::indexOfId(const QString& deviceId) const {
     for (int i = 0; i < devices_.size(); ++i)
         if (devices_[i].devId == deviceId) return i;

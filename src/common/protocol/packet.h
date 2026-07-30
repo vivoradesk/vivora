@@ -27,6 +27,22 @@ enum class PacketType : uint8_t {
     MonitorList        = 0x18,  // Host → client: list of displays (MonitorListMessage)
     SelectMonitor      = 0x19,  // Client → host: switch capture to display index
     Clipboard          = 0x1A,  // Both ways: fragmented ClipboardMessage (VIV-22)
+    Disconnect         = 0x1B,  // Host → client: explicit terminal disconnect
+                                // (sealed).  Payload is a single reason byte
+                                // (DisconnectReason).  Suppresses the client's
+                                // auto-reconnect — unlike a silent link drop,
+                                // this says "do not come back" (VIV-52).
+};
+
+// Reason carried in a Disconnect packet's single-byte payload.  Lets the
+// viewer show a correct terminal status ("Connection declined" vs "Removed
+// from your account") and, crucially, distinguish an intentional host-side
+// teardown from a network blip so it does not auto-reconnect.  Unknown values
+// are treated as a plain terminal disconnect (still no reconnect).
+enum class DisconnectReason : uint8_t {
+    Rejected     = 1,  // Host declined the approval prompt.
+    Kicked       = 2,  // Device removed from the account / key revoked.
+    HostShutdown = 3,  // Host is shutting down (reserved / future use).
 };
 
 enum PacketFlags : uint8_t {

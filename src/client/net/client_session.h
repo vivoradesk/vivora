@@ -10,6 +10,7 @@
 #include "common/protocol/cursor_message.h"
 #include "common/protocol/input_event.h"
 #include "common/protocol/monitor_info.h"
+#include "common/protocol/packet.h"
 #include "common/protocol/stream_info.h"
 #include "common/utils/types.h"
 #include "common/utils/spsc_ring.h"
@@ -167,6 +168,15 @@ public:
     void send_nack(uint16_t seq_no, const uint16_t* frag_indices, size_t count);
 
     SessionState state() const { return state_; }
+    // VIV-52: true once the host sent an explicit Disconnect packet.  When set
+    // the session went to Disconnected intentionally (reject/kick), NOT via a
+    // silent link drop — the view layer uses this to skip the reconnect banner
+    // and the auto-reconnect timeout path is suppressed.
+    bool host_disconnected() const { return host_disconnected_; }
+    protocol::DisconnectReason disconnect_reason() const { return disconnect_reason_; }
+    // User-visible terminal status for the view overlay.  Empty until a
+    // Disconnect packet arrives.  Strings only — no ticket refs.
+    const char* disconnect_status_text() const;
     double rtt_ms() const { return rtt_ms_; }
     // Wire path for the in-stream menu header (VIV-74).
     const char* transport_label() const { return relay_active_ ? "Relay" : "P2P"; }
@@ -286,6 +296,10 @@ private:
     float audio_volume_ = 1.0f;
     bool  audio_muted_  = false;
     SessionState state_ = SessionState::Disconnected;
+    // VIV-52 explicit terminal disconnect from the host (reject/kick).  Set in
+    // handle_packet on a Disconnect packet; suppresses auto-reconnect.
+    bool                       host_disconnected_ = false;
+    protocol::DisconnectReason disconnect_reason_ = protocol::DisconnectReason::HostShutdown;
     VideoCodec host_codec_ = VideoCodec::HEVC;
     net::SocketAddr host_addr_{};
 

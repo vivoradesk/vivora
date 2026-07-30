@@ -261,6 +261,10 @@ void HostSession::poll() {
                 log::info("HostSession", "Client approved — streaming starts");
             } else if (s == host::ApprovalState::Rejected) {
                 log::info("HostSession", "Client rejected — disconnecting");
+                // Tell the viewer explicitly so it shows "declined" and does
+                // NOT auto-reconnect into an endless reject→re-prompt loop
+                // (VIV-52).  Sent before eviction while the cipher is live.
+                send_disconnect(client, protocol::DisconnectReason::Rejected);
                 timed_out.push_back(addr);
                 continue;
             }
@@ -999,6 +1003,25 @@ void HostSession::send_ping(ClientInfo& client) {
     send_sealed(client, wire);
 }
 
+void HostSession::send_disconnect(ClientInfo& client,
+                                  protocol::DisconnectReason reason) {
+    // The client already holds recv_cs (the Noise handshake completes before
+    // the approval gate), so this rides the same sealed transport as every
+    // other host→client control packet.  Best-effort: a single UDP datagram,
+    // not retried — the viewer also tears down on the recv timeout as a
+    // backstop, this just makes the common case instant (VIV-52).
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::Disconnect;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload.resize(1);
+    pkt.payload[0]         = static_cast<uint8_t>(reason);
+    pkt.header.payload_len = 1;
+    auto wire = pkt.serialize();
+    send_sealed(client, wire);
+}
+
 void HostSession::send_cursor_position(const protocol::CursorPositionMessage& msg) {
     if (!socket_ || clients_.empty()) return;
     protocol::Packet pkt;
@@ -1276,6 +1299,10 @@ void HostSession::disconnect_client_by_pubkey(const std::string& pubkey_hex) {
         // viewer stops receiving frames immediately; it tears its own
         // window down on the next recv timeout, exactly as a rejected
         // client does today.
+        // Tell the viewer it was removed so it tears down instantly (and does
+        // not auto-reconnect) instead of waiting ~5s for the recv timeout —
+        // sent while the cipher is still live (VIV-52).
+        send_disconnect(client, protocol::DisconnectReason::Kicked);
         if (audio_sender_) audio_sender_->remove_destination(client.audio_dest);
         if (approval_gate_)
             approval_gate_->forget(host::HostApprovalGate::make_key(addr.ip, addr.port));

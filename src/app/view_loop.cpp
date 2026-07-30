@@ -272,6 +272,20 @@ bool ViewLoopState::iter_threaded() {
 
     // Disconnect teardown / linger.
     if (session.state() == client::SessionState::Disconnected) {
+        // VIV-52: the host ended the session on purpose (declined approval or
+        // removed this device).  Show the terminal reason and linger briefly,
+        // whether or not frames were flowing — never a reconnect banner.
+        if (session.host_disconnected()) {
+            if (!disconnecting_) {
+                disconnecting_ = true;
+                disconnect_at_ = Clock::now();
+                update_status(session.disconnect_status_text());
+            }
+            const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+                Clock::now() - disconnect_at_).count();
+            if (waited > DISCONNECT_LINGER_MS) return false;
+            return true;
+        }
         if (frames_decoded_ > 0) {
             log::info("VIEW", "Disconnected from host");
             return false;

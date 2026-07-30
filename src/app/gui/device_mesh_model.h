@@ -66,6 +66,13 @@ public:
     // the normal approval / TOFU path.  Ignores online/current.
     bool containsActivePubkey(const QString& pubkeyHex) const;
 
+    // VIV-52 self-membership: true iff some row is this install's own device
+    // (is_current / `current`).  When a mesh refresh returns a non-empty list
+    // in which our row is absent, we were removed from the account — the
+    // caller signs out immediately instead of waiting for the 60s
+    // heartbeat-410 backstop.
+    bool containsCurrent() const;
+
     // Rename is an upsert with the row's existing os/pubkey/peer_code so the
     // server keeps the same key (no key_changed).  Remove deletes remotely.
     // Both no-op without a CloudClient; the refresh is driven by the caller.

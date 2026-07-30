@@ -743,6 +743,20 @@ void AppController::logIn(const QString& email, const QString& password) {
 
 void AppController::logOut() {
     stopDeviceMesh();            // VIV-52: drop presence + stream first
+
+    // VIV-52: fully disconnect this device BOTH ways so a removed device stops
+    // sharing and stops viewing.  stopSharing() no-ops when not hosting; each
+    // ViewSession::stop() is cooperative — the loop tears down on its next tick
+    // and emits finished(), which erases it from viewSessions_.  Iterate a copy
+    // of the raw pointers so the finished()-driven erase can't invalidate us.
+    if (sharing_) stopSharing();
+    {
+        std::vector<ViewSession*> active;
+        active.reserve(viewSessions_.size());
+        for (auto& vs : viewSessions_) active.push_back(vs.get());
+        for (ViewSession* vs : active) if (vs) vs->stop();
+    }
+
     settings_->setAccountToken("");
     settings_->setAccountEmail("");
     settings_->setAccountUserId("");
@@ -820,6 +834,20 @@ void AppController::wireDeviceMesh() {
         }
         meshActivePubkeys_ = nowActive;
         if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
+
+        // VIV-52: if this mesh refresh returned a non-empty list in which our
+        // own device is absent (no is_current row), we were removed from the
+        // account — sign out immediately so the SSE-driven refresh drops us in
+        // ~1-2s instead of waiting for the 60s heartbeat-410 backstop.  Guards:
+        // only while signed in, and only on a genuinely non-empty result — an
+        // empty list is a transient/offline fetch, not a removal (the
+        // heartbeat-410 path still covers the last-device-removed edge).
+        if (cloud_.hasToken() && !devices.isEmpty()
+            && !myDevices_->containsCurrent()) {
+            log::info("AppController",
+                "This device is no longer in the account mesh — signing out");
+            logOut();
+        }
     });
     connect(&cloud_, &CloudClient::devicesError, this, [this](const QString& msg) {
         if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
