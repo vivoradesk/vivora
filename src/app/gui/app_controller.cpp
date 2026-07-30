@@ -357,6 +357,10 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         // VIV-54: capture a pending TOFU trust question (host key changed during
         // an auto-reconnect) BEFORE the session is destroyed by erase().
         const bool trustBroken = vs_ptr->trustPromptPending();
+        // A session that never reached the connected state and isn't a trust
+        // pause is a plain connect failure (the worker couldn't reach the host)
+        // — surface it, since the connect no longer fails synchronously.
+        const bool neverConnected = !vs_ptr->everConnected();
         QString code, newHex, oldHex;
         bool    mismatch = false;
         if (trustBroken) {
@@ -386,24 +390,15 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
                 crypto::key_fingerprint_hex(oldHex.toStdString()));
             emit trustPromptRequested(code, newFp, oldFp, mismatch);
             emit showWindowRequested();
+        } else if (neverConnected) {
+            if (tray_) tray_->notify("Vivora",
+                QString("Could not connect to %1").arg(dial));
         }
     });
     if (!vs->start(vc)) {
-        // VIV-23: not an error when the connect paused on a TOFU trust
-        // question — stash the context, raise the QML trust dialog and
-        // wait for resolveTrustPrompt().
-        if (vs->trustPromptPending()) {
-            trustDial_   = peerCodeOrHex;
-            trustCode_   = vs->trustPeerCode();
-            trustNewHex_ = vs->trustNewPubkeyHex();
-            const QString newFp = QString::fromStdString(
-                crypto::key_fingerprint_hex(trustNewHex_.toStdString()));
-            const QString oldFp = QString::fromStdString(
-                crypto::key_fingerprint_hex(vs->trustOldPubkeyHex().toStdString()));
-            emit trustPromptRequested(trustCode_, newFp, oldFp, vs->trustMismatch());
-            emit showWindowRequested();
-            return;
-        }
+        // start() now only fails synchronously on platform/window init — the
+        // connect handshake runs on a worker thread and reports success, a
+        // TOFU trust pause, or a plain failure asynchronously via finished().
         log::error("AppController", "ViewSession::start failed");
         if (tray_) tray_->notify("Vivora",
             QString("Could not connect to %1").arg(peerCodeOrHex));

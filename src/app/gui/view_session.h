@@ -12,6 +12,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 
 namespace vivora::gui {
 
@@ -82,6 +83,11 @@ public:
     QString trustNewPubkeyHex()  const { return trustNewHex_; }
     QString trustOldPubkeyHex()  const { return trustOldHex_; }
 
+    // True once the background connect handshake succeeded and the tick loop
+    // started.  Lets AppController tell a genuine connect FAILURE (never
+    // connected → "Could not connect") apart from a normal session end.
+    bool    everConnected()      const { return everConnected_; }
+
 signals:
     // Loop has fully torn down — session.stop(), platform.shutdown()
     // have run.  AppController removes us from its active-views list
@@ -97,6 +103,11 @@ private:
     // in view_session.cpp under VIVORA_WINDOWS / VIVORA_MACOS guards.
     bool init_platform();
 
+    // Resume point after the worker thread finished loop_->init(): start the
+    // tick loop on success, or tear down + emit finished() on failure.  Always
+    // runs on the GUI thread (posted via a queued invoke).
+    void finishConnect(bool ok);
+
     GuiViewConfig                          cfg_;
     std::string                            host_ip_storage_;  // backs ViewLoopConfig.host_ip
     std::atomic<bool>                      stop_flag_{false};
@@ -110,6 +121,10 @@ private:
     QTimer                                 tick_;
     ViewLoopConfig                         loop_cfg_{};
     bool                                   finished_emitted_ = false;
+    // Background connect: loop_->init() (DNS + rendezvous + Noise handshake)
+    // runs here so the GUI event loop stays responsive during a cold connect.
+    std::thread                            connect_thread_;
+    bool                                   everConnected_ = false;
     // VIV-23 trust-prompt capture (see trustPromptPending above).
     bool    trustPending_  = false;
     bool    trustMismatch_ = false;

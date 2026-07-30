@@ -26,6 +26,10 @@ ViewSession::~ViewSession() {
     // Make sure the loop tears down before the platform / window go.
     stop_flag_.store(true, std::memory_order_release);
     tick_.stop();
+    // Join the connect worker if it's still running (only when the session is
+    // destroyed mid-connect, e.g. app shutdown).  loop_->init() is not
+    // interruptible, so this can block until the in-flight handshake resolves.
+    if (connect_thread_.joinable()) connect_thread_.join();
     loop_.reset();
     platform_.reset();
 }
@@ -104,28 +108,57 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     loop_cfg_.clipboard = clipboardBridge_;
 
     loop_ = std::make_unique<ViewLoopState>();
-    if (!loop_->init(*platform_, loop_cfg_)) {
-        // VIV-23: capture a pending TOFU trust question before the loop is
-        // destroyed, so AppController can show the dialog and re-dial.
-        vivora::client::TrustPending tp;
-        if (loop_->trust_pending(tp)) {
-            trustPending_  = true;
-            trustMismatch_ = tp.mismatch;
-            trustPeerCode_ = QString::fromStdString(tp.code);
-            trustNewHex_   = QString::fromStdString(tp.pubkey_hex);
-            trustOldHex_   = QString::fromStdString(tp.stored_hex);
-            log::info("ViewSession", "Connect paused: trust decision needed for '%s'",
-                      tp.code.c_str());
-        } else {
-            log::error("ViewSession", "ViewLoopState::init failed (rc=%d)", loop_->exit_code());
-        }
-        loop_.reset();
-        platform_.reset();
-        return false;
+
+    // Run the blocking connect (DNS resolves + rendezvous lookup + hole punch +
+    // Noise handshake) on a worker thread so the GUI event loop — the launcher
+    // window and the tray — stays responsive during a cold connect, where
+    // getaddrinfo can stall several seconds on a cold resolver.  The platform
+    // window was already created on this (GUI) thread above; loop_->init() only
+    // STORES callbacks on it and drives the socket, and the tick timer that
+    // reads loop_/platform_ is not started until finishConnect() runs back on
+    // the GUI thread — so there is no concurrent access to the platform to race.
+    connect_thread_ = std::thread([this]() {
+        const bool ok = loop_->init(*platform_, loop_cfg_);
+        QMetaObject::invokeMethod(this, [this, ok]() { finishConnect(ok); },
+                                  Qt::QueuedConnection);
+    });
+    return true;
+}
+
+void ViewSession::finishConnect(bool ok) {
+    // The worker has posted us and is about to return — join it so the
+    // std::thread is cleanly reaped (and never outlives this object).
+    if (connect_thread_.joinable()) connect_thread_.join();
+
+    if (ok) {
+        everConnected_ = true;
+        tick_.start();
+        return;
     }
 
-    tick_.start();
-    return true;
+    // Connect failed.  VIV-23: capture a pending TOFU trust question before the
+    // loop is destroyed, so AppController can show the dialog and re-dial.
+    vivora::client::TrustPending tp;
+    if (loop_ && loop_->trust_pending(tp)) {
+        trustPending_  = true;
+        trustMismatch_ = tp.mismatch;
+        trustPeerCode_ = QString::fromStdString(tp.code);
+        trustNewHex_   = QString::fromStdString(tp.pubkey_hex);
+        trustOldHex_   = QString::fromStdString(tp.stored_hex);
+        log::info("ViewSession", "Connect paused: trust decision needed for '%s'",
+                  tp.code.c_str());
+    } else {
+        log::error("ViewSession", "ViewLoopState::init failed (rc=%d)",
+                   loop_ ? loop_->exit_code() : -1);
+    }
+    loop_.reset();
+    platform_.reset();
+    clipboardSync_.reset();
+    clipboardBridge_.reset();
+    if (!finished_emitted_) {
+        finished_emitted_ = true;
+        emit finished();
+    }
 }
 
 void ViewSession::stop() {
