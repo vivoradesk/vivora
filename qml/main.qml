@@ -7,12 +7,12 @@ import QtQuick.Shapes
 ApplicationWindow {
     id: window
     width: 495
-    height: 700
+    height: 730
     minimumWidth: 420
     // Tall enough that the sharing card, My Devices, the peer-code input and
     // Recent all stay on screen at once; the two lists scroll internally rather
     // than the whole window scrolling.
-    minimumHeight: 660
+    minimumHeight: 700
     visible: true
     title: "Vivora"
 
