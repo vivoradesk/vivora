@@ -28,6 +28,10 @@ ColumnLayout {
     readonly property bool isFree: mock.variant === "free"
     readonly property bool isEmpty: mock.variant === "empty"
     readonly property bool scroll: deviceCount > 5
+    // True when the device list (not the ProGate / empty state) is showing —
+    // main.qml binds the block's fillHeight to this so the list can flex and
+    // scroll internally without leaving a gap under the free/empty cards.
+    readonly property bool showsList: !isFree && !isEmpty
 
     function _onlineCount() {
         var n = 0
@@ -172,14 +176,31 @@ ColumnLayout {
         id: listView
         visible: !block.isFree && !block.isEmpty
         Layout.fillWidth: true
-        Layout.preferredHeight: block.scroll ? 268 : contentHeight
-        interactive: block.scroll
+        // Flex within the space the block is given, but never grow past the
+        // rows themselves; shrink (and scroll) down to ~2 rows when the window
+        // is short.  main.qml gives the block Layout.fillHeight when showsList.
+        Layout.fillHeight: true
+        Layout.minimumHeight: Math.min(contentHeight, 120)
+        Layout.maximumHeight: contentHeight
+        interactive: height < contentHeight
         clip: true
         spacing: 1
         opacity: block.isCached ? 0.55 : 1.0
         model: block.mock.model
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar { policy: block.scroll ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+        ScrollBar.vertical: ScrollBar {
+            id: devScroll
+            policy: listView.height < listView.contentHeight
+                    ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+            width: 10
+            contentItem: Rectangle {
+                implicitWidth: 6
+                radius: 3
+                color: block.pal.inkMid
+                opacity: (devScroll.pressed || devScroll.hovered) ? 1.0 : 0.7
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+            }
+        }
 
         delegate: DeviceRow {
             width: ListView.view.width

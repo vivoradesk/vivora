@@ -9,7 +9,10 @@ ApplicationWindow {
     width: 495
     height: 700
     minimumWidth: 420
-    minimumHeight: 560
+    // Tall enough that the sharing card, My Devices, the peer-code input and
+    // Recent all stay on screen at once; the two lists scroll internally rather
+    // than the whole window scrolling.
+    minimumHeight: 660
     visible: true
     title: "Vivora"
 
@@ -493,43 +496,15 @@ ApplicationWindow {
         // as one area between the pinned header and footer — so Recent keeps
         // usable height and the Settings/Hide footer stays visible at the
         // default window size.
-        Flickable {
-            id: middleFlick
+        // ── Middle: the sharing card, My Devices, Connect and Recent are all
+        // pinned (no window-wide scroll).  The two lists — My Devices and
+        // Recent — take the flexible vertical space and scroll INTERNALLY, so
+        // every section stays on screen down to the window's minimum height.
+        ColumnLayout {
+            id: middleCol
             Layout.fillWidth: true
             Layout.fillHeight: true
-            contentWidth: width
-            contentHeight: middleCol.implicitHeight
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-
-            // True when the content overflows the viewport — drives an
-            // always-visible bar (not the fading AsNeeded default).
-            readonly property bool scrollable:
-                contentHeight > height + 0.5
-            // Fixed gutter the content is inset by so the bar never draws on
-            // top of it.  A constant (not tied to `scrollable`) so toggling the
-            // bar can't reflow the column and feed a binding loop.
-            readonly property int scrollGutter: 12
-
-            ScrollBar.vertical: ScrollBar {
-                id: middleScroll
-                policy: middleFlick.scrollable ? ScrollBar.AlwaysOn
-                                               : ScrollBar.AlwaysOff
-                width: middleFlick.scrollGutter
-                contentItem: Rectangle {
-                    implicitWidth: 7
-                    radius: 3.5
-                    color: theme.textMuted
-                    opacity: (middleScroll.pressed || middleScroll.hovered)
-                             ? 1.0 : 0.7
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                }
-            }
-
-            ColumnLayout {
-                id: middleCol
-                width: middleFlick.width - middleFlick.scrollGutter
-                spacing: 14
+            spacing: 14
 
                 // ── Sharing section ──────────────────────────────────────────
                 // Wrapper Rectangle gives the "host card" its own subtly darker
@@ -744,7 +719,12 @@ ApplicationWindow {
                 // Pro gate per the mock's variant.  Preview any state with the
                 // VIVORA_DEVICES_VARIANT env var (pro | trial | free | empty | cached).
                 MyDevicesBlock {
+                    id: myDevicesBlock
                     Layout.fillWidth: true
+                    // Flex only when the device list is showing, so its list can
+                    // shrink+scroll internally; the ProGate/empty cards stay at
+                    // natural height.
+                    Layout.fillHeight: myDevicesBlock.showsList
                     // Connect a mesh device through the same path as the manual
                     // peer-code input — dial its peer code via App.connectToPeer.
                     onConnectRequested: (peerCode, pubkey, devName) => {
@@ -847,19 +827,37 @@ ApplicationWindow {
                     }
                 }
 
-                // Recent list — sized to its content and non-interactive so
-                // the surrounding Flickable owns scrolling.
+                // Recent list — takes the leftover vertical space but never more
+                // than its content, and scrolls INTERNALLY (its own bar) when
+                // the window is too short to show every row.
                 AddressBookView {
+                    id: recentList
+                    visible: App.peers.rowCount() > 0
                     Layout.fillWidth: true
-                    Layout.preferredHeight: contentHeight
-                    interactive: false
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 84 : 0
+                    Layout.maximumHeight: contentHeight
+                    interactive: height < contentHeight
                     onPeerActivated: (alias, pubkey, code) => {
                         App.connectToPeer(pubkey.length > 0 ? pubkey : code)
+                    }
+                    ScrollBar.vertical: ScrollBar {
+                        id: recentScroll
+                        policy: recentList.height < recentList.contentHeight
+                                ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                        width: 10
+                        contentItem: Rectangle {
+                            implicitWidth: 6
+                            radius: 3
+                            color: theme.textMuted
+                            opacity: (recentScroll.pressed || recentScroll.hovered)
+                                     ? 1.0 : 0.7
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+                        }
                     }
                 }
 
             }   // middleCol
-        }       // middleFlick
 
         // ── Footer ───────────────────────────────────────────────────
         RowLayout {
