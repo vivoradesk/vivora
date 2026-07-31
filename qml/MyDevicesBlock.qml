@@ -176,13 +176,14 @@ ColumnLayout {
         id: listView
         visible: !block.isFree && !block.isEmpty
         Layout.fillWidth: true
-        // Flex within the space the block is given, but never grow past the
-        // rows themselves; shrink (and scroll) down to ~2 rows when the window
-        // is short.  main.qml gives the block Layout.fillHeight when showsList.
-        Layout.fillHeight: true
-        Layout.minimumHeight: Math.min(contentHeight, 120)
-        Layout.maximumHeight: contentHeight
-        interactive: height < contentHeight
+        // Sized to its rows, but capped at ~4 rows: beyond that the list scrolls
+        // internally instead of pushing the rest of the window down.  Not
+        // fillHeight, so a tall window leaves the slack to the bottom spacer
+        // rather than stretching an empty gap into this block.
+        readonly property int maxListHeight: 224
+        Layout.preferredHeight: Math.min(contentHeight, maxListHeight)
+        Layout.maximumHeight: maxListHeight
+        interactive: contentHeight > maxListHeight
         clip: true
         spacing: 1
         opacity: block.isCached ? 0.55 : 1.0
@@ -204,7 +205,7 @@ ColumnLayout {
 
         ScrollBar.vertical: ScrollBar {
             id: devScroll
-            policy: listView.height < listView.contentHeight
+            policy: listView.contentHeight > listView.maxListHeight
                     ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
             width: 10
             contentItem: Rectangle {

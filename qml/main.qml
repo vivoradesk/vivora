@@ -7,12 +7,12 @@ import QtQuick.Shapes
 ApplicationWindow {
     id: window
     width: 495
-    height: 730
+    height: 780
     minimumWidth: 420
     // Tall enough that the sharing card, My Devices, the peer-code input and
     // Recent all stay on screen at once; the two lists scroll internally rather
     // than the whole window scrolling.
-    minimumHeight: 700
+    minimumHeight: 750
     visible: true
     title: "Vivora"
 
@@ -492,14 +492,11 @@ ApplicationWindow {
             }
         }
 
-        // ── Middle: the sharing card, My Devices, Connect and Recent scroll
-        // as one area between the pinned header and footer — so Recent keeps
-        // usable height and the Settings/Hide footer stays visible at the
-        // default window size.
         // ── Middle: the sharing card, My Devices, Connect and Recent are all
-        // pinned (no window-wide scroll).  The two lists — My Devices and
-        // Recent — take the flexible vertical space and scroll INTERNALLY, so
-        // every section stays on screen down to the window's minimum height.
+        // pinned (no window-wide scroll).  My Devices is capped (scrolls
+        // internally past ~4 rows); Recent takes the leftover height and scrolls
+        // internally; a trailing spacer soaks up any surplus so the sections
+        // stay top-packed at any window height.
         ColumnLayout {
             id: middleCol
             Layout.fillWidth: true
@@ -721,10 +718,6 @@ ApplicationWindow {
                 MyDevicesBlock {
                     id: myDevicesBlock
                     Layout.fillWidth: true
-                    // Flex only when the device list is showing, so its list can
-                    // shrink+scroll internally; the ProGate/empty cards stay at
-                    // natural height.
-                    Layout.fillHeight: myDevicesBlock.showsList
                     // Connect a mesh device through the same path as the manual
                     // peer-code input — dial its peer code via App.connectToPeer.
                     onConnectRequested: (peerCode, pubkey, devName) => {
@@ -856,6 +849,12 @@ ApplicationWindow {
                         }
                     }
                 }
+
+                // Absorbs surplus height when the window is stretched taller than
+                // the content, keeping the sections top-packed (no gap opens
+                // above the sharing card).  Collapses to zero first when the
+                // window is short, so the lists get the space they need.
+                Item { Layout.fillWidth: true; Layout.fillHeight: true }
 
             }   // middleCol
 
