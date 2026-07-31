@@ -188,6 +188,20 @@ ColumnLayout {
         opacity: block.isCached ? 0.55 : 1.0
         model: block.mock.model
         boundsBehavior: Flickable.StopAtBounds
+
+        // One device row per wheel notch (the default flick skips ~2).
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: (event) => {
+                if (listView.count <= 0) return
+                const rowH = listView.contentHeight / listView.count
+                const notches = event.angleDelta.y / 120
+                const maxY = Math.max(0, listView.contentHeight - listView.height)
+                listView.contentY = Math.max(0, Math.min(maxY,
+                                    listView.contentY - notches * rowH))
+            }
+        }
+
         ScrollBar.vertical: ScrollBar {
             id: devScroll
             policy: listView.height < listView.contentHeight

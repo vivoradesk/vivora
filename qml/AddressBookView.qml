@@ -26,6 +26,21 @@ ListView {
 
     readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
 
+    // One row per wheel notch.  A plain Flickable/ListView scrolls ~2 rows per
+    // notch (a fraction of the viewport), which feels like it skips items in a
+    // short list; step by exactly one row height instead.
+    WheelHandler {
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        onWheel: (event) => {
+            if (list.count <= 0) return
+            const rowH = list.contentHeight / list.count      // incl. spacing
+            const notches = event.angleDelta.y / 120
+            const maxY = Math.max(0, list.contentHeight - list.height)
+            list.contentY = Math.max(0, Math.min(maxY,
+                                     list.contentY - notches * rowH))
+        }
+    }
+
     // Relative "seen 2h ago" formatting for the context-menu header.
     // model.lastSeen arrives as a JS Date (QDateTime, UTC instant).
     function relTime(d) {
