@@ -109,19 +109,31 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
 
     loop_ = std::make_unique<ViewLoopState>();
 
-    // Run the blocking connect (DNS resolves + rendezvous lookup + hole punch +
-    // Noise handshake) on a worker thread so the GUI event loop — the launcher
-    // window and the tray — stays responsive during a cold connect, where
-    // getaddrinfo can stall several seconds on a cold resolver.  The platform
-    // window was already created on this (GUI) thread above; loop_->init() only
-    // STORES callbacks on it and drives the socket, and the tick timer that
-    // reads loop_/platform_ is not started until finishConnect() runs back on
-    // the GUI thread — so there is no concurrent access to the platform to race.
+#ifdef VIVORA_WINDOWS
+    // Windows: run the blocking connect (DNS resolves + rendezvous lookup + hole
+    // punch + Noise handshake) on a worker thread so the GUI event loop — the
+    // launcher window and the tray — stays responsive during a cold connect,
+    // where getaddrinfo can stall several seconds on a cold resolver.  Safe here
+    // because D3D11/HWND tolerate the split: loop_->init() only STORES callbacks
+    // on the platform and drives the socket, and the tick timer that reads
+    // loop_/platform_ isn't started until finishConnect() runs back on the GUI
+    // thread — no concurrent platform access.
     connect_thread_ = std::thread([this]() {
         const bool ok = loop_->init(*platform_, loop_cfg_);
         QMetaObject::invokeMethod(this, [this, ok]() { finishConnect(ok); },
                                   Qt::QueuedConnection);
     });
+#else
+    // macOS (AppKit) and Linux (X11) are NOT thread-safe for the platform work
+    // loop_->init() ends up doing (Cocoa view / CoreVideo, X11), so connect on
+    // the main thread — a worker there corrupts the view and crashes on
+    // teardown.  finishConnect() is still deferred to the next event-loop turn
+    // (queued) so the caller can finish start() and track us first, keeping the
+    // success/trust/failure handling identical to the Windows path.
+    const bool ok = loop_->init(*platform_, loop_cfg_);
+    QMetaObject::invokeMethod(this, [this, ok]() { finishConnect(ok); },
+                              Qt::QueuedConnection);
+#endif
     return true;
 }
 
