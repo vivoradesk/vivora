@@ -7,12 +7,12 @@ import QtQuick.Shapes
 ApplicationWindow {
     id: window
     width: 495
-    height: 780
+    height: 800
     minimumWidth: 420
     // Tall enough that the sharing card, My Devices, the peer-code input and
     // Recent all stay on screen at once; the two lists scroll internally rather
     // than the whole window scrolling.
-    minimumHeight: 750
+    minimumHeight: 790
     visible: true
     title: "Vivora"
 
@@ -828,7 +828,7 @@ ApplicationWindow {
                     visible: App.peers.rowCount() > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 84 : 0
+                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 64 : 0
                     Layout.maximumHeight: contentHeight
                     interactive: height < contentHeight
                     onPeerActivated: (alias, pubkey, code) => {

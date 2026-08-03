@@ -180,7 +180,7 @@ ColumnLayout {
         // internally instead of pushing the rest of the window down.  Not
         // fillHeight, so a tall window leaves the slack to the bottom spacer
         // rather than stretching an empty gap into this block.
-        readonly property int maxListHeight: 224
+        readonly property int maxListHeight: 210
         Layout.preferredHeight: Math.min(contentHeight, maxListHeight)
         Layout.maximumHeight: maxListHeight
         interactive: contentHeight > maxListHeight
