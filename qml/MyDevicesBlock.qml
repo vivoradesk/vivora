@@ -45,7 +45,7 @@ ColumnLayout {
     // ── Header ──────────────────────────────────────────────────────────
     RowLayout {
         Layout.fillWidth: true
-        Layout.bottomMargin: 10
+        Layout.bottomMargin: 6
         spacing: 8
 
         Glyph { name: "devices"; size: 13; color: block.pal.inkMid; Layout.alignment: Qt.AlignVCenter }

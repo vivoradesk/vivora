@@ -381,8 +381,8 @@ ApplicationWindow {
     // ── Layout ───────────────────────────────────────────────────────
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 14
+        anchors.margins: 12
+        spacing: 10
 
         // ── Update banner (VIV-69) — shown when a newer build is published ──
         Rectangle {
@@ -501,7 +501,7 @@ ApplicationWindow {
             id: middleCol
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 14
+            spacing: 10
 
                 // ── Sharing section ──────────────────────────────────────────
                 // Wrapper Rectangle gives the "host card" its own subtly darker
@@ -509,7 +509,7 @@ ApplicationWindow {
                 // to a peer" half below.
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: hostCard.implicitHeight + 24
+                    Layout.preferredHeight: hostCard.implicitHeight + 20
                     visible: App.sharing
                     color: theme.hostBg
                     radius: 10
@@ -517,8 +517,8 @@ ApplicationWindow {
                     ColumnLayout {
                         id: hostCard
                         anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
+                        anchors.margins: 10
+                        spacing: 6
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -574,14 +574,14 @@ ApplicationWindow {
                     // Peer code pill
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: codeRow.implicitHeight + 22
+                        Layout.preferredHeight: codeRow.implicitHeight + 18
                         visible: App.sharing
                         color: theme.pillBg
                         radius: 10
                         RowLayout {
                             id: codeRow
                             anchors.fill: parent
-                            anchors.margins: 11
+                            anchors.margins: 9
                             spacing: 8
                             Label {
                                 text: App.myPeerCode || "…"
@@ -820,16 +820,17 @@ ApplicationWindow {
                     }
                 }
 
-                // Recent list — takes the leftover vertical space but never more
-                // than its content, and scrolls INTERNALLY (its own bar) when
-                // the window is too short to show every row.
+                // Recent list — the sole space-filler below the pinned sections:
+                // it takes ALL the leftover height (showing as many rows as fit),
+                // floors at ~3 rows, and scrolls INTERNALLY when the window is too
+                // short for every row.  No max + no trailing spacer, so surplus
+                // goes to Recent rather than an empty gap.
                 AddressBookView {
                     id: recentList
                     visible: App.peers.rowCount() > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 52 : 0
-                    Layout.maximumHeight: contentHeight
+                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 114 : 0
                     interactive: height < contentHeight
                     onPeerActivated: (alias, pubkey, code) => {
                         App.connectToPeer(pubkey.length > 0 ? pubkey : code)
@@ -849,12 +850,6 @@ ApplicationWindow {
                         }
                     }
                 }
-
-                // Absorbs surplus height when the window is stretched taller than
-                // the content, keeping the sections top-packed (no gap opens
-                // above the sharing card).  Collapses to zero first when the
-                // window is short, so the lists get the space they need.
-                Item { Layout.fillWidth: true; Layout.fillHeight: true }
 
             }   // middleCol
 
