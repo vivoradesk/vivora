@@ -269,19 +269,39 @@ ApplicationWindow {
         implicitHeight: dotSize
 
         Rectangle {
+            id: pulseRing
             anchors.centerIn: parent
             width: pd.dotSize; height: pd.dotSize; radius: width / 2
             color: "transparent"
             border.color: pd.dotColor
             border.width: 1
             visible: pd.pulsing
-            SequentialAnimation on scale {
-                running: pd.pulsing; loops: Animation.Infinite
-                NumberAnimation { from: 1.0; to: 2.6; duration: 1600; easing.type: Easing.OutQuad }
+            scale: 1.0
+            opacity: 0.0
+            // Fire one ripple every few seconds instead of looping animations
+            // back-to-back.  A continuously-running animation forces a 60fps
+            // scene-graph resync/repaint for the WHOLE window (~15% CPU on a
+            // laptop whenever the window is visible).  A Timer-driven one-shot
+            // leaves a real idle gap where NO animation runs, so the render loop
+            // fully sleeps between pulses — same "listening" ripple, a fraction
+            // of the cost.
+            ParallelAnimation {
+                id: pulseRipple
+                NumberAnimation { target: pulseRing; property: "scale"
+                                  from: 1.0; to: 2.6; duration: 1600; easing.type: Easing.OutQuad }
+                NumberAnimation { target: pulseRing; property: "opacity"
+                                  from: 0.38; to: 0.0; duration: 1600; easing.type: Easing.OutQuad }
             }
-            SequentialAnimation on opacity {
-                running: pd.pulsing; loops: Animation.Infinite
-                NumberAnimation { from: 0.38; to: 0.0; duration: 1600; easing.type: Easing.OutQuad }
+            // Only ripple while the window is focused.  Left open in the
+            // background (the common case), the pulse stops entirely so the app
+            // drops to ~idle CPU instead of repainting forever; it resumes the
+            // moment the user clicks back in.
+            Timer {
+                interval: 3200
+                running: pd.pulsing && pd.visible && window.active
+                repeat: true
+                triggeredOnStart: true
+                onTriggered: pulseRipple.restart()
             }
         }
         Rectangle {
