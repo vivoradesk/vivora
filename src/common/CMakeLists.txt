@@ -40,8 +40,10 @@ endif()
 if(UNIX AND NOT APPLE)
     # Linux audio: PulseAudio output + loopback capture (PipeWire's
     # pulse-shim resolves both transparently on PW-based distros).
+    # libpulse-simple: pa_simple playback sink; libpulse: async threaded
+    # mainloop + pa_stream used by the loopback capture.
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(PULSE REQUIRED libpulse-simple)
+    pkg_check_modules(PULSE REQUIRED libpulse-simple libpulse)
     target_sources(vivora_common PRIVATE
         audio/pulse_audio_output.cpp
         audio/pulse_audio_capture.cpp
