@@ -29,13 +29,13 @@ CloudClient::CloudClient(QObject* parent) : QObject(parent) {
 }
 
 CloudClient::~CloudClient() {
-    // Drop the streaming reply without emitting a reconnect.
-    sseWanted_ = false;
-    if (sseReply_) {
-        sseReply_->abort();
-        sseReply_->deleteLater();
-        sseReply_ = nullptr;
-    }
+    // Delegate to the safe teardown.  Do NOT inline `sseReply_->abort();
+    // sseReply_->deleteLater();` here: abort() synchronously emits finished(),
+    // whose handler (openDeviceStream) nulls sseReply_ — so a following
+    // sseReply_->deleteLater() would run on a null pointer and segfault on
+    // shutdown.  stopDeviceStream() nulls the member *before* abort(), which
+    // makes the reentrant handler a no-op.
+    stopDeviceStream();
 }
 
 void CloudClient::setBaseUrl(const QString& url) {
