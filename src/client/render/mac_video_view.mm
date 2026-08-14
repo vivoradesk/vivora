@@ -866,6 +866,7 @@ void MacVideoView::update_stats(const StatsView& stats) {
              "Audio:  %u pps   PLC %u%%\n"
              "FEC:    %llu recovered / %llu failed\n"
              "Stream: %ux%u%s\n"
+             "Codec:   %s\n"
              "Decoder: VTB HW",
             stats.fps, stats.arrived_fps, (unsigned)stats.target_fps,
             stats.rtt_ms, (unsigned)stats.encoding_kbps, (unsigned)stats.bitrate_kbps,
@@ -875,7 +876,8 @@ void MacVideoView::update_stats(const StatsView& stats) {
             (unsigned long long)stats.fec_recovered,
             (unsigned long long)stats.fec_groups_failed,
             (unsigned)stats.width, (unsigned)stats.height,
-            hdr ? " HDR" : ""];
+            hdr ? " HDR" : "",
+            stats.codec];
         [impl->view setHudText:txt];
     }
 }

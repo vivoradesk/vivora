@@ -817,6 +817,7 @@ void QtGlVideoView::rebuild_hud_text() {
     txt += QString::asprintf("Stream: %ux%u%s\n",
                              last_stats_.width, last_stats_.height,
                              last_stats_.hdr ? " HDR" : "");
+    txt += QString::asprintf("Codec:   %s\n", last_stats_.codec);
     txt += QString::asprintf("Decoder: %s", last_stats_.decoder);
     hud_label_->setText(txt);
     hud_label_->adjustSize();
