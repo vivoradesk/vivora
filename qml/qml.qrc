@@ -7,6 +7,7 @@
         <file>AddPeerDialog.qml</file>
         <file>ConnectionApprovalDialog.qml</file>
         <file>TrustPromptDialog.qml</file>
+        <file>ScreenRecordingPermissionDialog.qml</file>
         <file>DevicePalette.qml</file>
         <file>Glyph.qml</file>
         <file>DeviceAvatar.qml</file>

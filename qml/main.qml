@@ -72,6 +72,15 @@ ApplicationWindow {
             window.raise()
             window.requestActivate()
         }
+        // VIV-111 (macOS): a share was requested without the Screen Recording
+        // grant — show the actionable permission dialog, keep sharing off.
+        function onScreenRecordingPermissionRequired(message) {
+            permissionLoader.message = message
+            permissionLoader.active = true
+            window.show()
+            window.raise()
+            window.requestActivate()
+        }
     }
 
     Loader {
@@ -111,6 +120,19 @@ ApplicationWindow {
             mismatch:       trustLoader.mismatch
             onTrusted:   { App.resolveTrustPrompt(true);  trustLoader.active = false }
             onDismissed: { App.resolveTrustPrompt(false); trustLoader.active = false }
+        }
+    }
+    // VIV-111 macOS Screen Recording permission prompt.  One at a time is fine
+    // (only fires on a share attempt).
+    Loader {
+        id: permissionLoader
+        active: false
+        property string message: ""
+        sourceComponent: ScreenRecordingPermissionDialog {
+            visible: true
+            message: permissionLoader.message
+            onOpenSettings: { App.openScreenRecordingSettings(); permissionLoader.active = false }
+            onDismissed:    permissionLoader.active = false
         }
     }
     Loader {

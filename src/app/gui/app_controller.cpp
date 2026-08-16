@@ -28,6 +28,13 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QStandardPaths>
+#include <QUrl>
+
+#ifdef VIVORA_MACOS
+// CGPreflight/RequestScreenCaptureAccess are plain C CoreGraphics APIs —
+// callable straight from this .cpp, no Obj-C needed (VIV-111).
+#include <CoreGraphics/CoreGraphics.h>
+#endif
 #include <QSysInfo>
 #include <QUrl>
 
@@ -129,6 +136,18 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             [this](QString reason) {
         log::error("AppController", "Host init failed: %s",
                    reason.toUtf8().constData());
+        // VIV-111: roll the advertised state back to "not sharing" so the UI /
+        // tray never claim an active share the host can't actually serve.  The
+        // stopped() signal also clears this once the worker thread unwinds, but
+        // do it here immediately so there's no window where sharing_ stays true.
+        pollTimer_.stop();
+        if (sharing_) {
+            sharing_     = false;
+            clientCount_ = 0;
+            emit sharingChanged();
+            emit clientCountChanged();
+        }
+        if (tray_) tray_->setSharing(false, 0);
         if (tray_) tray_->notify("Vivora: host failed to start", reason);
     });
     connect(hostWorker_.get(), &HostWorker::idleWarning, this,
@@ -262,6 +281,28 @@ void AppController::loadIdentity() {
 
 void AppController::startSharing() {
     if (sharing_) return;
+
+#ifdef VIVORA_MACOS
+    // VIV-111: preflight the Screen Recording (TCC) grant BEFORE flipping into
+    // the sharing state.  Without it ScreenCaptureKit enumerates no displays
+    // and the host silently produces no frames, yet the UI/tray/rendezvous all
+    // advertised "sharing".  If the grant is missing, register the app in the
+    // Screen Recording list (also raises the one-time system prompt) and surface
+    // an actionable message — and stay NOT sharing.
+    if (!CGPreflightScreenCaptureAccess()) {
+        CGRequestScreenCaptureAccess();  // async; prompts once, adds us to the list
+        log::warn("AppController",
+                  "Screen Recording permission missing — not starting host");
+        emit screenRecordingPermissionRequired(
+            QStringLiteral("Vivora needs Screen Recording permission to share "
+                           "this screen.\n\nOpen System Settings → Privacy & "
+                           "Security → Screen Recording, enable Vivora, then "
+                           "restart the app."));
+        if (tray_) tray_->setSharing(false, 0);
+        return;
+    }
+#endif
+
     HostWorkerConfig wc;
     wc.port               = static_cast<uint16_t>(settings_->hostPort());
     wc.manual_bitrate_bps = settings_->bitrateMbps() * 1'000'000u;
@@ -503,6 +544,15 @@ void AppController::resolveTrustPrompt(bool trust) {
 
 void AppController::copyToClipboard(const QString& text) {
     if (QClipboard* cb = QApplication::clipboard()) cb->setText(text);
+}
+
+void AppController::openScreenRecordingSettings() {
+#ifdef VIVORA_MACOS
+    // Deep-link straight to the Screen Recording pane (VIV-111).
+    QDesktopServices::openUrl(QUrl(QStringLiteral(
+        "x-apple.systempreferences:com.apple.preference.security"
+        "?Privacy_ScreenCapture")));
+#endif
 }
 
 void AppController::disconnectView(int /*viewId*/) {

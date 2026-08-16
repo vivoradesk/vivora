@@ -77,8 +77,13 @@ void HostWorker::runOnWorkerThread() {
     auto* p = new MacHostPlatform();
     if (!p->init(cfg_.display_index, cfg_.manual_bitrate_bps, cfg_.codec,
                  cfg_.host_fps)) {
+        // VIV-111: carry the platform's real reason (e.g. missing Screen
+        // Recording grant) instead of a generic string.
+        QString reason = QString::fromStdString(p->init_error());
         delete p;
-        emit initFailed("macOS host platform init failed");
+        emit initFailed(reason.isEmpty()
+            ? QStringLiteral("macOS host platform init failed")
+            : reason);
         return;
     }
     platform_.reset(p);

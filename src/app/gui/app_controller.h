@@ -187,6 +187,10 @@ public slots:
     // copy button next to the fingerprint in Settings, VIV-23).
     Q_INVOKABLE void copyToClipboard(const QString& text);
 
+    // VIV-111 (macOS): open the Screen Recording pane of System Settings so
+    // the user can grant the permission.  No-op on other platforms.
+    Q_INVOKABLE void openScreenRecordingSettings();
+
     // VIV-29: import a license token file — copies it next to the config as
     // license.bin, points the setting at it and re-verifies.  Accepts a
     // plain path or a file:// URL (from the QML file dialog).
@@ -241,6 +245,10 @@ signals:
     void pollResultsChanged();
     // Account action failed — QML shows the message inline in the form.
     void accountError(const QString& message);
+    // VIV-111 (macOS): a share was requested without the Screen Recording
+    // grant.  QML shows a dialog with `message` + an "Open System Settings"
+    // button (calls openScreenRecordingSettings()).  Sharing stays off.
+    void screenRecordingPermissionRequired(const QString& message);
     // VIV-53: new client awaiting approval.  QML shows
     // ConnectionApprovalDialog with these details.  key is a
     // stringified address used to identify the client when the user

@@ -25,9 +25,14 @@ bool MacHostPlatform::init(uint32_t display_index,
     if (codec == vivora::VideoCodec::H264) {
         vivora::log::info("HOST", "Negotiated H.264 (SDR fallback) for the macOS host encoder");
     }
+    init_error_.clear();
     auto displays = vivora::host::MacScreenCapture::enumerate_displays();
     if (displays.empty()) {
         vivora::log::error("HOST", "No displays found (check Screen Recording permission)");
+        // VIV-111: almost always a missing/denied Screen Recording grant (or a
+        // pending prompt that timed out) — surface that, not a generic failure.
+        init_error_ = "Screen Recording permission required — macOS returned no "
+                      "capturable displays.";
         return false;
     }
     vivora::log::info("HOST", "Available displays:");
@@ -37,11 +42,16 @@ bool MacHostPlatform::init(uint32_t display_index,
     }
     if (display_index >= displays.size()) {
         vivora::log::error("HOST", "Display index %u out of range", display_index);
+        init_error_ = "Selected display is no longer available.";
         return false;
     }
 
     manual_bitrate_bps_ = manual_bitrate_bps;
-    return start_pipeline(display_index);
+    if (!start_pipeline(display_index)) {
+        init_error_ = "Failed to start the screen-capture pipeline.";
+        return false;
+    }
+    return true;
 }
 
 // (Re)build capture for the given display.  Shared by init() and the VIV-50

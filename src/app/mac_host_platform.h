@@ -6,6 +6,7 @@
 #include "host/encode/mac_videotoolbox_encoder.h"
 #include "host/encode/video_encoder.h"
 #include <cstdint>
+#include <string>
 #include <vector>
 
 class MacHostPlatform : public vivora::HostPlatform {
@@ -15,6 +16,11 @@ public:
     // Defaulted so the legacy CLI keeps compiling.
     bool init(uint32_t display_index, uint32_t manual_bitrate_bps,
               vivora::VideoCodec codec, uint16_t stream_fps = 60);
+
+    // Human-readable reason set when init() fails, so the GUI worker can
+    // surface the real cause instead of a generic string (VIV-111).  Empty
+    // when init() succeeded.
+    const std::string& init_error() const { return init_error_; }
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -67,6 +73,7 @@ private:
     uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
     uint32_t manual_bitrate_bps_    = 0;     // user-pinned bitrate (0 = auto)
     uint16_t stream_fps_            = 60;    // VIV-67 framerate cap
+    std::string init_error_;                 // reason on init() failure (VIV-111)
     // Negotiated wire codec (VIV-7). HEVC by default; a viewer whose decoder
     // can't init HEVC negotiates H.264, and start_encoder() honours it.
     vivora::VideoCodec codec_       = vivora::VideoCodec::HEVC;
