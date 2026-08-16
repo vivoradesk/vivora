@@ -541,6 +541,20 @@ bool HostSession::probe_pending() const {
     return false;
 }
 
+bool HostSession::any_client_relayed() const {
+    // No relay binding → the host isn't forwarding through the relay at all.
+    if (!relay_active_) return false;
+    // Relay-reached clients are recursed through handle_packet() with the
+    // synthetic sentinel sender 0.0.0.1:0 (see handle_packet's DBRL DATA
+    // unwrap), so they are keyed under that addr in clients_.  A real ip:port
+    // key is a direct-LAN peer and must NOT trigger the relay clamp.
+    const uint32_t synth_ip = net::parse_ip("0.0.0.1");
+    for (const auto& [addr, client] : clients_) {
+        if (addr.ip == synth_ip && addr.port == 0) return true;
+    }
+    return false;
+}
+
 uint16_t HostSession::min_perf_target_fps(uint16_t cap) const {
     // `cap` is the host-configured framerate ceiling (VIV-67).  Starting
     // `lowest` at the cap means a client reporting more than the host is

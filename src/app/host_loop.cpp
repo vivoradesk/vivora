@@ -48,15 +48,40 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
               cfg.manual_bitrate_bps ? "manual" : "auto");
 
     // Diagnostic env-var: raise the hard warmup/recovery ceiling above
-    // 10 Mbps so a real channel-capacity test can ramp further.
+    // 10 Mbps so a real channel-capacity test can ramp further.  Remembered
+    // in `base_ceiling_override` so the relay profile below can restore it
+    // when a session flips from relay back to direct.
+    uint32_t base_ceiling_override = 0;
     if (const char* env = std::getenv("VIVORA_MAX_BPS")) {
         uint32_t max_bps = static_cast<uint32_t>(std::atoll(env));
         if (max_bps > 0) {
+            base_ceiling_override = max_bps;
             bitrate_ctl.set_ceiling_override(max_bps);
             log::info("HOST", "VIVORA_MAX_BPS=%u -> ceiling override %u kbps",
                       max_bps, max_bps / 1000);
         }
     }
+
+    // VIV-114 relay profile.  When a session runs THROUGH the relay (not a
+    // direct P2P link), the free relay box (~48 Mbps NIC, shared across many
+    // concurrent sessions) cannot carry a full adaptive stream.  While any
+    // attached client is relay-reached we clamp the encoder to a conservative
+    // wire budget plus an fps ceiling, decoupled from the P2P adaptive
+    // controller so direct sessions keep the full behaviour.  Both knobs are
+    // overridable for tuning / testing against a beefier relay.
+    uint32_t relay_max_bps = 5'000'000;   // relay wire budget (bps)
+    uint16_t relay_max_fps = 30;          // relay fps ceiling
+    if (const char* env = std::getenv("VIVORA_RELAY_MAX_BPS")) {
+        uint32_t v = static_cast<uint32_t>(std::atoll(env));
+        if (v > 0) relay_max_bps = v;
+    }
+    if (const char* env = std::getenv("VIVORA_RELAY_MAX_FPS")) {
+        int v = std::atoi(env);
+        if (v > 0 && v <= 240) relay_max_fps = static_cast<uint16_t>(v);
+    }
+    // Tracks whether the relay clamp is currently applied, so we only act on
+    // the direct<->relay transition.
+    bool relay_profile_on = false;
 
     // Start session.
     host::HostSession session;
@@ -310,6 +335,42 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             cfg.state_out->store(
                 session.state() == host::SessionState::Connected ? 1 : 0,
                 std::memory_order_relaxed);
+        }
+
+        // VIV-114: apply / lift the relay profile as the session's relay
+        // state changes.  Detection is host-side — a client reached through
+        // the relay is keyed under the synthetic sentinel addr, so this is
+        // true only when the shared encoded stream really traverses the relay
+        // box (a direct-LAN client returns false even if the host is also
+        // relay-bound for other peers).  Runs BEFORE the new-client warmup so
+        // the hard client-cap clamps the warmup-start burst on the very first
+        // relayed client, not one tick late.
+        {
+            const bool relayed_now = session.any_client_relayed();
+            if (relayed_now != relay_profile_on) {
+                relay_profile_on = relayed_now;
+                if (relayed_now) {
+                    // Clamp the recovery ceiling AND the connect-time BW-probe
+                    // hard cap (set_probe_bandwidth() caps at the ceiling
+                    // override) to the relay wire budget, so the probe can't
+                    // burst the encoder far above the relay NIC.  The
+                    // authoritative clamp is the client-cap applied each tick
+                    // below — set here too so the very first warmup obeys it.
+                    bitrate_ctl.set_ceiling_override(relay_max_bps);
+                    bitrate_ctl.set_client_cap(relay_max_bps);
+                    log::info("HOST",
+                              "Relay session -> relay profile ON "
+                              "(wire <= %u kbps, fps <= %u)",
+                              relay_max_bps / 1000, (unsigned)relay_max_fps);
+                } else {
+                    bitrate_ctl.set_ceiling_override(base_ceiling_override);
+                    bitrate_ctl.set_client_cap(
+                        session.min_client_bitrate_cap_bps());
+                    log::info("HOST",
+                              "Direct session -> relay profile OFF, "
+                              "full adaptive restored");
+                }
+            }
         }
 
         // Phase B+: encoder lifecycle on client_count transitions.
@@ -643,11 +704,23 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         {
             // Viewer-requested bitrate cap (PerfReport bytes [4..8), 0 =
             // none): hard clamp inside the controller, cheap no-op when
-            // unchanged.
-            bitrate_ctl.set_client_cap(session.min_client_bitrate_cap_bps());
-            // min_perf_target_fps(fps_cap) already clamps client reports to
-            // the user's cap (VIV-67), so the EWMA can never ratchet above it.
-            uint16_t want = session.min_perf_target_fps(fps_cap);
+            // unchanged.  VIV-114: while relayed, fold in the relay wire
+            // budget (tightest of viewer cap and relay budget wins) so the
+            // encoder stays within the relay NIC on every adaptation path.
+            uint32_t eff_bitrate_cap = session.min_client_bitrate_cap_bps();
+            if (relay_profile_on
+                && (eff_bitrate_cap == 0 || relay_max_bps < eff_bitrate_cap))
+                eff_bitrate_cap = relay_max_bps;
+            bitrate_ctl.set_client_cap(eff_bitrate_cap);
+            // min_perf_target_fps(cap) already clamps client reports to the
+            // user's cap (VIV-67), so the EWMA can never ratchet above it.
+            // VIV-114: while relayed, lower the effective cap to the relay fps
+            // ceiling so the paced capture rate drops to it (decoupled from
+            // P2P — full cap restored the moment the session goes direct).
+            const uint16_t eff_fps_cap = relay_profile_on
+                ? std::min<uint16_t>(fps_cap, relay_max_fps)
+                : fps_cap;
+            uint16_t want = session.min_perf_target_fps(eff_fps_cap);
             target_fps_ewma = 0.7f * target_fps_ewma + 0.3f * static_cast<float>(want);
             uint16_t smoothed = static_cast<uint16_t>(target_fps_ewma + 0.5f);
             int diff = static_cast<int>(smoothed) - static_cast<int>(applied_target_fps);
