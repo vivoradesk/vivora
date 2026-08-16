@@ -27,7 +27,20 @@ Rectangle {
     signal removeRequested(string devId, string devName)
 
     property bool editing: false
-    readonly property var osLabel: ({ "mac": "macOS 14.5", "win": "Windows 11", "linux": "Ubuntu 24.04" })
+    // VIV-115: `os` now holds the real OS pretty-name.  Derive the icon tag
+    // from it, and show the name as-is (bare-tag legacy rows get a plain
+    // platform name until they re-register).
+    function osTag(os) {
+        if (os === "mac" || os.indexOf("macOS") === 0 || os.indexOf("OS X") === 0) return "mac"
+        if (os === "win" || os.indexOf("Windows") === 0) return "win"
+        return "linux"
+    }
+    function osLabel(os) {
+        if (os === "mac")   return "macOS"
+        if (os === "win")   return "Windows"
+        if (os === "linux") return "Linux"
+        return os
+    }
 
     implicitHeight: 54
     color: current ? pal.blueSoft : (hover.hovered ? pal.paperSoft : "transparent")
@@ -146,9 +159,9 @@ Rectangle {
         RowLayout {
             Layout.preferredWidth: row.osColWidth
             spacing: 8
-            Glyph { name: row.os; size: 15; color: row.pal.inkMid; Layout.alignment: Qt.AlignVCenter }
+            Glyph { name: row.osTag(row.os); size: 15; color: row.pal.inkMid; Layout.alignment: Qt.AlignVCenter }
             Label {
-                text: row.osLabel[row.os]
+                text: row.osLabel(row.os)
                 color: row.pal.inkSoft
                 font.family: row.pal.sans
                 font.pixelSize: 13

@@ -12,6 +12,15 @@ Item {
     property real size: 34
     property real glyphSize: 15
 
+    // The `os` field now carries the real OS pretty-name ("macOS 26.5.2",
+    // "Windows 11 …", "Ubuntu 22.04 …"); map it back to the icon tag.  Legacy
+    // rows still stored as the bare "mac"/"win"/"linux" tag pass through (VIV-115).
+    function osTag(os) {
+        if (os === "mac" || os.indexOf("macOS") === 0 || os.indexOf("OS X") === 0) return "mac"
+        if (os === "win" || os.indexOf("Windows") === 0) return "win"
+        return "linux"
+    }
+
     implicitWidth: size
     implicitHeight: size
 
@@ -25,7 +34,7 @@ Item {
 
         Glyph {
             anchors.centerIn: parent
-            name: ava.os
+            name: ava.osTag(ava.os)
             size: ava.glyphSize
             color: ava.online ? ava.pal.inkSoft : ava.pal.inkFaint
             opacity: ava.online ? 1.0 : 0.7

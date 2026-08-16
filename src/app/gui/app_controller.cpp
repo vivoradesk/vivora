@@ -848,13 +848,11 @@ QString AppController::meshDeviceName() const {
 }
 
 QString AppController::meshDeviceOs() const {
-#if defined(VIVORA_WINDOWS)
-    return QStringLiteral("win");
-#elif defined(VIVORA_MACOS)
-    return QStringLiteral("mac");
-#else
-    return QStringLiteral("linux");
-#endif
+    // VIV-115: send the real OS pretty-name (e.g. "macOS 26.5.2", "Windows 11
+    // Version 23H2", "Ubuntu 22.04.5 LTS").  The cloud stores `os` as an opaque
+    // string; the device UI derives the platform icon from a prefix match and
+    // shows this verbatim — no more hardcoded fake versions.
+    return QSysInfo::prettyProductName();
 }
 
 void AppController::wireDeviceMesh() {

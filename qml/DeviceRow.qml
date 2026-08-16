@@ -31,7 +31,15 @@ Item {
     signal removeRequested(string devId, string devName)
     signal verifyRequested(string devId, string devName)
 
-    readonly property var osLabel: ({ "mac": "macOS 14.5", "win": "Windows 11", "linux": "Ubuntu 24.04" })
+    // VIV-115: `os` now holds the real OS pretty-name; show it as-is.  Legacy
+    // rows stored as the bare tag get a plain platform name (no fake version)
+    // until they re-register.
+    function osLabel(os) {
+        if (os === "mac")   return "macOS"
+        if (os === "win")   return "Windows"
+        if (os === "linux") return "Linux"
+        return os
+    }
 
     property bool editing: false
 
@@ -192,7 +200,7 @@ Item {
                     // Meta line
                     Label {
                         Layout.fillWidth: true
-                        text: root.osLabel[root.os] + "  ·  "
+                        text: root.osLabel(root.os) + "  ·  "
                               + (root.current ? "This device"
                                  : root.online ? "Online now"
                                  : "Last seen " + root.seen)
