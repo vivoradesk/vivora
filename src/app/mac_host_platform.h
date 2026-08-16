@@ -6,6 +6,7 @@
 #include "host/encode/mac_videotoolbox_encoder.h"
 #include "host/encode/video_encoder.h"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,7 +68,16 @@ public:
     bool take_cursor_shape(CursorShapeView& out) override;
 
 private:
-    vivora::host::MacScreenCapture capture_;
+    // VIV-116: heap-owned so the live ScreenCaptureKit session can be moved
+    // into a process-global keepalive slot on pause and adopted back on
+    // resume WITHOUT relocating the MacScreenCapture object.  The SCK stream
+    // delegate + wake observer capture `this` (the MacScreenCapture*), so the
+    // pointee address must stay stable across a stow/adopt — moving a
+    // unique_ptr transfers the pointer but never moves the object, which a
+    // by-value member could not guarantee.  Keeping the session alive across a
+    // user-initiated pause means Resume never creates a fresh SCStream, so
+    // macOS does not re-raise the Screen Recording prompt.
+    std::unique_ptr<vivora::host::MacScreenCapture> capture_;
     vivora::host::MacVideoToolboxEncoder encoder_;
     std::vector<uint8_t> pkt_buf_;
     uint32_t current_display_index_ = 0;     // captured SCDisplay index (VIV-50)
@@ -86,8 +96,19 @@ private:
     // (Re)build capture for `display_index`.  Shared by init() and
     // select_monitor().  The encoder is built separately by start_encoder()
     // when a viewer is attached (Phase B+).  Returns false leaving the
-    // object unusable on failure.
+    // object unusable on failure.  First tries to adopt a live SCK session
+    // stowed by a previous pause (VIV-116); only creates a fresh SCStream —
+    // and thus risks a Screen Recording re-prompt — when nothing compatible
+    // is stowed.
     bool start_pipeline(uint32_t display_index);
+
+    // VIV-116 keepalive helpers.  adopt() moves a compatible stowed capture
+    // into capture_ (returns true on adoption); stow() moves the live capture
+    // out to the global keepalive so Resume can adopt it instead of building a
+    // new SCStream.  A compatible capture matches both the display index and
+    // the requested stream fps (the only capture-side config that varies).
+    bool adopt_keepalive_capture(uint32_t display_index);
+    void stow_keepalive_capture();
 
     // Cursor tracking state.
     uint64_t  last_shape_hash_ = 0;

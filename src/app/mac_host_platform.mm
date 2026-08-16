@@ -3,12 +3,51 @@
 #include "app/mac_host_platform.h"
 #include "common/codec/bitrate_controller.h"
 #include "common/utils/log.h"
+#include <memory>
+#include <mutex>
 #include <thread>
 #include <chrono>
 #include <utility>
 
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+
+namespace {
+
+// VIV-116: process-global keepalive for the ScreenCaptureKit session.
+//
+// Pause tears the host worker (thread + MacHostPlatform + encoder + network
+// session) all the way down — the only thing we deliberately keep alive is the
+// SCStream.  A brand-new SCStream on Resume is a fresh capture session that
+// macOS 15+/26 re-confirms with the native Screen Recording prompt even when
+// the permission is already granted; keeping the exact same SCStream running
+// avoids that.
+//
+// The live MacScreenCapture is moved (unique_ptr, so the pointee never
+// relocates — see the header note) into this slot by shutdown() and moved back
+// out by start_pipeline() on the next start.  While stowed the SCStream keeps
+// running on its own dispatch queue: frames land in its drop-oldest slot and
+// are simply never pulled (no encoder, no worker), which costs a little GPU but
+// no CPU on our side.  Its internal restart/wake watchdog keeps `this` valid
+// because the object stays alive here.
+//
+// Access is serialised by the GUI: HostWorker::stop() blocks on thread join
+// (so shutdown()'s stow completes) before AppController::startSharing() spins a
+// new worker whose init() adopts — the two never overlap.  The mutex is belt-
+// and-braces against any future caller that breaks that ordering.
+struct MacCaptureKeepalive {
+    std::mutex mtx;
+    std::unique_ptr<vivora::host::MacScreenCapture> capture;
+    uint32_t display_index = 0;
+    uint16_t fps = 0;
+};
+
+MacCaptureKeepalive& keepalive() {
+    static MacCaptureKeepalive g_keepalive;
+    return g_keepalive;
+}
+
+} // namespace
 
 bool MacHostPlatform::init(uint32_t display_index,
                             uint32_t manual_bitrate_bps,
@@ -60,6 +99,17 @@ bool MacHostPlatform::init(uint32_t display_index,
 // (Phase B+ lazy encoder, VIV-12), so a host that's "Listening" all day
 // holds no VideoToolbox session until somebody connects.
 bool MacHostPlatform::start_pipeline(uint32_t display_index) {
+    // VIV-116: adopt a live SCK session kept alive across a previous pause if
+    // it targets the same display + fps.  Adoption reuses the running
+    // SCStream, so macOS does not re-raise the Screen Recording prompt.
+    if (adopt_keepalive_capture(display_index)) {
+        current_display_index_ = display_index;
+        vivora::log::info("HOST", "Adopted kept-alive SCK capture (display %u) — no re-prompt",
+                          display_index);
+        return true;
+    }
+
+    auto cap = std::make_unique<vivora::host::MacScreenCapture>();
     vivora::host::MacCaptureConfig ccfg;
     ccfg.display_index = display_index;
     ccfg.fps = stream_fps_;   // VIV-67 user framerate cap
@@ -67,17 +117,57 @@ bool MacHostPlatform::start_pipeline(uint32_t display_index) {
     // Auto-detect: capture HDR if the display reports HDR, otherwise SDR.
     // MacScreenCapture honours prefer_hdr only when display_is_hdr() agrees.
     ccfg.prefer_hdr = true;
-    if (!capture_.init(ccfg)) {
+    if (!cap->init(ccfg)) {
         vivora::log::error("HOST", "Failed to init capture");
         return false;
     }
-    if (!capture_.start()) {
+    if (!cap->start()) {
         vivora::log::error("HOST", "Failed to start capture");
         return false;
     }
 
+    capture_ = std::move(cap);
     current_display_index_ = display_index;
     return true;
+}
+
+bool MacHostPlatform::adopt_keepalive_capture(uint32_t display_index) {
+    auto& ka = keepalive();
+    std::lock_guard<std::mutex> lock(ka.mtx);
+    if (!ka.capture) return false;
+    if (ka.display_index == display_index && ka.fps == stream_fps_) {
+        // Compatible: take ownership of the still-running SCStream.
+        capture_ = std::move(ka.capture);
+        ka.fps = 0;
+        return true;
+    }
+    // Stowed capture targets a different display or fps (a Settings change
+    // between pause and resume).  We can't reuse it — tear it down (this stops
+    // the SCStream and removes its wake observer) so it doesn't linger, then
+    // fall back to a fresh capture.  This rare path may re-prompt, which is
+    // acceptable for an intentional capture-config change.
+    vivora::log::info("HOST",
+                      "Stowed SCK capture incompatible (display %u/fps %u vs %u/%u) — rebuilding",
+                      ka.display_index, ka.fps, display_index, stream_fps_);
+    ka.capture.reset();
+    ka.fps = 0;
+    return false;
+}
+
+void MacHostPlatform::stow_keepalive_capture() {
+    if (!capture_) return;
+    auto& ka = keepalive();
+    std::lock_guard<std::mutex> lock(ka.mtx);
+    // Normally the slot is empty here (the matching resume already adopted the
+    // previous one).  If something is still stowed, drop it before overwriting
+    // so we never leak a running SCStream.
+    if (ka.capture) ka.capture.reset();
+    ka.display_index = current_display_index_;
+    ka.fps           = stream_fps_;
+    ka.capture       = std::move(capture_);
+    vivora::log::info("HOST",
+                      "Stowed live SCK capture across pause (display %u, %u fps) — kept alive",
+                      ka.display_index, ka.fps);
 }
 
 bool MacHostPlatform::start_encoder() {
@@ -89,13 +179,13 @@ bool MacHostPlatform::start_encoder() {
     if (bitrate == 0) {
         bitrate = manual_bitrate_bps_ != 0
             ? manual_bitrate_bps_
-            : vivora::codec::default_bitrate_for(capture_.width(), capture_.height(),
+            : vivora::codec::default_bitrate_for(capture_->width(), capture_->height(),
                                                  stream_fps_);
     }
 
     vivora::host::MacEncoderConfig ecfg;
-    ecfg.width = capture_.width();
-    ecfg.height = capture_.height();
+    ecfg.width = capture_->width();
+    ecfg.height = capture_->height();
     ecfg.fps = stream_fps_;   // VIV-67 user framerate cap
     ecfg.bitrate_bps = bitrate;
     // Keep the keyframe interval at ~2s worth of frames (120 @ 60fps).
@@ -103,7 +193,7 @@ bool MacHostPlatform::start_encoder() {
     ecfg.codec = codec_;   // VIV-7: honour the negotiated H.264/HEVC choice
     // H.264 is SDR-only; the encoder ignores hdr for H.264 but keep the config
     // honest so the log reflects reality.
-    ecfg.hdr = (codec_ != vivora::VideoCodec::H264) && capture_.hdr_active();
+    ecfg.hdr = (codec_ != vivora::VideoCodec::H264) && capture_->hdr_active();
     if (!encoder_.init(ecfg)) {
         vivora::log::error("HOST", "Failed to init encoder");
         return false;
@@ -153,22 +243,25 @@ bool MacHostPlatform::select_monitor(uint32_t index, bool /*seed_cursor*/) {
     // otherwise the lazy-encoder gap stays encoder-free (VIV-12).
     const bool had_encoder = encoder_live_;
     stop_encoder();
-    capture_.stop();
+    // Full teardown (not a stow): we're switching displays, so the old
+    // display's SCStream must not survive.  reset() stops it + removes its
+    // wake observer before start_pipeline() builds one for the new display.
+    capture_.reset();
     if (start_pipeline(index) && (!had_encoder || start_encoder()))
         return true;
     // Roll back to the previous display so the session keeps streaming.
     vivora::log::error("HOST", "select_monitor: rebuild on display %u failed, restoring %u",
                        index, prev);
     stop_encoder();
-    capture_.stop();
+    capture_.reset();
     if (!start_pipeline(prev)) return false;
     return had_encoder ? start_encoder() : true;
 }
 
-uint32_t MacHostPlatform::capture_width()  const { return capture_.width(); }
-uint32_t MacHostPlatform::capture_height() const { return capture_.height(); }
-uint32_t MacHostPlatform::input_width()    const { return capture_.points_width(); }
-uint32_t MacHostPlatform::input_height()   const { return capture_.points_height(); }
+uint32_t MacHostPlatform::capture_width()  const { return capture_ ? capture_->width() : 0; }
+uint32_t MacHostPlatform::capture_height() const { return capture_ ? capture_->height() : 0; }
+uint32_t MacHostPlatform::input_width()    const { return capture_ ? capture_->points_width() : 0; }
+uint32_t MacHostPlatform::input_height()   const { return capture_ ? capture_->points_height() : 0; }
 
 void MacHostPlatform::set_bitrate(uint32_t bps) {
     // Remember the value even when the encoder is torn down so the next
@@ -189,9 +282,9 @@ bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
     // keeps us out of here while the encoder is down, but guard anyway so a
     // disconnect racing this tick can't feed a dead VT session.  Not pulling
     // the frame leaves it in the capture's latest-frame slot — free.
-    if (!encoder_live_) return false;
+    if (!encoder_live_ || !capture_) return false;
 
-    CVPixelBufferRef pb = capture_.try_get_frame(&pts_us);
+    CVPixelBufferRef pb = capture_->try_get_frame(&pts_us);
     if (pb) {
         content_changed = true;
         encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
@@ -203,7 +296,7 @@ bool MacHostPlatform::capture_and_encode(uint64_t& pts_us,
     // indefinitely on static content.  Re-encode the last delivered
     // frame so the encoder has SOMETHING to base its IDR on.
     if (!force) return false;
-    pb = capture_.get_last_frame_for_force(&pts_us);
+    pb = capture_->get_last_frame_for_force(&pts_us);
     if (!pb) return false;
     content_changed = false;  // refresh of last frame, not new content.
     encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
@@ -216,9 +309,9 @@ bool MacHostPlatform::re_encode_last(uint64_t pts_us) {
     // rect emission).  Re-feed the cached last frame so the wire
     // maintains the expected cadence: keeps WiFi power-saving from
     // killing the link and gives FEC groups a steady fill rate.
-    if (!encoder_live_) return false;   // lazy encoder down (VIV-12)
+    if (!encoder_live_ || !capture_) return false;   // lazy encoder down (VIV-12)
     uint64_t cached_pts = 0;
-    CVPixelBufferRef pb = capture_.get_last_frame_for_force(&cached_pts);
+    CVPixelBufferRef pb = capture_->get_last_frame_for_force(&cached_pts);
     if (!pb) return false;
     encoder_.encode(pb, pts_us);  // encoder takes ownership + CFReleases
     return true;
@@ -243,7 +336,14 @@ void MacHostPlatform::on_idle() {
 
 void MacHostPlatform::shutdown() {
     stop_encoder();   // no-op when the lazy encoder is already down
-    capture_.stop();
+    // VIV-116: do NOT stop the SCK capture here.  shutdown() runs on every
+    // pause (AppController::stopSharing -> HostWorker::stop -> loop exit ->
+    // platform teardown).  Stopping + rebuilding the SCStream is exactly what
+    // makes macOS 15+/26 re-raise the Screen Recording prompt on Resume, so we
+    // stow the live capture in the process-global keepalive instead and the
+    // next start_pipeline() adopts it.  (On a genuine app quit the process
+    // exits right after; the static keepalive's destructor stops the stream.)
+    stow_keepalive_capture();
 }
 
 // ---------------------------------------------------------------------------
