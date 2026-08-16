@@ -25,8 +25,18 @@ Item {
         switch (n) {
         // ---- OS glyphs (fill, 24 viewBox) ----
         case "win":
-            return { vb: 24, filled: true, sw: 0,
-                d: "M3 4.6 10.6 3.5v7.7H3zM11.6 3.35 21 2v9.2h-9.4zM3 12.8h7.6v7.7L3 19.4zM11.6 12.8H21V22l-9.4-1.3z" }
+            // Four disjoint slanted quads.  Authored as four independent
+            // single-subpath quads (`subpaths`) instead of one multi-subpath
+            // fill: the latter triangulates incorrectly on the D3D11 RHI
+            // backend and renders garbled (VIV-117).  Same geometry as the
+            // original combined path, just split and made explicit.
+            return { vb: 24, filled: true, sw: 0, d: "",
+                subpaths: [
+                    "M3 4.6 L10.6 3.5 L10.6 11.2 L3 11.2 Z",
+                    "M11.6 3.35 L21 2 L21 11.2 L11.6 11.2 Z",
+                    "M3 12.8 L10.6 12.8 L10.6 20.5 L3 19.4 Z",
+                    "M11.6 12.8 L21 12.8 L21 22 L11.6 20.7 Z"
+                ] }
         case "mac":
             return { vb: 24, filled: true, sw: 0,
                 d: "M17.05 12.04c-.03-2.7 2.21-3.99 2.31-4.06-1.26-1.85-3.23-2.1-3.92-2.13-1.67-.17-3.26.98-4.11.98-.86 0-2.16-.96-3.55-.93-1.83.03-3.51 1.06-4.45 2.7-1.9 3.3-.49 8.18 1.36 10.86.9 1.31 1.97 2.78 3.37 2.73 1.36-.05 1.87-.88 3.51-.88 1.64 0 2.1.88 3.53.85 1.46-.03 2.39-1.33 3.28-2.65 1.04-1.52 1.47-2.99 1.49-3.07-.03-.01-2.85-1.1-2.87-4.34zM14.43 4.3c.73-.9 1.23-2.14 1.09-3.39-1.06.04-2.36.71-3.12 1.6-.68.78-1.28 2.04-1.12 3.26 1.19.09 2.41-.6 3.15-1.47z" }
@@ -94,6 +104,8 @@ Item {
     }
 
     readonly property var _icon: _def(name)
+    // Icons that supply `subpaths` render one ShapePath per pane (see "win").
+    readonly property var _subs: _icon.subpaths ? _icon.subpaths : []
 
     Shape {
         id: shp
@@ -105,13 +117,38 @@ Item {
             xScale: g.size / g._icon.vb
             yScale: g.size / g._icon.vb
         }
+        // Single-path icons: every glyph except those that supply `subpaths`.
         ShapePath {
             strokeColor: g._icon.filled ? "transparent" : g.color
             strokeWidth: g._icon.sw
             fillColor: g._icon.filled ? g.color : "transparent"
             capStyle: ShapePath.RoundCap
             joinStyle: ShapePath.RoundJoin
-            PathSvg { path: g._icon.d }
+            PathSvg { path: g._subs.length > 0 ? "" : g._icon.d }
+        }
+        // Multi-quad icons (the Windows logo): one independent filled ShapePath
+        // per pane so no single path holds multiple disjoint subpaths, which
+        // triangulates incorrectly on the D3D11 RHI backend (VIV-117).  Four
+        // fixed slots cover the glyph; unused slots render an empty path.
+        ShapePath {
+            strokeColor: "transparent"; strokeWidth: 0
+            fillColor: g._icon.filled ? g.color : "transparent"
+            PathSvg { path: g._subs.length > 0 ? g._subs[0] : "" }
+        }
+        ShapePath {
+            strokeColor: "transparent"; strokeWidth: 0
+            fillColor: g._icon.filled ? g.color : "transparent"
+            PathSvg { path: g._subs.length > 1 ? g._subs[1] : "" }
+        }
+        ShapePath {
+            strokeColor: "transparent"; strokeWidth: 0
+            fillColor: g._icon.filled ? g.color : "transparent"
+            PathSvg { path: g._subs.length > 2 ? g._subs[2] : "" }
+        }
+        ShapePath {
+            strokeColor: "transparent"; strokeWidth: 0
+            fillColor: g._icon.filled ? g.color : "transparent"
+            PathSvg { path: g._subs.length > 3 ? g._subs[3] : "" }
         }
     }
 }
