@@ -25,17 +25,19 @@ Item {
         switch (n) {
         // ---- OS glyphs (fill, 24 viewBox) ----
         case "win":
-            // Four disjoint slanted quads.  Authored as four independent
-            // single-subpath quads (`subpaths`) instead of one multi-subpath
-            // fill: the latter triangulates incorrectly on the D3D11 RHI
-            // backend and renders garbled (VIV-117).  Same geometry as the
-            // original combined path, just split and made explicit.
+            // Four panes as independent single-subpath quads (`subpaths`)
+            // instead of one multi-subpath fill: the latter triangulates
+            // incorrectly on the D3D11 RHI backend and renders garbled
+            // (VIV-117).  Geometry is a clean 2x2 grid with a 2-unit centre
+            // gap so the four panes stay legible at icon size (~15px) — the
+            // original 1-unit slanted gaps collapsed sub-pixel and read as two
+            // solid bars once the triangulation garble was gone.
             return { vb: 24, filled: true, sw: 0, d: "",
                 subpaths: [
-                    "M3 4.6 L10.6 3.5 L10.6 11.2 L3 11.2 Z",
-                    "M11.6 3.35 L21 2 L21 11.2 L11.6 11.2 Z",
-                    "M3 12.8 L10.6 12.8 L10.6 20.5 L3 19.4 Z",
-                    "M11.6 12.8 L21 12.8 L21 22 L11.6 20.7 Z"
+                    "M3 3 H11 V11 H3 Z",
+                    "M13 3 H21 V11 H13 Z",
+                    "M3 13 H11 V21 H3 Z",
+                    "M13 13 H21 V21 H13 Z"
                 ] }
         case "mac":
             return { vb: 24, filled: true, sw: 0,
