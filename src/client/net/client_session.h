@@ -206,6 +206,20 @@ public:
     // Codec advertised by the host in HELLO_ACK.  Defaults to HEVC for
     // legacy hosts that don't carry the codec byte.
     VideoCodec host_codec() const { return host_codec_; }
+
+    // VIV-112: advertise which codecs this client can decode (VideoCodecCaps
+    // bitmask).  Set once, before start()/the first HELLO, from the platform
+    // decode-capability probe.  Carried in the HELLO tail so the host can pick
+    // a codec we can actually play.
+    void set_decode_caps(uint8_t caps) { if (caps) decode_caps_ = caps; }
+    uint8_t decode_caps() const { return decode_caps_; }
+
+    // VIV-112 runtime fallback: called by the view layer when the decoder
+    // fails to initialise for the host-negotiated codec.  Asks the host to
+    // renegotiate down to H.264 (which every client can decode) and locally
+    // pins host_codec_ to H.264 so the view retries init with it.  Returns the
+    // codec the caller should now init a decoder for.
+    VideoCodec request_codec_downgrade();
     uint64_t frames_dropped() const;
     VideoReceiver* receiver() { return receiver_.get(); }
     AudioReceiver* audio_receiver() { return audio_receiver_.get(); }
@@ -301,6 +315,11 @@ private:
     bool                       host_disconnected_ = false;
     protocol::DisconnectReason disconnect_reason_ = protocol::DisconnectReason::HostShutdown;
     VideoCodec host_codec_ = VideoCodec::HEVC;
+    // VIV-112: which codecs this client can decode, advertised to the host in
+    // HELLO so it negotiates a codec we can actually play.  Defaults to "both"
+    // (the pre-VIV-112 assumption) until the app layer sets the real probe
+    // result via set_decode_caps().
+    uint8_t decode_caps_ = CODEC_CAP_ALL_KNOWN;
     net::SocketAddr host_addr_{};
 
     // Stored connect target so a reconnect can re-run establish() without the

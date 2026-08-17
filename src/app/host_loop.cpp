@@ -662,6 +662,31 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         if (session.consume_monitor_list_request()) {
             session.send_monitor_list(platform.list_monitors());
         }
+        // VIV-112 codec negotiation: a client whose decoder can't handle the
+        // configured codec (advertised in its HELLO caps, or a runtime decode
+        // failure) has driven the session to pick a different codec.  Rebuild
+        // the encoder for it and re-sync the session so future HELLO_ACKs
+        // advertise the live codec.
+        vivora::VideoCodec want_codec;
+        if (session.consume_codec_change(want_codec)) {
+            if (platform.set_codec(want_codec)) {
+                session.set_codec(platform.actual_codec());
+                platform.request_idr();   // clean re-init for the new codec
+                force_encode = true;
+                loss_grace_until = std::chrono::steady_clock::now()
+                                 + std::chrono::milliseconds(1500);
+                log::info("HOST", "Codec switched to %s per client negotiation",
+                          platform.actual_codec() == vivora::VideoCodec::HEVC
+                              ? "HEVC" : "H.264");
+            } else {
+                log::warn("HOST", "Codec switch to %s not supported on this "
+                          "platform — staying on %s (client will fall back)",
+                          want_codec == vivora::VideoCodec::HEVC ? "HEVC" : "H.264",
+                          platform.actual_codec() == vivora::VideoCodec::HEVC
+                              ? "HEVC" : "H.264");
+            }
+        }
+
         uint32_t want_monitor = 0;
         if (session.consume_monitor_select(want_monitor)) {
             log::info("HOST", "Client requested switch to display %u", want_monitor);

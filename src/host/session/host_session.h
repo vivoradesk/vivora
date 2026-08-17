@@ -102,6 +102,12 @@ struct ClientInfo {
     // Clipboard fragment reassembly for this viewer (VIV-22).  Fed only when
     // the client is approved AND its grant has clipboard enabled.
     protocol::ClipboardReassembler clipboard_rx;
+
+    // VIV-112: codecs this client advertised it can decode (VideoCodecCaps
+    // bitmask, from the HELLO tail or a runtime CodecRenegotiate).  Defaults to
+    // "both" so a legacy client that sends no caps is treated as fully capable —
+    // preserving the pre-VIV-112 host-dictates behaviour for it.
+    uint8_t decode_caps = CODEC_CAP_ALL_KNOWN;
 };
 
 class HostSession {
@@ -326,6 +332,22 @@ public:
     // Broadcast the capturable-display list to all connected clients.
     void send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
 
+    // VIV-112 codec negotiation.  consume_codec_change(): true (and reset) if a
+    // handshake or runtime renegotiation picked a codec different from the one
+    // the encoder is currently producing — host_loop applies it via
+    // platform.set_codec() + encoder rebuild, then set_codec() here re-syncs
+    // codec_ so future HELLO_ACKs advertise the live codec.
+    bool consume_codec_change(VideoCodec& out) {
+        if (!codec_change_pending_) return false;
+        out = negotiated_codec_;
+        codec_change_pending_ = false;
+        return true;
+    }
+    // Advertise which codecs the host's encoder backend can produce (defaults
+    // to H.264 + HEVC).  Lets a backend that can only do one narrow the
+    // negotiation set.
+    void set_host_encode_caps(uint8_t caps) { if (caps) host_encode_caps_ = caps; }
+
     // VIV-22 clipboard sync.  send_clipboard() fragments the message and
     // broadcasts it to every approved client whose grant has clipboard
     // enabled; the prepared wires are re-broadcast once ~150ms later from
@@ -426,7 +448,27 @@ private:
     // monotonic clock domain.  Default-constructed value means "no
     // input yet this session".  Updated in handle_input.
     TimePoint last_input_time_{};
+    // Configured codec (host --codec / GUI setting).  With VIV-112 this is a
+    // PREFERENCE/CEILING, not an absolute dictate: negotiate_codec() may
+    // downgrade it for a client that can't decode it, but never upgrades above
+    // it.  set_codec() (host_loop, from platform.actual_codec()) seeds it.
     VideoCodec codec_ = VideoCodec::HEVC;
+    // Which codecs THIS host can actually encode (VideoCodecCaps).  Our
+    // encoders (NVENC/AMF/QSV/VAAPI/VTB) all do H.264 + HEVC, so both by
+    // default; the intersection with the client's decode caps drives selection.
+    uint8_t host_encode_caps_ = CODEC_CAP_ALL_KNOWN;
+    // VIV-112 negotiated-codec change requested by a handshake or a runtime
+    // CodecRenegotiate.  host_loop consumes this and rebuilds its encoder for
+    // the new codec (mirrors the monitor-select consume pattern).
+    bool       codec_change_pending_ = false;
+    VideoCodec negotiated_codec_     = VideoCodec::HEVC;
+
+    // Pick the codec to encode for the currently-connected clients: the most
+    // preferred codec (<= configured codec_) that BOTH the host can encode and
+    // EVERY handshaked client can decode.  Called on each HELLO and on a
+    // runtime CodecRenegotiate.  Sets codec_change_pending_ when the result
+    // differs from negotiated_codec_.
+    void recompute_negotiated_codec();
 
     uint32_t pending_screen_w_ = 0;
     uint32_t pending_screen_h_ = 0;

@@ -127,6 +127,36 @@ vivora::VideoCodec WindowsHostPlatform::actual_codec() const {
     return encoder_ ? encoder_->get_config().codec : saved_codec_;
 }
 
+bool WindowsHostPlatform::set_codec(vivora::VideoCodec codec) {
+    // VIV-112: client-driven codec switch.  Update the saved config and, if the
+    // encoder is live, rebuild it for the new codec — same teardown/rebuild the
+    // monitor switch uses.  Capture (DXGI Duplicate1) is untouched, so this is
+    // cheap and the GPU surfaces are reused.
+    if (codec == actual_codec()) return true;   // already there
+    // HDR guard (see init()): H.264 is 8-bit only, and DXGI hands us FP16 on an
+    // HDR display — downgrading to H.264 there produces green garbage.  Refuse
+    // the switch and stay on HEVC; the (rare) HEVC-incapable client on an HDR
+    // host can't be served correctly in H.264 anyway.
+    if (codec == vivora::VideoCodec::H264 && dxgi_
+        && dxgi_->get_capture_format() == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+        vivora::log::warn("HOST",
+            "set_codec: refusing H.264 downgrade on HDR (FP16) capture — keeping HEVC");
+        return false;
+    }
+    saved_codec_ = codec;
+    if (!encoder_) return true;                  // takes effect at next start_encoder()
+
+    stop_encoder();
+    if (!start_encoder()) {
+        vivora::log::error("HOST", "set_codec: encoder rebuild failed for %s",
+                           codec == vivora::VideoCodec::HEVC ? "hevc" : "h264");
+        return false;
+    }
+    vivora::log::info("HOST", "Encoder switched to %s (VIV-112 negotiation)",
+                      codec == vivora::VideoCodec::HEVC ? "hevc" : "h264");
+    return true;
+}
+
 std::vector<vivora::protocol::MonitorDesc> WindowsHostPlatform::list_monitors() {
     std::vector<vivora::protocol::MonitorDesc> out;
     if (!capture_) return out;

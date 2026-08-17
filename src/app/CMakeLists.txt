@@ -286,6 +286,10 @@ endif()
 target_sources(vivora PRIVATE
     ${CMAKE_SOURCE_DIR}/src/client/net/video_receiver.cpp
     ${CMAKE_SOURCE_DIR}/src/client/net/client_session.cpp
+    # Decoder-capability probe (VIV-112).  Platform bodies are #ifdef'd;
+    # links against MF on Windows / libavcodec on Linux (both already on the
+    # vivora target below), a plain return on macOS.
+    ${CMAKE_SOURCE_DIR}/src/client/decode/codec_caps.cpp
 )
 # Host session + sender are cross-platform (pure C++).
 target_sources(vivora PRIVATE

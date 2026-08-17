@@ -8,6 +8,7 @@
 #include "common/utils/thread_priority.h"
 #include "common/utils/types.h"
 #include "client/net/client_session.h"
+#include "client/decode/codec_caps.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -240,7 +241,18 @@ bool ViewLoopState::iter_threaded() {
 
     // Lazy init once Connected: pipeline decoder + decode thread, audio, clock.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
-        if (pipeline_->init_decoder(session.host_codec())) {
+        bool ok = pipeline_->init_decoder(session.host_codec());
+        // VIV-112 runtime fallback: the negotiated codec won't init on this
+        // client's decoder — ask the host to renegotiate down to H.264 and
+        // retry once with it.  (Belt-and-suspenders behind the HELLO caps
+        // probe, which should already have prevented an unplayable codec.)
+        if (!ok && !codec_downgrade_tried_
+            && session.host_codec() != VideoCodec::H264) {
+            codec_downgrade_tried_ = true;
+            const VideoCodec fb = session.request_codec_downgrade();
+            ok = pipeline_->init_decoder(fb);
+        }
+        if (ok) {
             decoder_ready_ = true;
             decode_running_.store(true, std::memory_order_release);
             decode_thread_ = std::thread(&ViewLoopState::decode_thread_proc, this);
@@ -630,6 +642,11 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             peer_label_ = cfg.peer_pubkey_hex;  // already an adjective-noun code
         }
     }
+    // VIV-112: advertise which codecs this client can actually decode so the
+    // host negotiates one we can play (instead of dictating its own).  Probed
+    // once; must be set before the first HELLO goes out in start().
+    session_.set_decode_caps(client::probe_decode_caps());
+
     if (!session_.start(cfg.host_ip ? cfg.host_ip : "0.0.0.0", cfg.port)) {
         if (session_.has_trust_pending()) {
             // Not an error — the GUI shows the trust dialog and re-dials.
@@ -739,7 +756,16 @@ bool ViewLoopState::iter() {
     // the decoder now, and also open the audio output device.  Both
     // idempotent after first success.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
-        if (platform.init_decoder(session.host_codec())) {
+        bool ok = platform.init_decoder(session.host_codec());
+        // VIV-112 runtime fallback (see iter_threaded()): renegotiate to H.264
+        // once if the negotiated codec won't init here.
+        if (!ok && !codec_downgrade_tried_
+            && session.host_codec() != VideoCodec::H264) {
+            codec_downgrade_tried_ = true;
+            const VideoCodec fb = session.request_codec_downgrade();
+            ok = platform.init_decoder(fb);
+        }
+        if (ok) {
             decoder_ready_ = true;
         }
     }

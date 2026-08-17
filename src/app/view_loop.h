@@ -130,6 +130,10 @@ private:
     uint64_t  last_arrived_count_ = 0;
     float     last_arrived_fps_  = 0.0f;
     bool      decoder_ready_     = false;
+    // VIV-112 runtime fallback: set once we've asked the host to downgrade the
+    // codec after a decoder-init failure, so we try the downgrade at most once
+    // and don't loop if H.264 also fails to init.
+    bool      codec_downgrade_tried_ = false;
     bool      audio_started_     = false;
     int       exit_code_         = 0;
     bool      torn_down_         = false;

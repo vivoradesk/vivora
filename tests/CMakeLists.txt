@@ -30,6 +30,12 @@ target_link_libraries(monitor_info_test PRIVATE vivora_common)
 target_include_directories(monitor_info_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME monitor_info_test COMMAND monitor_info_test)
 
+# Codec negotiation (VIV-112) — capability bitmask + choose_codec, header-only.
+add_executable(codec_negotiation_test codec_negotiation_test.cpp)
+target_link_libraries(codec_negotiation_test PRIVATE vivora_common)
+target_include_directories(codec_negotiation_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME codec_negotiation_test COMMAND codec_negotiation_test)
+
 # Clipboard wire message + fragmentation/reassembly (VIV-22).
 add_executable(clipboard_test clipboard_test.cpp)
 target_link_libraries(clipboard_test PRIVATE vivora_common)
