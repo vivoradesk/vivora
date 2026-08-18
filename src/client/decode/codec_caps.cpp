@@ -3,6 +3,8 @@
 #include "common/codec/video_codec.h"
 #include "common/utils/log.h"
 
+#include <cstdlib>
+
 #if defined(VIVORA_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -72,6 +74,17 @@ uint8_t probe_platform() {
 
 uint8_t probe_decode_caps() {
     static const uint8_t cached = [] {
+        // Test hook (VIV-112): VIVORA_FORCE_DECODE_CAPS overrides the real
+        // platform probe with a literal capability bitmask (e.g. "0x01" =
+        // H.264-only, "0x02" = HEVC-only) so codec negotiation can be exercised
+        // on a machine that genuinely can decode both.  Accepts 0x-hex or dec.
+        if (const char* env = std::getenv("VIVORA_FORCE_DECODE_CAPS")) {
+            uint8_t forced = static_cast<uint8_t>(std::strtoul(env, nullptr, 0));
+            log::warn("DECODE",
+                      "VIVORA_FORCE_DECODE_CAPS=%s -> caps 0x%02X (test override)",
+                      env, forced);
+            return forced;
+        }
         uint8_t caps = probe_platform();
         if (caps == 0) {
             // Probe failed or found nothing — don't strand the client with no

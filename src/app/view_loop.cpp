@@ -241,7 +241,13 @@ bool ViewLoopState::iter_threaded() {
 
     // Lazy init once Connected: pipeline decoder + decode thread, audio, clock.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
-        bool ok = pipeline_->init_decoder(session.host_codec());
+        // Test hook (VIV-112): VIVORA_FORCE_DECODE_FAIL fails the first
+        // decoder-init for a non-H.264 negotiated codec, exercising the runtime
+        // renegotiation fallback below without needing a genuinely broken decoder.
+        const bool force_fail_ = std::getenv("VIVORA_FORCE_DECODE_FAIL")
+                                 && !codec_downgrade_tried_
+                                 && session.host_codec() != VideoCodec::H264;
+        bool ok = force_fail_ ? false : pipeline_->init_decoder(session.host_codec());
         // VIV-112 runtime fallback: the negotiated codec won't init on this
         // client's decoder — ask the host to renegotiate down to H.264 and
         // retry once with it.  (Belt-and-suspenders behind the HELLO caps
@@ -756,7 +762,12 @@ bool ViewLoopState::iter() {
     // the decoder now, and also open the audio output device.  Both
     // idempotent after first success.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
-        bool ok = platform.init_decoder(session.host_codec());
+        // Test hook (VIV-112): see iter_threaded() — force the first non-H.264
+        // decoder-init to fail so the renegotiation fallback can be exercised.
+        const bool force_fail_ = std::getenv("VIVORA_FORCE_DECODE_FAIL")
+                                 && !codec_downgrade_tried_
+                                 && session.host_codec() != VideoCodec::H264;
+        bool ok = force_fail_ ? false : platform.init_decoder(session.host_codec());
         // VIV-112 runtime fallback (see iter_threaded()): renegotiate to H.264
         // once if the negotiated codec won't init here.
         if (!ok && !codec_downgrade_tried_
