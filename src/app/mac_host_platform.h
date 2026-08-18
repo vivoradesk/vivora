@@ -37,6 +37,13 @@ public:
     // not a re-negotiation.
     vivora::VideoCodec actual_codec() const override { return codec_; }
 
+    // VIV-112: client-driven live codec switch.  Rebuilds the VideoToolbox
+    // session for the new codec (same teardown/rebuild path select_monitor
+    // uses); capture is untouched.  Refuses an H.264 downgrade on an HDR
+    // capture (H.264 is 8-bit SDR — the colours would be wrong).  Returns
+    // true if the encoder now produces `codec`.
+    bool set_codec(vivora::VideoCodec codec) override;
+
     // Monitor selection (VIV-50).  ScreenCaptureKit enumerates displays
     // directly (unlike the Linux portal), so this mirrors the Windows path:
     // stop capture+encoder, re-init capture on the new SCDisplay, rebuild the

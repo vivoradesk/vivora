@@ -29,6 +29,12 @@ public:
     void request_idr() override;
     vivora::VideoCodec actual_codec() const override { return codec_; }
 
+    // VIV-112: client-driven live codec switch.  Rebuilds the encoder session
+    // for the new codec (NVENC-CUDA and VAAPI both do H.264 + HEVC), reusing
+    // the same teardown/rebuild path as the lazy-encoder lifecycle; PipeWire
+    // capture is untouched.  Returns true if the encoder now produces `codec`.
+    bool set_codec(vivora::VideoCodec codec) override;
+
     // Phase B+ lazy encoder (VIV-12).  start_encoder() builds the VAAPI /
     // NVENC session from the cached capture geometry when the first viewer
     // attaches; stop_encoder() destroys it when the last viewer drops.

@@ -215,6 +215,31 @@ void MacHostPlatform::stop_encoder() {
     vivora::log::info("HOST", "Encoder stopped (no clients attached)");
 }
 
+bool MacHostPlatform::set_codec(vivora::VideoCodec codec) {
+    // VIV-112: client-driven codec switch.  start_encoder() reads codec_ when
+    // it builds the VideoToolbox session, so update it and rebuild if live.
+    // Runs on the host_loop thread alongside start/stop_encoder — no lock.
+    if (codec == codec_) return true;   // already there
+    // H.264 is 8-bit SDR only; downgrading it on an HDR capture yields wrong
+    // colours (mirrors the Windows FP16 guard).  Refuse and stay on HEVC.
+    if (codec == vivora::VideoCodec::H264 && capture_ && capture_->hdr_active()) {
+        vivora::log::warn("HOST",
+            "set_codec: refusing H.264 downgrade on HDR capture — keeping HEVC");
+        return false;
+    }
+    codec_ = codec;
+    if (!encoder_live_) return true;    // applied at next start_encoder()
+    stop_encoder();
+    if (!start_encoder()) {
+        vivora::log::error("HOST", "set_codec: encoder rebuild failed for %s",
+                           codec == vivora::VideoCodec::H264 ? "h264" : "hevc");
+        return false;
+    }
+    vivora::log::info("HOST", "Encoder switched to %s (VIV-112 negotiation)",
+                      codec == vivora::VideoCodec::H264 ? "h264" : "hevc");
+    return true;
+}
+
 std::vector<vivora::protocol::MonitorDesc> MacHostPlatform::list_monitors() {
     std::vector<vivora::protocol::MonitorDesc> out;
     for (const auto& d : vivora::host::MacScreenCapture::enumerate_displays()) {
