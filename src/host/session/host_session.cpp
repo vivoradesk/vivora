@@ -541,6 +541,21 @@ bool HostSession::probe_pending() const {
     return false;
 }
 
+bool HostSession::any_client_relayed() const {
+    // No relay binding → the host isn't forwarding through the relay at all.
+    if (!relay_active_) return false;
+    // The relay forwards each peer's inner payload verbatim (relay_server's
+    // DATA handler send_to's the decoded payload as-is), so a relay-reached
+    // client's packets arrive FROM the relay endpoint and it is keyed under
+    // relay_addr_ in clients_ — exactly the predicate transport_send() uses
+    // to decide whether to wrap a client's traffic in DBRL.  A real ip:port
+    // key is a direct-LAN peer and must NOT trigger the relay clamp.
+    for (const auto& [addr, client] : clients_) {
+        if (addr == relay_addr_) return true;
+    }
+    return false;
+}
+
 uint16_t HostSession::min_perf_target_fps(uint16_t cap) const {
     // `cap` is the host-configured framerate ceiling (VIV-67).  Starting
     // `lowest` at the cap means a client reporting more than the host is

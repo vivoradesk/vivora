@@ -272,6 +272,17 @@ public:
     // a hard clamp so a viewer can bound the stream it receives.
     uint32_t min_client_bitrate_cap_bps() const;
 
+    // VIV-114: true when at least one attached client is reached THROUGH
+    // the relay (its packets arrive via the relay conduit and it is keyed
+    // under the synthetic sentinel addr, not a real ip:port).  The host
+    // fans one encoded stream to all clients, so any relayed client means
+    // the shared stream traverses the free relay box — host_loop uses this
+    // to clamp the encoder to the conservative relay profile (wire budget +
+    // fps cap), decoupled from the P2P adaptive path.  A purely direct-LAN
+    // client returns false even when the host also happens to be relay-bound
+    // for other potential peers, so P2P sessions keep the full behaviour.
+    bool any_client_relayed() const;
+
     VideoSender* sender() { return sender_.get(); }
     AudioSender* audio_sender() { return audio_sender_.get(); }
 
