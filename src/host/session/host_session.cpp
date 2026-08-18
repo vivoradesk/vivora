@@ -687,6 +687,19 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
             }
             break;
         }
+        case protocol::PacketType::CodecRenegotiate:
+            // VIV-112 runtime fallback: the client's decoder couldn't init the
+            // negotiated codec.  Payload is its reduced decode-caps bitmask —
+            // adopt it and re-run negotiation; host_loop applies any resulting
+            // codec switch on its next tick (consume_codec_change).
+            if (payload_len >= 1) {
+                client->decode_caps = payload[0] ? payload[0] : CODEC_CAP_H264;
+                log::warn("HostSession",
+                          "Client reported decode failure — caps now 0x%02X, renegotiating",
+                          client->decode_caps);
+                recompute_negotiated_codec();
+            }
+            break;
         case protocol::PacketType::NackRequest:
             if (sender_ && payload_len >= 3) {
                 uint16_t seq = payload[0] | (payload[1] << 8);
@@ -840,7 +853,9 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     // Optional viewer device name (VIV-61): MAGIC(9) | port(2) | len(1) | name.
     // Self-asserted but integrity-protected by the Noise transcript — a
     // display hint for the approval prompt, as trustworthy as the static key.
+    // VIV-112 appends after the name:  caps_len(1) | caps(caps_len).
     std::string client_name;
+    uint8_t client_caps = CODEC_CAP_ALL_KNOWN;  // legacy client (no field) = both
     {
         const int name_off = static_cast<int>(sizeof(HELLO_MAGIC)) + 2;
         if (inner_len > name_off) {
@@ -849,13 +864,32 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
                 client_name.assign(reinterpret_cast<const char*>(inner + name_off + 1),
                                    static_cast<size_t>(nlen));
             }
+            // Codec-capability field sits right after the name bytes.
+            const int caps_off = name_off + 1 + (nlen > 0 ? nlen : 0);
+            if (caps_off < inner_len) {
+                const int caps_len = inner[caps_off];
+                if (caps_len >= 1 && caps_off + 1 + caps_len <= inner_len) {
+                    client_caps = inner[caps_off + 1];   // byte 0 of the bitmask
+                }
+            }
         }
     }
 
-    // Build msg2: HELLO_ACK || codec byte, encrypted inside the Noise frame.
+    // VIV-112 negotiate the codec for the ACK: intersect this client's decode
+    // caps with the codecs every already-connected client can decode, then pick
+    // the best the host can encode (capped at the configured preference codec_).
+    // The single shared encoder serves all clients, so the codec must be one
+    // they all decode.
+    uint8_t common_caps = client_caps;
+    for (const auto& kv : clients_)
+        if (kv.second.handshake_complete) common_caps &= kv.second.decode_caps;
+    const VideoCodec negotiated = choose_codec(common_caps, host_encode_caps_, configured_codec_);
+
+    // Build msg2: HELLO_ACK || negotiated codec byte, encrypted inside the
+    // Noise frame.  The client inits its decoder for whatever we advertise here.
     uint8_t ack_inner[32];
     std::memcpy(ack_inner, HELLO_ACK, sizeof(HELLO_ACK));
-    ack_inner[sizeof(HELLO_ACK)] = static_cast<uint8_t>(codec_);
+    ack_inner[sizeof(HELLO_ACK)] = static_cast<uint8_t>(negotiated);
     const size_t ack_inner_len = sizeof(HELLO_ACK) + 1;
 
     uint8_t msg2_wire[128];
@@ -893,6 +927,20 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     client.probe_bw_bps   = 0;
     client.probe_pending  = false;
     client.probe_scheduled = false;   // re-arm deferred probe on each HELLO
+    client.decode_caps    = client_caps;   // VIV-112
+
+    // VIV-112: flag host_loop to switch the live encoder if the negotiated
+    // codec differs from what it's currently producing (codec_ tracks the live
+    // encoder codec — host_loop calls set_codec() after it applies a switch).
+    // We advertised `negotiated` in the ACK above; make it real on the wire.
+    negotiated_codec_ = negotiated;
+    if (negotiated != codec_) {
+        codec_change_pending_ = true;
+        log::info("HostSession",
+                  "Codec negotiated to %s (client caps 0x%02X, was %s)",
+                  negotiated == VideoCodec::HEVC ? "HEVC" : "H.264",
+                  client_caps, codec_ == VideoCodec::HEVC ? "HEVC" : "H.264");
+    }
 
     // Seed the idle timer at handshake completion.  Without this a
     // client that connects and never sends any input (looks at a static
@@ -977,6 +1025,24 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
         (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
         (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port,
         clients_.size());
+}
+
+void HostSession::recompute_negotiated_codec() {
+    // AND the decode caps of every handshaked client — the shared encoder must
+    // produce a codec they can all decode.  No clients → assume full caps.
+    uint8_t common = CODEC_CAP_ALL_KNOWN;
+    bool any = false;
+    for (const auto& kv : clients_) {
+        if (kv.second.handshake_complete) { common &= kv.second.decode_caps; any = true; }
+    }
+    if (!any) return;
+    const VideoCodec negotiated = choose_codec(common, host_encode_caps_, configured_codec_);
+    negotiated_codec_ = negotiated;
+    if (negotiated != codec_) {
+        codec_change_pending_ = true;
+        log::info("HostSession", "Renegotiated codec to %s (common caps 0x%02X)",
+                  negotiated == VideoCodec::HEVC ? "HEVC" : "H.264", common);
+    }
 }
 
 void HostSession::handle_pong(const uint8_t* payload, size_t len,

@@ -1151,8 +1151,12 @@ void ClientSession::send_hello() {
     }
     handshake_complete_ = false;
 
-    // Inner payload: HELLO_MAGIC | audio port (2) | name len (1) | device name.
-    // The name (VIV-61) lets the host label the approval prompt.
+    // Inner payload (all fields optional/length-tolerant so older/newer peers
+    // interoperate — an absent tail field = "legacy default"):
+    //   HELLO_MAGIC(9) | audio_port(2) | name_len(1) | name(name_len)
+    //                  | caps_len(1)   | caps(caps_len)         <- VIV-112
+    // The name (VIV-61) lets the host label the approval prompt; the codec
+    // capability field (VIV-112) tells the host which codecs we can decode.
     uint8_t inner[96];
     std::memcpy(inner, HELLO_MAGIC, sizeof(HELLO_MAGIC));
     inner[sizeof(HELLO_MAGIC)]     = static_cast<uint8_t>(audio_local_port_ & 0xFF);
@@ -1162,6 +1166,14 @@ void ClientSession::send_hello() {
     const uint8_t nlen = static_cast<uint8_t>(dn.size());   // already <= 63
     inner[inner_len++] = nlen;
     if (nlen) { std::memcpy(inner + inner_len, dn.data(), nlen); inner_len += nlen; }
+
+    // VIV-112 codec-capability field: caps_len(1) | caps bytes.  A single
+    // little-endian bitmask byte today (VideoCodecCaps); the length prefix lets
+    // it grow (more codecs → more bits/bytes) without another wire revision.
+    // A legacy host stops after the name and never reads these bytes; a legacy
+    // client omits them entirely, which the host reads as "no caps → dictate".
+    inner[inner_len++] = 1;                                   // caps_len
+    inner[inner_len++] = decode_caps_;                        // caps[0]
 
     uint8_t msg1[256];
     size_t msg1_len = handshake_.write_message(inner, inner_len,
@@ -1179,6 +1191,36 @@ void ClientSession::send_hello() {
     auto wire = hello.serialize();
     transport_send(wire.data(), wire.size());
     last_hello_time_ = Clock::now();
+}
+
+VideoCodec ClientSession::request_codec_downgrade() {
+    // The decoder couldn't initialise for host_codec_ at runtime.  Drop that
+    // codec from our advertised caps and tell the host to renegotiate down; it
+    // re-picks from the intersection (which now excludes the failed codec) and
+    // switches its live encoder.  We also pin host_codec_ to H.264 locally so
+    // the view retries decoder init with a codec every client can decode — even
+    // if the CodecRenegotiate packet is lost, or the host is too old to honour
+    // it, the client will at least try H.264.
+    decode_caps_ &= ~codec_cap_bit(host_codec_);
+    if (decode_caps_ == 0) decode_caps_ = CODEC_CAP_H264;  // never advertise nothing
+    log::warn("ClientSession",
+              "Decoder init failed for %s — requesting host downgrade (caps now 0x%02X)",
+              host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264", decode_caps_);
+
+    host_codec_ = VideoCodec::H264;
+
+    if (state_ == SessionState::Connected && socket_) {
+        protocol::Packet pkt;
+        pkt.header.type = protocol::PacketType::CodecRenegotiate;
+        pkt.header.seq_no = 0;
+        pkt.header.timestamp = 0;
+        pkt.header.flags = 0;
+        pkt.payload.assign(1, decode_caps_);
+        pkt.header.payload_len = 1;
+        auto wire = pkt.serialize();
+        send_sealed(wire);
+    }
+    return host_codec_;
 }
 
 void ClientSession::send_input(const protocol::InputEvent& event) {

@@ -50,6 +50,15 @@ struct HostPlatform {
     // H.264 and using HEVC instead).  Defaults to HEVC.
     virtual VideoCodec actual_codec() const { return VideoCodec::HEVC; }
 
+    // VIV-112: switch the encoder to `codec` live (client-driven negotiation /
+    // runtime fallback).  Rebuilds the encoder session, analogous to
+    // select_monitor() rebuilding it for a new resolution.  Returns true if the
+    // encoder now produces `codec` (or already did).  Default returns false =
+    // "this platform can't switch codec live" — host_loop then keeps streaming
+    // its configured codec and the client's runtime fallback handles the gap.
+    // Platforms wire this as the capability lands (Windows/DXGI first).
+    virtual bool set_codec(VideoCodec /*codec*/) { return false; }
+
     // Capture + encode one frame.  Returns true if a frame was captured
     // (even if encoding produced no output yet).  pts_us receives the
     // presentation timestamp in microseconds.

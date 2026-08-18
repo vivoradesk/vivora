@@ -28,6 +28,7 @@ public:
     void set_bitrate(uint32_t bps) override;
     void request_idr() override;
     vivora::VideoCodec actual_codec() const override;
+    bool set_codec(vivora::VideoCodec codec) override;
 
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
     bool select_monitor(uint32_t index, bool seed_cursor = true) override;

@@ -32,6 +32,12 @@ enum class PacketType : uint8_t {
                                 // (DisconnectReason).  Suppresses the client's
                                 // auto-reconnect — unlike a silent link drop,
                                 // this says "do not come back" (VIV-52).
+    CodecRenegotiate   = 0x1C,  // Client → host: the client could not decode the
+                                // negotiated codec at runtime — renegotiate down
+                                // (VIV-112).  Payload is a single VideoCodecCaps
+                                // byte: the codecs the client can still decode.
+                                // The host re-picks from the intersection and
+                                // switches its live encoder.
 };
 
 // Reason carried in a Disconnect packet's single-byte payload.  Lets the
