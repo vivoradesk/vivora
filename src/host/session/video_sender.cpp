@@ -198,7 +198,14 @@ void VideoSender::prepare_frame_interleaved(const uint8_t* data, size_t data_len
         // Distribute the remainder across the first groups so sizes differ by ≤1.
         const int K = (N - idx) / (G - g);
         int M = (K * pct + 99) / 100;    // ceil(K * pct / 100)
-        if (M < 1) M = 1;
+        // VIV-88: the percentage collapses on tiny groups.  A near-idle desktop
+        // encodes 2-3 packet frames, which stay one group (below MIN_GROUP_K),
+        // and ceil(2 * 46%) = 1 — a single lost packet then kills the frame
+        // while the loss EWMA reads 10%.  Parity is cheapest exactly there (the
+        // whole frame is a couple of KB), so give every group a small absolute
+        // floor rather than trusting the ratio.  Only bites at K <= 4; a normal
+        // K=8 group already gets 2 at the ladder's 25% rung.
+        if (M < MIN_PARITY_SHARDS) M = MIN_PARITY_SHARDS;
         if (K + M > 255) M = 255 - K;
         fec_encoder_.set_group_size(static_cast<uint8_t>(K));
         fec_encoder_.set_parity_count(static_cast<uint8_t>(M));
