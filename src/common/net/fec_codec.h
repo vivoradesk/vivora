@@ -100,6 +100,41 @@ public:
     uint64_t total_recovered() const { return total_recovered_; }
     uint64_t total_failed()    const { return total_failed_; }
 
+    // VIV-88: collect the wire keys of data shards belonging to groups that are
+    // within MAX_RESCUE_SHORTFALL shards of recovering, so the caller can ask
+    // the host to retransmit exactly those.  Reed-Solomon resolves a group as
+    // soon as ANY k of its k+m shards arrive, so a group short by n is saved by
+    // any n shards — and measurement (fec_test's rescue-headroom harness) shows
+    // ~86% of failing groups are short by exactly one, i.e. one retransmit turns
+    // a dropped frame (drop-to-keyframe → visible freeze) into a clean recovery.
+    //
+    // Deliberately narrow, because the VIV-82 attempt at this (604971a, reverted
+    // in 0fd5c98) NACKed every missing shard of every unresolved group with no
+    // grace window and drowned the link at startup:
+    //   * only groups whose parity header has arrived (we know the key layout)
+    //     and that are still unresolved;
+    //   * only groups short by 1..MAX_RESCUE_SHORTFALL — a group missing more is
+    //     both unlikely to be saved cheaply and a sign of a burst that
+    //     retransmission can't fix;
+    //   * only after `grace_ms` since the group's parity arrived, so packets
+    //     merely reordered or still in flight are never NACKed;
+    //   * at most one request per group per `rl_ms`;
+    //   * at most `max_keys` keys per call, well inside the host's retransmit
+    //     budget so this never crowds out the frame-assembler NACKs.
+    void collect_rescue_keys(std::vector<uint32_t>& out, int64_t grace_ms,
+                             int64_t rl_ms, size_t max_keys);
+
+    // VIV-88: how long a near-complete group is held open waiting for the
+    // shard a rescue NACK asked for, before it is declared failed and the
+    // keyframe path takes over.  tick() would otherwise bury such a group on
+    // the very next poll, i.e. milliseconds after the loss and long before any
+    // retransmit could land — the rescue NACK only means anything with this.
+    // 0 (the default) restores the original fail-immediately behaviour, so a
+    // caller that doesn't send rescue NACKs is unaffected.  Callers should size
+    // it off RTT: the retransmit costs one round trip, and holding longer than
+    // that only delays the keyframe recovery for groups that won't be saved.
+    void set_rescue_window_ms(int64_t ms) { rescue_window_ms_ = ms; }
+
     // Drop all state — call after an IDR / stream reset so stale groups
     // and old ring entries don't match against the fresh packet stream.
     // Also guards against 16-bit group_id_ wraparound on very long
@@ -128,6 +163,14 @@ private:
         // missing_data==0 shortcut and the later decode path double-counting
         // if they ever overlap for the same group.
         bool     loss_counted = false;
+        // VIV-88 targeted rescue.  first_seen_ms is stamped when the group's
+        // parity header arrives — with the production transmit order that is
+        // the frame's tail, so by then every data shard of the group has either
+        // landed or been lost.  It gates the rescue NACK behind a grace window
+        // so we never ask for packets still in flight (the failure mode that
+        // sank the VIV-82 attempt).  last_nack_ms rate-limits per group.
+        int64_t  first_seen_ms = 0;
+        int64_t  last_nack_ms  = 0;
     };
 
     void populate_group_from_ring(FecGroup& group);
@@ -166,6 +209,13 @@ private:
     uint64_t total_recovered_ = 0;
     uint64_t total_failed_    = 0;
     static constexpr size_t MAX_GROUPS = 64;
+    // VIV-88: how far short a group may be and still be worth a targeted
+    // retransmit.  Measured on the production geometry, ~86% of failing groups
+    // are short by exactly 1 and 99% of lost frames are covered at 2; past that
+    // the loss is a burst wide enough that retransmission can't rescue the
+    // frame in time and the keyframe path is the honest answer.
+    static constexpr int MAX_RESCUE_SHORTFALL = 2;
+    int64_t rescue_window_ms_ = 0;   // 0 = disabled (see set_rescue_window_ms)
 };
 
 } // namespace vivora::net

@@ -74,6 +74,22 @@ void ClientSession::set_relay_license(const uint8_t token[95]) {
 }
 
 bool ClientSession::start(const char* host_ip, uint16_t port) {
+    // Test hooks (VIV-88) — see the member declarations.  Read once per
+    // session so a run's behaviour can't change under it mid-stream.
+    if (const char* e = std::getenv("VIVORA_SIM_LOSS")) {
+        sim_loss_pct_ = std::atoi(e);
+        if (sim_loss_pct_ < 0)  sim_loss_pct_ = 0;
+        if (sim_loss_pct_ > 99) sim_loss_pct_ = 99;
+        if (sim_loss_pct_ > 0)
+            log::warn("ClientSession",
+                      "VIVORA_SIM_LOSS=%d%% — discarding video packets on purpose",
+                      sim_loss_pct_);
+    }
+    if (const char* e = std::getenv("VIVORA_FEC_RESCUE")) {
+        fec_rescue_enabled_ = (std::atoi(e) != 0);
+        if (!fec_rescue_enabled_)
+            log::warn("ClientSession", "VIVORA_FEC_RESCUE=0 — targeted FEC rescue disabled");
+    }
     // Remember the target so a reconnect can re-run establish() without the
     // caller re-supplying it (VIV-54).
     host_ip_ = host_ip ? host_ip : "";
@@ -726,6 +742,20 @@ void ClientSession::poll() {
         }
 
         if (receiver_) {
+            // VIV-88: hold near-complete groups open just long enough for a
+            // rescued shard to make the round trip, then let them fail into the
+            // keyframe path as before.  Sized off RTT — a retransmit costs one
+            // round trip, and waiting longer only delays recovery for the
+            // groups that won't be saved.  Clamped so a wild RTT sample can
+            // neither disable the rescue nor stall the stream.
+            if (fec_rescue_enabled_) {
+                const int64_t rtt = rtt_ms_ > 0 ? static_cast<int64_t>(rtt_ms_) : 20;
+                int64_t window = rtt * 5 / 2;
+                if (window < 25) window = 25;
+                if (window > 90) window = 90;
+                receiver_->set_fec_rescue_window_ms(window);
+            }
+
             // FEC recovery FIRST: recover lost packets before NACK fires.
             // The recv loop above already drained all buffered packets, so
             // any FEC group still missing exactly 1 packet = true loss.
@@ -755,6 +785,54 @@ void ClientSession::poll() {
             for (const auto& b : batches) {
                 send_nack(b.seq_no, b.frag_indices.data(), b.frag_indices.size());
             }
+
+            // VIV-88 targeted FEC rescue.  The assembler NACK above only sees
+            // frames that already have a fragment in hand; a burst that takes a
+            // whole FEC group leaves nothing to notice, and the group then fails
+            // one or two shards short — measured at ~86% short by exactly one —
+            // costing a dropped frame, a drop-to-keyframe and a visible freeze.
+            // Ask for precisely those missing shards instead.
+            //
+            // The grace window is what makes this safe where the VIV-82 attempt
+            // was not: a group is only chased once its parity has been in hand
+            // for a full RTT, by which point anything merely reordered or still
+            // in flight has landed.  The budget is deliberately small (8 keys)
+            // so rescue traffic can never crowd out the assembler's NACKs
+            // against the host's per-poll retransmit budget, nor inflate the
+            // retx ratio the bitrate controller reads as congestion.
+            const int64_t grace_ms = rtt_ms_ > 0
+                ? std::max<int64_t>(10, static_cast<int64_t>(rtt_ms_))
+                : 20;
+            rescue_keys_scratch_.clear();
+            if (fec_rescue_enabled_)
+                receiver_->collect_rescue_keys(rescue_keys_scratch_, grace_ms, rl_ms,
+                                               MAX_RESCUE_KEYS_PER_POLL);
+            if (!rescue_keys_scratch_.empty()) {
+                // Don't ask twice for a fragment the assembler just requested.
+                for (const auto& b : batches)
+                    for (uint16_t fi : b.frag_indices)
+                        rescue_keys_scratch_.erase(
+                            std::remove(rescue_keys_scratch_.begin(),
+                                        rescue_keys_scratch_.end(),
+                                        (static_cast<uint32_t>(b.seq_no) << 16) | fi),
+                            rescue_keys_scratch_.end());
+                // Wire format is per-frame, so group the keys by their seq.
+                std::sort(rescue_keys_scratch_.begin(), rescue_keys_scratch_.end());
+                std::vector<uint16_t> frags;
+                size_t i = 0;
+                while (i < rescue_keys_scratch_.size()) {
+                    const uint16_t seq =
+                        static_cast<uint16_t>(rescue_keys_scratch_[i] >> 16);
+                    frags.clear();
+                    while (i < rescue_keys_scratch_.size()
+                           && static_cast<uint16_t>(rescue_keys_scratch_[i] >> 16) == seq) {
+                        frags.push_back(static_cast<uint16_t>(rescue_keys_scratch_[i] & 0xFFFF));
+                        ++i;
+                    }
+                    send_nack(seq, frags.data(), frags.size());
+                    fec_rescue_requests_ += frags.size();
+                }
+            }
         }
 
         // Periodic FEC loss report — host uses this to adapt FEC group size K.
@@ -763,6 +841,17 @@ void ClientSession::poll() {
                 now - last_fec_report_time_).count();
             if (since_report >= FEC_REPORT_INTERVAL_MS) {
                 send_fec_report();
+                // VIV-88 diagnostics: how much rescue traffic we're generating
+                // and what the FEC layer still lost, so a rig run can be judged
+                // without guessing.  Only interesting once something is lost.
+                if (receiver_ && (fec_rescue_requests_ > 0 || sim_loss_dropped_ > 0)) {
+                    log::info("ClientSession",
+                              "FEC: recovered=%llu failed=%llu rescue_asked=%llu%s",
+                              static_cast<unsigned long long>(receiver_->fec_recovered()),
+                              static_cast<unsigned long long>(receiver_->fec_failed()),
+                              static_cast<unsigned long long>(fec_rescue_requests_),
+                              sim_loss_pct_ > 0 ? " (VIVORA_SIM_LOSS active)" : "");
+                }
                 last_fec_report_time_ = now;
             }
         }
@@ -926,6 +1015,16 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
             }
             break;
         case protocol::PacketType::Video: {
+            // Test hook (VIV-88): VIVORA_SIM_LOSS=<percent> discards that share
+            // of arriving video packets, so the FEC / NACK / rescue path can be
+            // exercised deterministically on a loopback rig — real loss needs a
+            // WiFi link or privileged tc/netem.  Retransmits are subject to the
+            // same dice, as they would be on a real lossy link.
+            if (sim_loss_pct_ > 0
+                && static_cast<int>(sim_loss_rng_() % 100) < sim_loss_pct_) {
+                ++sim_loss_dropped_;
+                break;
+            }
             // Feed plaintext wire bytes through FEC decoder → assembler.
             // FEC decoder consumes FLAG_FEC parity packets internally and
             // emits recovered data wires for the assembler.
