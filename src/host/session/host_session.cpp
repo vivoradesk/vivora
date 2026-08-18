@@ -883,7 +883,7 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     uint8_t common_caps = client_caps;
     for (const auto& kv : clients_)
         if (kv.second.handshake_complete) common_caps &= kv.second.decode_caps;
-    const VideoCodec negotiated = choose_codec(common_caps, host_encode_caps_, codec_);
+    const VideoCodec negotiated = choose_codec(common_caps, host_encode_caps_, configured_codec_);
 
     // Build msg2: HELLO_ACK || negotiated codec byte, encrypted inside the
     // Noise frame.  The client inits its decoder for whatever we advertise here.
@@ -1036,7 +1036,7 @@ void HostSession::recompute_negotiated_codec() {
         if (kv.second.handshake_complete) { common &= kv.second.decode_caps; any = true; }
     }
     if (!any) return;
-    const VideoCodec negotiated = choose_codec(common, host_encode_caps_, codec_);
+    const VideoCodec negotiated = choose_codec(common, host_encode_caps_, configured_codec_);
     negotiated_codec_ = negotiated;
     if (negotiated != codec_) {
         codec_change_pending_ = true;

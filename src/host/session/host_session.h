@@ -165,9 +165,18 @@ public:
     // self-host instances.
     void set_relay_license(const uint8_t token[95]);
 
-    // Advertise which codec the host is encoding in.  Sent to the client
-    // in HELLO_ACK so it can initialise the matching decoder.
+    // Advertise which codec the host is encoding in RIGHT NOW.  Sent to the
+    // client in HELLO_ACK so it can initialise the matching decoder.  host_loop
+    // calls this after a live encoder switch so codec_ tracks the wire codec.
+    // It intentionally does NOT touch configured_codec_ — a runtime downgrade
+    // must not lower the negotiation ceiling for future clients.
     void set_codec(VideoCodec codec) { codec_ = codec; }
+
+    // Seed the configured codec PREFERENCE/CEILING (host --codec / GUI setting)
+    // once at startup.  choose_codec() is capped at this, never at the live
+    // codec_ — otherwise a single H.264-only client would permanently pin the
+    // host to H.264 (VIV-112).  Also seeds the live codec_ to the same value.
+    void set_configured_codec(VideoCodec codec) { configured_codec_ = codec; codec_ = codec; }
 
     // VIV-53 per-client approval gate.  When set, every new client
     // that completes handshake lands in Pending state — HostSession
@@ -448,11 +457,18 @@ private:
     // monotonic clock domain.  Default-constructed value means "no
     // input yet this session".  Updated in handle_input.
     TimePoint last_input_time_{};
-    // Configured codec (host --codec / GUI setting).  With VIV-112 this is a
-    // PREFERENCE/CEILING, not an absolute dictate: negotiate_codec() may
-    // downgrade it for a client that can't decode it, but never upgrades above
-    // it.  set_codec() (host_loop, from platform.actual_codec()) seeds it.
+    // The codec the live encoder is CURRENTLY producing (advertised in
+    // HELLO_ACK).  Seeded at startup and updated by set_codec() after each
+    // live switch.  choose_codec() compares its result against this to decide
+    // whether an encoder rebuild is needed — it is NOT the negotiation ceiling.
     VideoCodec codec_ = VideoCodec::HEVC;
+    // Configured codec PREFERENCE/CEILING (host --codec / GUI setting), seeded
+    // once via set_configured_codec() and never mutated by a runtime downgrade.
+    // With VIV-112 this is the ceiling choose_codec() honours: negotiation may
+    // downgrade below it for a client that can't decode it, but never upgrades
+    // above it — and, crucially, a downgrade for one client does not lower it
+    // for the next (which keying the ceiling on the live codec_ would).
+    VideoCodec configured_codec_ = VideoCodec::HEVC;
     // Which codecs THIS host can actually encode (VideoCodecCaps).  Our
     // encoders (NVENC/AMF/QSV/VAAPI/VTB) all do H.264 + HEVC, so both by
     // default; the intersection with the client's decode caps drives selection.
