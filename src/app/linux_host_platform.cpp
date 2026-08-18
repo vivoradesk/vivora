@@ -146,6 +146,32 @@ void LinuxHostPlatform::stop_encoder() {
     vivora::log::info("HOST", "Encoder stopped (no clients attached)");
 }
 
+bool LinuxHostPlatform::set_codec(vivora::VideoCodec codec) {
+    // VIV-112: client-driven codec switch.  start_encoder() reads codec_ when
+    // it builds enc_, so update it, then rebuild if the encoder is live.  Both
+    // set_codec() and start_encoder()/stop_encoder() run on the host_loop
+    // thread, so codec_ needs no lock here; enc_ liveness is checked under
+    // enc_mu_ (the PipeWire callback also touches enc_) and the lock is dropped
+    // before stop/start, which take enc_mu_ themselves (non-recursive).
+    if (codec == codec_) return true;   // already there
+    bool live;
+    {
+        std::lock_guard<std::mutex> lk(enc_mu_);
+        live = (enc_ != nullptr);
+    }
+    codec_ = codec;
+    if (!live) return true;             // takes effect at next start_encoder()
+    stop_encoder();
+    if (!start_encoder()) {
+        vivora::log::error("HOST", "set_codec: Linux encoder rebuild failed for %s",
+                           codec == vivora::VideoCodec::HEVC ? "hevc" : "h264");
+        return false;
+    }
+    vivora::log::info("HOST", "Encoder switched to %s (VIV-112 negotiation)",
+                      codec == vivora::VideoCodec::HEVC ? "hevc" : "h264");
+    return true;
+}
+
 void LinuxHostPlatform::on_pw_frame(const vivora::host::PipeWireCapture::Frame& f) {
     // First frame: latch capture geometry and unblock init().  Encoder
     // creation is decoupled from this (VIV-12 lazy encoder): it happens in
