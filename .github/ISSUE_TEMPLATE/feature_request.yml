@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something Vivora should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, not the solution. "I share a machine with two monitors
+        and have to walk over to switch" tells us more than "add a hotkey".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. If you already know the shape of the fix, say so.
+
+  - type: dropdown
+    id: latency
+    attributes:
+      label: Would this add work to the per-frame path
+      description: >
+        Vivora's whole design is a latency budget. If the answer is yes or you
+        are unsure, say so -- it changes how the idea gets evaluated, it does
+        not disqualify it.
+      options:
+        - "No -- it's UI, packaging, or a one-off operation"
+        - "Yes, or possibly"
+        - "Not sure"
+    validations:
+      required: true

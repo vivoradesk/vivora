@@ -9,7 +9,7 @@ Vivora is an open-source, low-latency remote desktop application. The goal is Pa
 ## Build System
 
 - **Build tool:** CMake
-- **Dependencies:** Qt 6.5+, NVIDIA Video Codec SDK, FFmpeg (libavcodec, libavutil), Opus, libsodium
+- **Dependencies:** Qt 6.5+ (built against 6.8/6.9), NVIDIA Video Codec SDK, FFmpeg (libavcodec, libavutil, libswscale), Opus, Monocypher (vendored)
 - **Optional deps:** AMD AMF SDK, Intel oneVPL, x264
 - **Target platforms (MVP):** Windows host + client, macOS host + client, Linux host + client
 
@@ -31,10 +31,10 @@ A single `vivora` executable that runs in either host or client mode (selected a
 **Network protocol:** Custom UDP (not TCP, not WebRTC). Four channels:
 - Video: unreliable UDP + FEC (lost frames are skipped, not retransmitted)
 - Audio: semi-reliable UDP (Opus codec, 20-40ms jitter buffer)
-- Input: reliable UDP with lightweight ACK mechanism (separate from video)
-- Control: TCP for handshake, auth, clipboard, file transfer
+- Input: its own datagrams so a video burst never delays a keystroke.  Note the ACK/retransmit in the original design was never built -- input is fire-and-forget today (VIV-97)
+- Control: UDP for handshake, auth, clipboard, monitor switching (the original TCP design was dropped -- everything rides the one UDP socket)
 
-**Encryption:** Noise Protocol (pattern NK) for all channels via libsodium. Curve25519 key exchange + ChaCha20-Poly1305 symmetric. Host's public key is its identity (shown as QR / paste on first connect, TOFU).
+**Encryption:** Noise Protocol (pattern IK) for all channels via Monocypher. Curve25519 key exchange + ChaCha20-Poly1305 symmetric. Host's public key is its identity (shown as a peer code on first connect, TOFU). IK rather than NK so the host also learns the client's static key.
 
 ## Source Layout
 
@@ -56,7 +56,7 @@ tests/                # Unit tests and latency benchmarks
 - **Every module must log its latency** (capture_time, encode_time, network_rtt, decode_time, render_time) for profiling.
 - Code comments in English. Git commits in English using conventional commits format.
 - Write tests for the protocol layer first -- it's the most critical shared component.
-- Current phase is **Phase 1 (Proof of Concept):** get a 1080p60 video stream working over LAN with DXGI capture, NVENC encoding, basic UDP transport, D3D11VA decoding, and basic mouse+keyboard input. Direct IP:port connection, no NAT traversal yet.
+- Current phase is **0.1 release**: Windows and Linux binaries, packaging and CI. See `STATUS.md` for the per-platform state and `docs/ARCHITECTURE.md` for how the pipeline fits together.
 
 ## Packet Header Format
 

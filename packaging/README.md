@@ -1,22 +1,27 @@
 # Packaging — Vivora
 
-Templates and identity files for OS-specific bundling.  Wired into the
-build when each platform's GUI installer flow lands (see Phase 5 of the
-DeskBeam → Vivora rename checklist).  Today the GUI binary is `vivora`
-on all platforms but only the Windows GUI is fully bootstrapped; macOS
-and Linux still ship the CLI.
+Templates and identity files for OS-specific bundling.  The GUI binary is
+`vivora` on all three platforms and all three are bootstrapped; what
+differs is distribution.  Windows and Linux get published artefacts
+(installer / portable zip / AppImage); macOS builds from source until the
+signing certificate is in place.
 
 ## Layout
 
 ```
 packaging/
 ├── macos/
-│   └── Info.plist.in              configure_file()'d into Vivora.app
+│   └── Info.plist.in                 configure_file()'d into Vivora.app
 ├── linux/
-│   ├── vivora.desktop.in          (configure_file: writes vivora.desktop)
-│   └── dev.vivora.app.metainfo.xml  AppStream metainfo for Flathub etc.
+│   ├── vivora.desktop.in             installed as dev.vivora.app.desktop
+│   ├── dev.vivora.app.metainfo.xml   AppStream metainfo (Flathub, GNOME
+│   │                                 Software).  Its <releases> block must
+│   │                                 be updated on every release.
+│   └── 60-vivora-uinput.rules        udev rule granting the "input" group
+│                                     access to /dev/uinput, without which a
+│                                     Linux host cannot inject remote input
 └── windows/
-    └── vivora.exe.manifest        embedded via .rc once installer flow lands
+    └── vivora.exe.manifest           embedded via .rc once installer flow lands
 ```
 
 ## Reverse-DNS app id

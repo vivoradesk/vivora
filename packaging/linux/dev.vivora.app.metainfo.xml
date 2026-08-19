@@ -27,7 +27,10 @@
 
     <url type="homepage">https://vivora.dev</url>
     <url type="bugtracker">https://github.com/vivoradesk/vivora/issues</url>
-    <url type="vcs-browser">https://github.com/vivoradesk/vivora</url>
+    <!-- "help" rather than "vcs-browser": the latter is only accepted by
+         appstreamcli >= 0.16, and this file has to validate on the oldest
+         distribution we build against. -->
+    <url type="help">https://github.com/vivoradesk/vivora#readme</url>
 
     <developer_name>Vivora Contributors</developer_name>
 
@@ -39,6 +42,19 @@
         <category>Network</category>
         <category>RemoteAccess</category>
     </categories>
+
+    <!-- Keep this in step with CMakeLists.txt project(VERSION) on every
+         release: appstreamcli warns without it and GNOME Software / KDE
+         Discover show no changelog at all.  The date is the publication
+         date, not the date the branch was cut. -->
+    <releases>
+        <release version="0.1.0" date="2026-08-19">
+            <url type="details">https://github.com/vivoradesk/vivora/releases/tag/v0.1.0</url>
+            <description>
+                <p>First public release.</p>
+            </description>
+        </release>
+    </releases>
 
     <content_rating type="oars-1.1"/>
 </component>
