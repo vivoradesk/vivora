@@ -10,8 +10,14 @@
 
 #include <mutex>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 
 namespace vivora::host {
+
+// VIV-95: identity tag for the control queue (see Impl::alive / stop()).
+static const void* const kControlQueueKey = &kControlQueueKey;
+
 
 namespace {
 constexpr const char* TAG = "MAC_CAPTURE";
@@ -162,6 +168,16 @@ struct MacScreenCapture::Impl {
     dispatch_queue_t control_q = nullptr;
     int restart_attempt = 0;
 
+    // VIV-95: liveness token for work already queued on control_q.
+    // schedule_restart_retry() arms a dispatch_after that cannot be
+    // cancelled, and the wake observer fires on an arbitrary thread — both
+    // captured a raw `this`, so either could run after the capture object
+    // was destroyed and use it (crash on disconnect right after an SCK error
+    // or a system wake).  Blocks now capture a copy of this shared flag and
+    // check it before touching the object; stop() clears it.
+    std::shared_ptr<std::atomic<bool>> alive =
+        std::make_shared<std::atomic<bool>>(true);
+
     // NSWorkspace observer token for `removeObserver:` at shutdown.
     id wake_observer = nil;
 };
@@ -310,6 +326,11 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
 
     impl_->queue = dispatch_queue_create("dev.vivora.capture", DISPATCH_QUEUE_SERIAL);
     impl_->control_q = dispatch_queue_create("dev.vivora.capture.ctrl", DISPATCH_QUEUE_SERIAL);
+    // Tag control_q so stop() can tell whether it is already running on it and
+    // run its teardown inline instead of dispatch_sync-ing into itself (which
+    // would deadlock a serial queue).
+    dispatch_queue_set_specific(impl_->control_q, kControlQueueKey,
+                                impl_->control_q, nullptr);
 
     impl_->stream = [[SCStream alloc] initWithFilter:filter
                                         configuration:cfg
@@ -335,11 +356,13 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
     // stop event.  This observer triggers an explicit restart on every
     // wake so the user doesn't have to Stop/Start Sharing manually.
     MacScreenCapture* self_ptr = this;
+    auto alive_token = impl_->alive;   // VIV-95
     impl_->wake_observer = [[[NSWorkspace sharedWorkspace] notificationCenter]
         addObserverForName:NSWorkspaceDidWakeNotification
                     object:nil
                      queue:nil
                 usingBlock:^(NSNotification* /*note*/) {
+        if (!alive_token->load()) return;   // VIV-95
         log::info(TAG, "System wake — restarting SCStream");
         self_ptr->restart_stream();
     }];
@@ -353,7 +376,12 @@ bool MacScreenCapture::init(const MacCaptureConfig& config) {
 
 bool MacScreenCapture::restart_stream() {
     if (!impl_ || !impl_->control_q) return false;
+    if (!impl_->alive->load()) return false;
+    auto alive = impl_->alive;   // VIV-95: outlives `this`
     dispatch_async(impl_->control_q, ^{
+        // stop() may have run (and the object been destroyed) between the
+        // dispatch and now — the token is the only thing safe to read here.
+        if (!alive->load()) return;
         // Tear down the existing stream.  Stop is synchronous to make
         // sure the OS won't call back into the output we're about to
         // release.  3-second timeout covers a wedged stop callback.
@@ -449,8 +477,10 @@ void MacScreenCapture::schedule_restart_retry() {
     log::warn(TAG, "Scheduling SCStream restart retry #%d in %lldms",
               attempt, (long long)delay_ms);
     MacScreenCapture* self_ptr = this;
+    auto alive = impl_->alive;   // VIV-95: dispatch_after can't be cancelled
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
         impl_->control_q, ^{
+        if (!alive->load()) return;   // capture was stopped/destroyed meanwhile
         self_ptr->restart_stream();
     });
 }
@@ -477,18 +507,57 @@ bool MacScreenCapture::start() {
     return true;
 }
 
+uint32_t MacScreenCapture::display_id() const {
+    // SCDisplay carries the CGDirectDisplayID the stream is bound to.
+    return (impl_ && impl_->display) ? (uint32_t)impl_->display.displayID : 0;
+}
+
 void MacScreenCapture::stop() {
-    if (impl_ && impl_->stream) {
-        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-        [impl_->stream stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
-            dispatch_semaphore_signal(sem);
-        }];
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
-        [impl_->stream release];  impl_->stream = nil;
-        [impl_->output release];  impl_->output = nil;
-        [impl_->display release]; impl_->display = nil;
-        impl_->queue = nullptr;   // retained by OS until last use
+    if (!impl_) return;
+
+    // VIV-95: restart_stream() tears down and rebuilds stream/output on
+    // control_q.  stop() used to mutate the same pointers straight from the
+    // calling thread, so a disconnect landing on an SCK error or a system wake
+    // could double-release them (use-after-free crash).  Both paths now run on
+    // control_q, which serialises them.
+    //
+    // Clearing `alive` first means any restart already queued (including the
+    // uncancellable dispatch_after retry) turns into a no-op instead of
+    // rebuilding a stream we are about to drop.
+    impl_->alive->store(false);
+
+    auto teardown = ^{
+        if (impl_->stream) {
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            [impl_->stream stopCaptureWithCompletionHandler:^(NSError* /*e*/) {
+                dispatch_semaphore_signal(sem);
+            }];
+            // NB: the semaphore is deliberately not released.  If the wait
+            // times out and the completion handler fires afterwards it would
+            // signal freed memory — a crash traded for a one-off leak.  Same
+            // reasoning applies to the other timed waits in this file.
+            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+            [impl_->stream release];  impl_->stream = nil;
+        }
+        if (impl_->output)  { [impl_->output release];  impl_->output = nil; }
+        if (impl_->display) { [impl_->display release]; impl_->display = nil; }
+    };
+
+    // Already on control_q (a future caller inside a restart block): run
+    // inline — dispatch_sync onto our own serial queue would deadlock.
+    if (impl_->control_q && dispatch_get_specific(kControlQueueKey) == nullptr) {
+        dispatch_sync(impl_->control_q, teardown);
+    } else {
+        teardown();
     }
+
+    // VIV-95: the sample and control queues are dispatch_queue_create'd in a
+    // non-ARC file and were never released — one pair leaked per capture
+    // session.  Safe here because start() requires a live stream, so stop() is
+    // terminal for this object.  Released after the teardown above so nothing
+    // is still scheduled on them.
+    if (impl_->queue)     { dispatch_release(impl_->queue);     impl_->queue = nullptr; }
+    if (impl_->control_q) { dispatch_release(impl_->control_q); impl_->control_q = nullptr; }
 }
 
 CVPixelBufferRef MacScreenCapture::try_get_frame(uint64_t* out_pts_us) {

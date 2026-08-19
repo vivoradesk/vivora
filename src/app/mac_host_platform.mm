@@ -456,7 +456,23 @@ bool MacHostPlatform::get_cursor_state(CursorState& out) {
         // space used across the wire protocol.
         NSPoint p = [NSEvent mouseLocation];
 
-        NSScreen* screen = [NSScreen mainScreen];
+        // VIV-95: normalise against the display we are CAPTURING, not the
+        // main one.  On a multi-display Mac streaming a secondary screen these
+        // are different rectangles, so mainScreen's frame produced coordinates
+        // that saturated at an edge and the client's cursor stuck there.
+        // NSScreen carries the CGDirectDisplayID under NSScreenNumber, which is
+        // what the capture reports.
+        NSScreen* screen = nil;
+        const uint32_t want_id = capture_ ? capture_->display_id() : 0;
+        if (want_id != 0) {
+            for (NSScreen* s in [NSScreen screens]) {
+                NSNumber* n = s.deviceDescription[@"NSScreenNumber"];
+                if (n && (uint32_t)[n unsignedIntValue] == want_id) { screen = s; break; }
+            }
+        }
+        // No capture yet, or the display vanished (unplugged mid-session):
+        // mainScreen keeps the cursor roughly sane until capture rebuilds.
+        if (!screen) screen = [NSScreen mainScreen];
         if (!screen) return false;
         NSRect frame = screen.frame;
         if (frame.size.width <= 0 || frame.size.height <= 0) return false;

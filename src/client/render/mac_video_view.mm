@@ -12,6 +12,7 @@
 
 #include <vector>
 #include <functional>
+#include <atomic>
 #include <unordered_map>
 #include <cmath>
 
@@ -475,8 +476,15 @@ struct MacVideoViewImpl {
     std::vector<uint8_t> vps, sps, pps;
     bool have_params = false;
     uint64_t frames_submitted = 0;
-    uint32_t host_w = 0;
-    uint32_t host_h = 0;
+    // VIV-95: host_w/host_h are written by BOTH the decode thread (submit_frame
+    // adopts the SPS dimensions when the stream size wasn't known yet) and the
+    // main thread (set_stream_size from the StreamInfo message), and read on the
+    // main thread by normalize_mouse()/update_cursor_position().  A torn read
+    // there puts absolute mouse coordinates on the wrong scale — clicks land in
+    // the wrong place right after a monitor switch.  Atomic scalars keep the
+    // hot path lock-free.
+    std::atomic<uint32_t> host_w{0};
+    std::atomic<uint32_t> host_h{0};
     VideoCodec codec = VideoCodec::HEVC;
     // In-stream menu (VIV-74): aspect mode + hotkey toggle callback.
     bool keep_aspect = true;
@@ -486,7 +494,9 @@ struct MacVideoViewImpl {
     // function — surfaced through update_stats so the F9 HUD reports HDR.
     // Detected from kCMFormatDescriptionExtension_TransferFunction once
     // the CMVideoFormatDescription is created from VPS/SPS/PPS.
-    bool is_hdr = false;
+    // Written by the decode thread when the format description is built, read
+    // by the main thread in update_stats() for the F9 HUD (VIV-95).
+    std::atomic<bool> is_hdr{false};
 
     // Cursor cache: shape_id -> CGImage (+ owned backing BGRA buffer).
     std::unordered_map<uint32_t, CursorShapeEntry> cursor_shapes;
@@ -514,9 +524,9 @@ static void invoke_fullscreen_toggle(MacVideoViewImpl* impl) {
 static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
                             double vw, double vh, float* out_xn, float* out_yn) {
     float xn, yn;
-    if (impl && impl->host_w > 0 && impl->host_h > 0 && impl->keep_aspect) {
+    if (impl && impl->host_w.load() > 0 && impl->host_h.load() > 0 && impl->keep_aspect) {
         // AVLayerVideoGravityResizeAspect — fit preserving aspect ratio.
-        double host_aspect = (double)impl->host_w / (double)impl->host_h;
+        double host_aspect = (double)impl->host_w.load() / (double)impl->host_h.load();
         double view_aspect = vw / vh;
         double video_w, video_h, off_x, off_y;
         if (view_aspect > host_aspect) {
@@ -848,8 +858,8 @@ void MacVideoView::flush_decoder() {
 void MacVideoView::set_stream_size(uint32_t width, uint32_t height) {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
     if (!impl || width == 0 || height == 0) return;
-    impl->host_w = width;
-    impl->host_h = height;
+    impl->host_w.store(width);
+    impl->host_h.store(height);
 }
 
 void MacVideoView::update_stats(const StatsView& stats) {
@@ -858,7 +868,7 @@ void MacVideoView::update_stats(const StatsView& stats) {
     @autoreleasepool {
         // view_loop doesn't know HDR-ness — use the flag detected from the
         // active CMVideoFormatDescription's transfer function.
-        const bool hdr = impl->is_hdr;
+        const bool hdr = impl->is_hdr.load();
         NSString* txt = [NSString stringWithFormat:
             @"FPS:    %5.1f decoded / %5.1f arrived / target %u\n"
              "RTT:    %5.1f ms   Bitrate: %u (%u) kbps\n"
@@ -959,10 +969,10 @@ void MacVideoView::update_cursor_position(const protocol::CursorPositionMessage&
     const CGFloat view_w = impl->view.bounds.size.width;
     const CGFloat view_h = impl->view.bounds.size.height;
     if (view_w <= 0 || view_h <= 0) return;
-    if (impl->host_w == 0 || impl->host_h == 0) return;
+    if (impl->host_w.load() == 0 || impl->host_h.load() == 0) return;
 
     // Compute letterboxed/pillarboxed video rect (bottom-up coords).
-    const double host_ar = (double)impl->host_w / (double)impl->host_h;
+    const double host_ar = (double)impl->host_w.load() / (double)impl->host_h.load();
     const double view_ar = (double)view_w / (double)view_h;
     double video_w, video_h, off_x, off_y_bu;
     if (!impl->keep_aspect) {
@@ -981,8 +991,8 @@ void MacVideoView::update_cursor_position(const protocol::CursorPositionMessage&
     }
 
     // Cursor size in view space: preserve host-relative size.
-    const double cw = (double)entry.width  * video_w / (double)impl->host_w;
-    const double ch = (double)entry.height * video_h / (double)impl->host_h;
+    const double cw = (double)entry.width  * video_w / (double)impl->host_w.load();
+    const double ch = (double)entry.height * video_h / (double)impl->host_h.load();
     // Hotspot offset in view space.
     const double hsx = (double)entry.hotspot_x * cw / (double)entry.width;
     const double hsy = (double)entry.hotspot_y * ch / (double)entry.height;
@@ -1107,24 +1117,24 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
             impl->have_params = true;
             CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(impl->format_desc);
             // Respect stream-size override from set_stream_size() if already set.
-            if (impl->host_w == 0 || impl->host_h == 0) {
-                impl->host_w = static_cast<uint32_t>(dims.width);
-                impl->host_h = static_cast<uint32_t>(dims.height);
+            if (impl->host_w.load() == 0 || impl->host_h.load() == 0) {
+                impl->host_w.store(static_cast<uint32_t>(dims.width));
+                impl->host_h.store(static_cast<uint32_t>(dims.height));
             }
             // Detect HDR from the format description's transfer function.
             // PQ (SMPTE 2084) or HLG (Rec.2100) → treat as HDR for the HUD.
             CFStringRef tfn = (CFStringRef)CMFormatDescriptionGetExtension(
                 impl->format_desc, kCMFormatDescriptionExtension_TransferFunction);
-            impl->is_hdr = false;
+            impl->is_hdr.store(false);
             if (tfn) {
                 if (CFEqual(tfn, kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ) ||
                     CFEqual(tfn, kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG)) {
-                    impl->is_hdr = true;
+                    impl->is_hdr.store(true);
                 }
             }
             log::info(TAG, "%s format description ready: %dx%d%s",
                       is_hevc ? "HEVC" : "H264", dims.width, dims.height,
-                      impl->is_hdr ? " HDR" : "");
+                      impl->is_hdr.load() ? " HDR" : "");
             // Colour diagnostics (VIV-84): what CoreMedia extracted from the
             // SPS VUI.  The host encodes SDR as FULL-range (AMF
             // OUTPUT_FULL_RANGE_COLOR) — if the range flag doesn't survive to
@@ -1142,7 +1152,7 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
                 if (mat) CFStringGetCString(mat, mat_s, sizeof(mat_s), kCFStringEncodingUTF8);
                 log::info(TAG, "colour: full_range=%s primaries=%s matrix=%s tfn=%s",
                           fr ? (CFBooleanGetValue(fr) ? "yes" : "no") : "unset",
-                          pri_s, mat_s, impl->is_hdr ? "PQ/HLG" : "sdr/unset");
+                          pri_s, mat_s, impl->is_hdr.load() ? "PQ/HLG" : "sdr/unset");
             }
         }
     }

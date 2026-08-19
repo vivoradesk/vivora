@@ -47,6 +47,11 @@ public:
     bool start();
     void stop();
 
+    // CGDirectDisplayID of the display currently being captured (0 when no
+    // stream is live).  VIV-95: the host needs it to normalise cursor
+    // coordinates against the captured screen rather than the main one.
+    uint32_t display_id() const;
+
     // Try to get the most recent captured frame. Returns nullptr if no new frame
     // has arrived since the last call. The caller owns the returned reference
     // and must CFRelease() it when done.
