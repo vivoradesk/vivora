@@ -29,6 +29,13 @@ set(VIVORA_ARTEFACT_BASENAME
 if(APPLE)
     enable_language(OBJCXX)
 endif()
+if(MSVC)
+    # Needed for the VERSIONINFO / icon resource in src/app.  The Visual Studio
+    # generator infers RC on its own; Ninja does not.
+    enable_language(RC)
+endif()
+
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,6 +53,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Options
 option(VIVORA_BUILD_TESTS "Build tests" ON)
+# The servers and the cross-platform test suite depend on nothing but
+# vivora_common, so they can be built without Qt, ffmpeg or PipeWire present.
+# CI leans on this: the fast gate needs one apt package instead of a Qt build.
+option(VIVORA_BUILD_APP   "Build the Qt GUI/CLI application" ON)
 
 # Platform detection
 if(WIN32)
@@ -59,6 +70,11 @@ endif()
 # App version string exposed to C++ (e.g. the update check, VIV-69).
 add_compile_definitions(VIVORA_VERSION="${PROJECT_VERSION}")
 
+# Packaging scripts read this instead of re-deriving the version themselves,
+# so CMake stays the single source of truth for what an artefact is called.
+configure_file(${CMAKE_SOURCE_DIR}/packaging/artefact.env.in
+               ${CMAKE_BINARY_DIR}/artefact.env @ONLY)
+
 # Third-party dependencies (audio: libopus + speex resampler)
 add_subdirectory(third_party)
 
@@ -66,7 +82,9 @@ add_subdirectory(third_party)
 add_subdirectory(src/common)
 
 # Main application (single binary: host + client)
-add_subdirectory(src/app)
+if(VIVORA_BUILD_APP)
+    add_subdirectory(src/app)
+endif()
 
 # Standalone rendezvous + relay servers (no Qt, no media — just signalling).
 add_subdirectory(src/relay)

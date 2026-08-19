@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  vivora.exe application manifest.  CMake should embed this via target_sources
-  with the .rc that compiles into the binary, once we wire up the installer
-  flow (Phase 5).
+  vivora.exe application manifest.  configure_file()'d by src/app/CMakeLists.txt
+  and handed to the linker as a target source, so mt.exe merges it into the
+  binary and the assembly version tracks project(VERSION).
 
   Identity name MUST match the MSI ProductName for taskbar grouping to
   collapse the running instance under the pinned installer entry.
@@ -13,7 +13,7 @@
     <assemblyIdentity
         type="win32"
         name="dev.vivora.app"
-        version="0.1.0.0"
+        version="@PROJECT_VERSION@.0"
         processorArchitecture="amd64"/>
 
     <description>Vivora — low-latency remote desktop</description>

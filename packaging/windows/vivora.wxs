@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Vivora installer.
+
+  Built by scripts/package-windows.ps1 with the -Msi switch, which stages the
+  payload with a cmake install step first and passes the result in as the
+  "stage" bind path.  Do not run wix against this file by hand unless you have
+  staged a payload the same way.
+
+  Per-user by design.  Installing under %LOCALAPPDATA% means no UAC prompt at
+  all, which matters for a tool people are trying out: a consent dialog on
+  first contact costs more installs than a machine-wide install is worth.
+
+  Note for anyone editing: XML comments cannot contain two consecutive
+  hyphens, so command-line flags have to be spelled out in prose here.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Vivora"
+           Manufacturer="Vivora Contributors"
+           Version="$(Version)"
+           UpgradeCode="32E196D8-905D-419D-B044-7DFF9B8A75BF"
+           Scope="perUser"
+           Compressed="yes">
+
+    <!-- DO NOT CHANGE THE UpgradeCode ABOVE.  It is how Windows recognises a
+         later Vivora as an upgrade of this one; changing it silently turns
+         every future release into a second, parallel installation. -->
+
+    <!-- AllowSameVersionUpgrades because MSI only compares the first three
+         numeric fields: a 0.1.0-rc1 and the final 0.1.0 are the same
+         ProductVersion, and without this the rc refuses to be replaced. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Vivora is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="VivoraIcon" SourceFile="!(bindpath.icons)\vivora.ico" />
+    <Property Id="ARPPRODUCTICON"  Value="VivoraIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://vivora.dev" />
+    <Property Id="ARPHELPLINK"     Value="https://github.com/vivoradesk/vivora/issues" />
+    <!-- Repair has nothing to do for a handful of files in a user directory. -->
+    <Property Id="ARPNOREPAIR"     Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Vivora" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="Vivora" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Vivora" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="vivora.exe" Source="!(bindpath.stage)\vivora.exe" KeyPath="yes" />
+      </Component>
+      <!-- Qt's TLS plugin resolves these before any Vivora code runs.  Without
+           them the app hangs at startup with no window and no log, so they are
+           not optional payload. -->
+      <Component>
+        <File Source="!(bindpath.stage)\libcrypto-1_1-x64.dll" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="!(bindpath.stage)\libssl-1_1-x64.dll" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="!(bindpath.stage)\LICENSE" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="!(bindpath.stage)\THIRD-PARTY-NOTICES.md" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcut" Directory="AppShortcutFolder" Guid="*">
+      <Shortcut Id="VivoraShortcut"
+                Name="Vivora"
+                Description="Low-latency open-source remote desktop"
+                Target="[INSTALLFOLDER]vivora.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="VivoraIcon" />
+      <RemoveFolder Id="RemoveAppShortcutFolder" Directory="AppShortcutFolder" On="uninstall" />
+      <!-- A per-user component needs an HKCU key path.  Pointing it at a file
+           under ProgramMenuFolder instead would make the component per-machine
+           and break the no-UAC promise. -->
+      <RegistryValue Root="HKCU" Key="Software\Vivora\Vivora"
+                     Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>

@@ -131,12 +131,32 @@ capable GPU.
 
 ### Windows
 
-Needs MSVC 2022 and a **statically built Qt 6.9**. This is currently the least
-friendly part of the project: the build links against Qt's build tree rather
-than an install prefix, so a stock Qt installation will not do. Point CMake at
-your Qt build with `-DQt6_DIR=<qt>/qtbase/lib/cmake/Qt6`; the paths derived from
-it can be overridden individually if your layout differs. Making Windows build
-against a normal Qt install is tracked as a follow-up.
+Needs MSVC 2022 and a **statically built Qt 6.9**, and this is the least
+friendly part of the project. The build links QML plugin libraries and Qt's
+internal resource object files by path, which only exist where Qt was
+compiled - so a stock Qt *installation* will not work, you need the build tree
+it came out of.
+
+```powershell
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DQt6_DIR=<qt>/qtbase/lib/cmake/Qt6
+```
+
+Everything else is derived from `Qt6_DIR`, and CMake fails immediately with a
+useful message if the layout is not what it expects. Override individually if
+yours differs:
+
+| Variable | Default |
+| --- | --- |
+| `VIVORA_QT_BASE_BUILD_DIR` | derived: `<Qt6_DIR>/../../..` |
+| `VIVORA_QT_DECL_BUILD_DIR` | derived: `<qt build root>/qtdeclarative` |
+| `VIVORA_QT_BUILD_CONFIG` | `Release` |
+| `VIVORA_OPENSSL3_STATIC_DIR` | `C:/OpenSSL-WinUniversal/lib/VC/x64/MT` |
+| `VIVORA_OPENSSL11_BIN_DIR` | `C:/OpenSSL/bin` |
+
+Because the object-file names encode Qt's internal target names, this is tied
+to the Qt version it was developed against. Migrating the QML registration to
+`qt_add_qml_module()` would remove the whole arrangement, and is the follow-up
+that also unblocks building Windows in CI.
 
 ### macOS
 

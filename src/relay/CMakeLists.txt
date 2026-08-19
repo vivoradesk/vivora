@@ -28,3 +28,18 @@ target_compile_features(vivora-relay PRIVATE cxx_std_17)
 # license.sk was an accident waiting to happen in a public repository.
 # Token *verification* stays here and is public by design:
 # common/crypto/license_token.{h,cpp} + the embedded public key.
+
+
+# ── Install rules ────────────────────────────────────────────────────────────
+#
+# The self-host tarball is `cmake --install --component servers` into a staging
+# tree.  Neutral units only: the Vivora-operated ones carry our license gate and
+# our relay endpoint, which is not what someone running their own server wants.
+install(TARGETS vivora-rendezvous vivora-relay
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT servers)
+install(FILES
+        ${CMAKE_SOURCE_DIR}/deploy/selfhost/vivora-relay.service
+        ${CMAKE_SOURCE_DIR}/deploy/selfhost/vivora-rendezvous.service
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vivora/systemd COMPONENT servers)
+install(FILES ${CMAKE_SOURCE_DIR}/LICENSE
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vivora COMPONENT servers)
