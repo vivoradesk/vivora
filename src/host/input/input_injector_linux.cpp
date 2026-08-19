@@ -2,6 +2,8 @@
 
 #include "host/input/input_injector.h"
 
+#include "common/protocol/scancode.h"
+
 #include <string>
 #include "common/utils/log.h"
 
@@ -147,23 +149,28 @@ public:
         // screen like a tablet/pointer (not a touchscreen → not DIRECT).
         ::ioctl(fd_, UI_SET_PROPBIT, INPUT_PROP_POINTER);
 
-        // Register every keyboard key we know how to translate to.
-        // Letters + digits + F1-F12.
-        for (uint16_t k = KEY_1; k <= KEY_EQUAL; ++k)   ::ioctl(fd_, UI_SET_KEYBIT, k);
-        for (uint16_t k = KEY_Q; k <= KEY_RIGHTBRACE; ++k) ::ioctl(fd_, UI_SET_KEYBIT, k);
-        for (uint16_t k = KEY_A; k <= KEY_GRAVE; ++k)   ::ioctl(fd_, UI_SET_KEYBIT, k);
-        for (uint16_t k = KEY_BACKSLASH; k <= KEY_SLASH; ++k) ::ioctl(fd_, UI_SET_KEYBIT, k);
-        for (uint16_t k = KEY_F1; k <= KEY_F12; ++k)    ::ioctl(fd_, UI_SET_KEYBIT, k);
-        // Modifiers + navigation.
-        const uint16_t extra[] = {
-            KEY_BACKSPACE, KEY_TAB, KEY_ENTER, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
-            KEY_LEFTCTRL,  KEY_RIGHTCTRL, KEY_LEFTALT, KEY_RIGHTALT,
-            KEY_PAUSE, KEY_CAPSLOCK, KEY_ESC, KEY_SPACE,
-            KEY_PAGEUP, KEY_PAGEDOWN, KEY_END, KEY_HOME,
-            KEY_LEFT, KEY_UP, KEY_RIGHT, KEY_DOWN,
-            KEY_INSERT, KEY_DELETE, KEY_LEFTMETA, KEY_RIGHTMETA,
+        // Register every key the scancode translation can produce -- an event
+        // for a key the device never advertised is dropped by the kernel, and
+        // the old hand-picked list predated VIV-6, so it was missing the whole
+        // keypad, NumLock, PrintScreen, the 102nd key and the menu key.
+        //
+        // KEY_ESC (1) .. KEY_F12 (88) is the contiguous PC/AT block, which is
+        // exactly what set1_to_evdev() returns for codes 0x01..0x58.  The rest
+        // is its extended tail, listed explicitly rather than as a range so we
+        // never advertise something we cannot be asked to press -- KEY_POWER
+        // sits in the middle of that numeric space.
+        for (uint16_t k = KEY_ESC; k <= KEY_F12; ++k) ::ioctl(fd_, UI_SET_KEYBIT, k);
+        const uint16_t extended[] = {
+            KEY_KPENTER, KEY_RIGHTCTRL, KEY_KPSLASH, KEY_SYSRQ, KEY_RIGHTALT,
+            KEY_HOME, KEY_UP, KEY_PAGEUP, KEY_LEFT, KEY_RIGHT,
+            KEY_END, KEY_DOWN, KEY_PAGEDOWN, KEY_INSERT, KEY_DELETE,
+            KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP,
+            KEY_LEFTMETA, KEY_RIGHTMETA, KEY_COMPOSE,
+            // Not reachable through a scancode (0xE1 1D 45 has no single-code
+            // form) but the vk fallback still maps VK_PAUSE to it.
+            KEY_PAUSE,
         };
-        for (uint16_t k : extra) ::ioctl(fd_, UI_SET_KEYBIT, k);
+        for (uint16_t k : extended) ::ioctl(fd_, UI_SET_KEYBIT, k);
 
         // Configure the absolute axis range.
         uinput_abs_setup abs_x{};
@@ -290,7 +297,12 @@ public:
         }
         case protocol::InputEventType::KeyDown:
         case protocol::InputEventType::KeyUp: {
-            uint16_t k = vk_to_linux_key(event.vk_code);
+            // Prefer the physical key (VIV-6).  The vk table is Latin-only and
+            // layout-derived, so it cannot express a key on a Cyrillic or CJK
+            // layout; the scancode can.  vk stays as the fallback for peers
+            // that send scan_code = 0.
+            uint16_t k = protocol::set1_to_evdev(event.scan_code);
+            if (!k) k = vk_to_linux_key(event.vk_code);
             if (!k) return;
             emit(EV_KEY, k, event.type == protocol::InputEventType::KeyDown ? 1 : 0);
             sync();

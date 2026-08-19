@@ -36,7 +36,7 @@ Notes
 | Render                   | ✅ D3D11 swapchain            | ✅ AVSampleBufferDisplayLayer  | ✅ Qt OpenGL                         |
 | HDR display              | ✅ scRGB FP16 native          | ✅ Metal native                 | ✅ BT.2020+PQ shader (auto-exposure) |
 | Audio playback           | ✅ WASAPI                     | ✅ CoreAudio                    | ✅ PulseAudio (PipeWire-shim ok)     |
-| Input capture (KB+mouse) | ✅ Raw Input                  | ✅ NSEvent + IOKit modifiers   | ✅ Qt events (Qt-key→Win-VK table)   |
+| Input capture (KB+mouse) | ✅ Raw Input                  | ✅ NSEvent + IOKit modifiers   | ✅ Qt events, physical scancodes     |
 | Relative-mouse mode      | ✅ Raw Input + ClipCursor     | ✅ NSEvent.deltaX/Y + warp     | ✅ X11 only (warp + grabMouse)       |
 | Cursor shape (host→client)| ✅ QCursor cache             | ✅ CALayer cache                | ✅ QCursor cache                     |
 | Diagnostics HUD (F9)     | ✅                             | ✅ (HDR detected from CMVideoFormatDescription) | ✅                          |
@@ -77,7 +77,10 @@ Listed so we know what to say when someone reports "doesn't work on my X."
 2. **No software encoder fallback anywhere.** If hardware encoder init fails (driver mismatch, headless server, container without DRM nodes) the host bails. An x264 path would buy server / VM / very-old-hardware compatibility at the cost of CPU.
 3. **NVENC on Windows: HEVC only.** Deliberate — AMF and QSV cover H.264, and codec negotiation picks a common one. It does mean an NVIDIA-only Windows host cannot serve an H.264-only client.
 4. **Client software decode fallback on Windows / macOS** — same shape as Linux's. Not in today.
-5. **Linux host cannot switch monitors.** It enumerates displays and advertises them, but `select_monitor` is unimplemented, so the client's picker cannot actually change the captured display.
+5. **macOS hosts still inject keys from the virtual-key code**, not the
+   scancode the wire now carries, so a viewer on a non-Latin layout types
+   correctly against Windows and Linux hosts but not against a macOS one.
+6. **Linux host cannot switch monitors.** It enumerates displays and advertises them, but `select_monitor` is unimplemented, so the client's picker cannot actually change the captured display.
 
 ### Network / protocol stack (cross-platform)
 
@@ -107,7 +110,6 @@ Listed so we know what to say when someone reports "doesn't work on my X."
 ### Before 0.1 ships
 
 - **Packaging.** Windows installer + portable zip, Linux AppImage, a tarball of the two servers for self-hosters. Nothing here is published yet.
-- **Scancode keyboard.** The Linux client maps Qt key codes through a hand-written ASCII table and drops anything it cannot map, so non-Latin layouts (Cyrillic, CJK) do not work at all. The wire format already carries a scancode field and the Windows path already uses it; Linux is the hole.
 - **Linux desktop parity.** Start-at-login, a legible failure when `/dev/uinput` is not writable, and not exiting silently when the desktop has no system tray.
 - **CI.** No automated build or test run exists.
 

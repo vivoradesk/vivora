@@ -8,6 +8,11 @@
 
 # --- Cross-platform unit tests -----------------------------------------------
 
+add_executable(scancode_test scancode_test.cpp)
+target_link_libraries(scancode_test PRIVATE vivora_common)
+target_include_directories(scancode_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME scancode_test COMMAND scancode_test)
+
 add_executable(log_test log_test.cpp)
 target_link_libraries(log_test PRIVATE vivora_common)
 target_include_directories(log_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

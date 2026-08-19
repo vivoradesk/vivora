@@ -1,6 +1,8 @@
 #ifdef VIVORA_WINDOWS
 
 #include "client/render/stream_window.h"
+
+#include "common/protocol/scancode.h"
 #include "client/render/fullscreen_hotkey.h"
 #include "common/utils/log.h"
 #include <QImage>
@@ -643,7 +645,12 @@ void StreamWindow::keyPressEvent(QKeyEvent* event) {
         }
         return;
     }
-    const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+    // Qt hands out the bare 8-bit make code; the canonical wire space is set 1
+    // WITH the 0xE0 prefix, so a Linux host can tell Left Arrow from Keypad-4
+    // without having to interpret a Windows virtual key (VIV-6).
+    const uint16_t scan = protocol::win_scan_to_set1(
+        static_cast<uint16_t>(event->nativeScanCode()),
+        static_cast<uint16_t>(event->nativeVirtualKey()));
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_[vk] = scan;
     protocol::InputEvent ev;
@@ -660,7 +667,9 @@ void StreamWindow::keyReleaseEvent(QKeyEvent* event) {
         return;                              // Ctrl+F1 menu toggle, don't forward
     if (is_fullscreen_hotkey(event))
         return;                              // F11 / Ctrl+Shift+F — local (VIV-20)
-    const uint16_t scan = static_cast<uint16_t>(event->nativeScanCode());
+    const uint16_t scan = protocol::win_scan_to_set1(
+        static_cast<uint16_t>(event->nativeScanCode()),
+        static_cast<uint16_t>(event->nativeVirtualKey()));
     const uint16_t vk   = static_cast<uint16_t>(event->nativeVirtualKey());
     pressed_keys_.erase(vk);
     protocol::InputEvent ev;

@@ -1,4 +1,6 @@
 #include "client/render/qt_gl_video_view.h"
+
+#include "common/protocol/scancode.h"
 #include "client/render/fullscreen_hotkey.h"
 #include "common/utils/log.h"
 
@@ -580,17 +582,28 @@ void QtGlVideoView::emit_mouse_button(int qt_button, bool down) {
     input_cb_(ev);
 }
 
-void QtGlVideoView::emit_key(int qt_key, bool down) {
+void QtGlVideoView::emit_key(int qt_key, uint32_t native_scan, bool down) {
     if (!input_cb_) return;
-    uint16_t vk = qt_key_to_vk(qt_key);
-    if (vk == 0) return;  // unmapped — drop rather than confuse host
-    if (down) pressed_vks_.insert(vk);
-    else      pressed_vks_.erase(vk);
+    // The physical key is what travels (VIV-6).  qt_key_to_vk() maps a
+    // *character* key through a Latin-only table, so on a Cyrillic or CJK
+    // layout it returned 0 and the keystroke was thrown away here -- the host
+    // never saw it at all.  The scancode is layout-independent; the vk goes
+    // along as a fallback for hosts that only understand it.
+    const uint16_t scan = protocol::qt_native_scan_to_set1(native_scan);
+    const uint16_t vk   = qt_key_to_vk(qt_key);
+    if (scan == 0 && vk == 0) return;   // nothing identifiable to send
+
+    // Key the bookkeeping on the scancode where we have one: two unmapped
+    // keys would otherwise collide under vk 0.
+    const uint16_t id = scan != 0 ? scan : static_cast<uint16_t>(0x8000u | vk);
+    if (down) pressed_keys_[id] = vk;
+    else      pressed_keys_.erase(id);
+
     protocol::InputEvent ev{};
     ev.type      = down ? protocol::InputEventType::KeyDown
                         : protocol::InputEventType::KeyUp;
     ev.vk_code   = vk;
-    ev.scan_code = 0;  // host derives scancode from VK on Windows
+    ev.scan_code = scan;
     input_cb_(ev);
 }
 
@@ -601,14 +614,15 @@ void QtGlVideoView::release_all_keys() {
     // window, so without this the host keeps the modifier stuck down — the
     // "Ctrl held after opening the menu with Ctrl+F1" report (VIV-50).
     if (!input_cb_) return;
-    for (uint16_t vk : pressed_vks_) {
+    for (const auto& kv : pressed_keys_) {
         protocol::InputEvent ev{};
         ev.type      = protocol::InputEventType::KeyUp;
-        ev.vk_code   = vk;
-        ev.scan_code = 0;
+        // Ids with the top bit set are the vk-only fallback (no scancode).
+        ev.scan_code = (kv.first & 0x8000u) ? 0 : kv.first;
+        ev.vk_code   = kv.second;
         input_cb_(ev);
     }
-    pressed_vks_.clear();
+    pressed_keys_.clear();
 }
 
 void QtGlVideoView::mouseMoveEvent(QMouseEvent* e) {
@@ -702,7 +716,7 @@ void QtGlVideoView::keyPressEvent(QKeyEvent* e)   {
         }
         return;
     }
-    emit_key(e->key(), true);
+    emit_key(e->key(), e->nativeScanCode(), true);
 }
 
 void QtGlVideoView::update_stats(const StatsView& stats) {
@@ -835,7 +849,7 @@ void QtGlVideoView::keyReleaseEvent(QKeyEvent* e) {
         return;  // Ctrl+F1 menu toggle — local, don't forward
     if (is_fullscreen_hotkey(e))
         return;  // F11 / Ctrl+Shift+F fullscreen toggle — local (VIV-20)
-    emit_key(e->key(), false);
+    emit_key(e->key(), e->nativeScanCode(), false);
 }
 
 void QtGlVideoView::upload_cursor_shape(const protocol::CursorShapeMessage& shape) {

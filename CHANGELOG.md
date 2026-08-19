@@ -62,6 +62,9 @@ what 0.1 *is* rather than what changed.
 - Peer codes (`swift-tiger-4271`) instead of typing 64 hex characters.
 - Address book with pinning, recent connections, and an optional cloud-synced
   device mesh for signed-in users.
+- Layout-independent keyboard: the physical key travels (PS/2 set 1) and the
+  host applies its own layout, so a viewer on a Cyrillic or CJK layout types
+  correctly instead of dropping every key it cannot name.
 - Bidirectional text clipboard sync.
 - Borderless fullscreen toggle, aspect-ratio control, an in-stream overlay
   menu, and an F9 diagnostics HUD.
