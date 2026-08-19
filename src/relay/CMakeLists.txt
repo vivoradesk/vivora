@@ -22,12 +22,9 @@ target_include_directories(vivora-relay PRIVATE
 target_compile_features(vivora-relay PRIVATE cxx_std_17)
 
 
-add_executable(vivora-license-mint
-    license_mint.cpp
-)
-target_link_libraries(vivora-license-mint PRIVATE vivora_common monocypher)
-target_include_directories(vivora-license-mint PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/third_party/monocypher
-)
-target_compile_features(vivora-license-mint PRIVATE cxx_std_17)
+# NOTE: the license minting CLI used to live here.  It moved to the closed
+# vivora-cloud repository (cmd/mint), which already produced wire-identical
+# 95-byte tokens.  Keeping a signing tool next to the .gitignore entry for
+# license.sk was an accident waiting to happen in a public repository.
+# Token *verification* stays here and is public by design:
+# common/crypto/license_token.{h,cpp} + the embedded public key.

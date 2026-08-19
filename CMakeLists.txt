@@ -19,9 +19,12 @@ elseif(UNIX)
 else()
     set(VIVORA_PLATFORM_TAG "unknown")
 endif()
+# Deliberately NOT a cache variable: a cached value would survive a
+# project(VERSION) bump in an existing build directory and happily name
+# 0.1.1 binaries "Vivora-0.1.0-...".  VIVORA_VERSION_SUFFIX above stays
+# cached because it is a user-facing knob, not derived state.
 set(VIVORA_ARTEFACT_BASENAME
-    "Vivora-${PROJECT_VERSION}${VIVORA_VERSION_SUFFIX}-${VIVORA_PLATFORM_TAG}"
-    CACHE STRING "Base name used for installer / dmg / AppImage filenames")
+    "Vivora-${PROJECT_VERSION}${VIVORA_VERSION_SUFFIX}-${VIVORA_PLATFORM_TAG}")
 
 if(APPLE)
     enable_language(OBJCXX)

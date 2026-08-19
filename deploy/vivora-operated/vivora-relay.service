@@ -1,6 +1,6 @@
 [Unit]
 Description=Vivora media relay (UDP forwarder)
-Documentation=https://github.com/vivora/vivora
+Documentation=https://github.com/vivoradesk/vivora
 After=network-online.target
 Wants=network-online.target
 

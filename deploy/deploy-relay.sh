@@ -19,7 +19,7 @@ fi
 
 TARGET="$1"
 BIN="${BIN:-build-linux/bin/vivora-relay}"
-SERVICE_FILE="$(dirname "$0")/vivora-relay.service"
+SERVICE_FILE="$(dirname "$0")/vivora-operated/vivora-relay.service"
 
 if [[ ! -x "$BIN" ]]; then
     echo "binary not found: $BIN" >&2

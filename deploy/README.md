@@ -1,7 +1,24 @@
 # Vivora deploy
 
-Production deployment artefacts for the Vivora services that aren't
-shipped inside the user-facing app binary.
+Deployment artefacts for the Vivora services that aren't shipped inside
+the user-facing app binary.
+
+## Layout
+
+```
+deploy/
+├── vivora-operated/    units for the Vivora-run instances (rdv.vivora.dev,
+│                       relay.vivora.dev): the relay requires a Pro license
+│                       token and the rendezvous advertises it to peers
+├── selfhost/           neutral units for your own box: open relay, no
+│                       license gate, no relay advertised by default
+├── deploy-rendezvous.sh
+└── deploy-relay.sh     push a build + the vivora-operated/ unit over ssh
+```
+
+If you are self-hosting, take `selfhost/*.service` -- they are the same
+hardened units with the Vivora-specific flags removed.  The comments in
+each file say what to add back if you do want a license-gated relay.
 
 ## Rendezvous server
 
@@ -81,8 +98,9 @@ Tier's 10 TB egress is enough for the early test phase but won't scale
 — move the relay to a paid VPS with bandwidth headroom (Hetzner CCX23
 ~€27/mo includes 20 TB) once usage takes off.
 
-The Pro-managed instance will gate access via a `--require-license`
-flag (separate commit) — self-hosted instances stay open by default.
+The Vivora-operated instance gates access with `--require-license`
+(see `vivora-operated/vivora-relay.service`); self-hosted instances stay
+open by default.
 
 ### Operations
 

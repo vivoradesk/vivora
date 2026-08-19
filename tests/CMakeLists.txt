@@ -8,6 +8,11 @@
 
 # --- Cross-platform unit tests -----------------------------------------------
 
+add_executable(log_test log_test.cpp)
+target_link_libraries(log_test PRIVATE vivora_common)
+target_include_directories(log_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME log_test COMMAND log_test)
+
 add_executable(fragment_test fragment_test.cpp)
 target_link_libraries(fragment_test PRIVATE vivora_common)
 target_include_directories(fragment_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
