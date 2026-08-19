@@ -56,6 +56,45 @@ xcrun notarytool submit Vivora.app.zip \
 xcrun stapler staple Vivora.app
 ```
 
+## Building the Windows artefacts
+
+```powershell
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+scripts\package-windows.ps1            # portable zip
+scripts\package-windows.ps1 -Msi       # zip + installer
+```
+
+Everything is staged through `cmake --install`, never by copying from the
+source tree -- the working tree holds `license.sk`, and a packaging script
+that globs is one bad pattern away from publishing it.
+
+The `.msi` needs the **WiX toolset v5**, a dotnet global tool:
+
+```powershell
+dotnet tool install --global wix --version 5.0.2
+```
+
+Pinned to v5 deliberately.  WiX v6 and v7 are gated behind the Open Source
+Maintenance Fee: v7 refuses to build at all until you accept its EULA, which
+is a licensing decision and not one a build script should make.  v5 is MIT.
+
+`icons/win/vivora.ico` is checked in rather than generated at build time --
+otherwise every Windows contributor needs an image converter for an asset that
+changes about once a year.  Regenerate it with `scripts/make-ico.ps1` after
+editing the source PNGs.
+
+### What the installer does
+
+Per-user, into `%LOCALAPPDATA%\Programs\Vivora`, so it never raises a UAC
+prompt.  Start menu shortcut, an entry in Settings -> Apps, and a working
+uninstall.  Settings under `HKCU\Software\Vivora` deliberately survive an
+uninstall.
+
+The `UpgradeCode` GUID in `vivora.wxs` must never change: it is how Windows
+recognises a later release as an upgrade rather than a second parallel
+install.
+
 ## Windows code signing notes (future)
 
 For an MSI installer the same `dev.vivora.app` string goes into the

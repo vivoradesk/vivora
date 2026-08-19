@@ -21,3 +21,6 @@ third_party/ff/*.exe
 # Cloudflare wrangler cache (stray from Pages deploys)
 .wrangler/
 .claude/worktrees/
+
+# Release artefacts and the staging tree they are built from.
+dist/

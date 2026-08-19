@@ -45,6 +45,31 @@ if(WIN32)
     # MSVC link with WinMainCRTStartup; Qt6's qtmain shim bridges
     # that back to plain `int main(...)`.
     set_target_properties(vivora PROPERTIES WIN32_EXECUTABLE TRUE)
+
+    # Application icon + VERSIONINFO.  Without these the exe carried the
+    # default MSVC icon everywhere Windows shows one -- taskbar, Explorer,
+    # Alt-Tab, the installer's Add/Remove Programs entry -- and Properties ->
+    # Details was blank.
+    set(_VIVORA_ICO "${CMAKE_SOURCE_DIR}/icons/win/vivora.ico")
+    if(EXISTS "${_VIVORA_ICO}")
+        # rc.exe treats backslash as an escape inside string literals, so the
+        # path has to be doubled rather than passed through as-is.
+        string(REPLACE "/" "\\\\" VIVORA_ICO_PATH_RC "${_VIVORA_ICO}")
+        configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/vivora.rc.in
+                       ${CMAKE_CURRENT_BINARY_DIR}/vivora.rc @ONLY)
+        target_sources(vivora PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/vivora.rc)
+    else()
+        message(WARNING "icons/win/vivora.ico missing - exe will have no icon "
+                        "or version info.  Regenerate with scripts/make-ico.ps1")
+    endif()
+
+    # Application manifest, handed to CMake as a source file so it reaches the
+    # linker as /MANIFESTINPUT and mt.exe merges it with the auto-generated
+    # one.  Putting an RT_MANIFEST in the .rc instead collides with that
+    # generated manifest and needs /MANIFEST:NO to work at all.
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/vivora.exe.manifest.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/vivora.exe.manifest @ONLY)
+    target_sources(vivora PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/vivora.exe.manifest)
 endif()
 if(VIVORA_MAC_APP_BUNDLE)
     set_target_properties(vivora PROPERTIES
@@ -427,4 +452,50 @@ if(WIN32)
         d3d11
         dxgi
     )
+endif()
+
+# ── Install rules ────────────────────────────────────────────────────────────
+#
+# These exist so packaging is `cmake --install` into a staging tree rather than
+# a script copying files it hopes are the right ones.  The AppDir an AppImage
+# is built from is exactly this layout, which is why the Linux side follows the
+# FHS names precisely.
+
+if(WIN32)
+    install(TARGETS vivora RUNTIME DESTINATION . COMPONENT app)
+    # Qt's TLS plugin dlopens OpenSSL 1.1 at startup; the build copies both
+    # DLLs next to the exe (see the POST_BUILD step above).  OPTIONAL because a
+    # build configured without them still produces a usable app.
+    install(FILES
+        "$<TARGET_FILE_DIR:vivora>/libcrypto-1_1-x64.dll"
+        "$<TARGET_FILE_DIR:vivora>/libssl-1_1-x64.dll"
+        DESTINATION . COMPONENT app OPTIONAL)
+    install(FILES ${CMAKE_SOURCE_DIR}/LICENSE DESTINATION . COMPONENT app)
+
+elseif(UNIX AND NOT APPLE)
+    # The desktop file is renamed to the reverse-DNS app id because the
+    # metainfo's <launchable> names it that way, and AppStream validates the
+    # pair.
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/linux/vivora.desktop.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/dev.vivora.app.desktop @ONLY)
+
+    install(TARGETS vivora RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/dev.vivora.app.desktop
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications COMPONENT app)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/linux/dev.vivora.app.metainfo.xml
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo COMPONENT app)
+    foreach(_sz 16 32 48 64 128 256)
+        install(FILES ${CMAKE_SOURCE_DIR}/icons/win/vivora-${_sz}.png
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${_sz}x${_sz}/apps
+                RENAME dev.vivora.app.png COMPONENT app)
+    endforeach()
+    install(FILES ${CMAKE_SOURCE_DIR}/icons/vivora-mark.svg
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps
+            RENAME dev.vivora.app.svg COMPONENT app)
+    # The udev rule is documentation, not something we can install ourselves:
+    # /etc/udev/rules.d needs root and an AppImage has no installer step.
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/linux/60-vivora-uinput.rules
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT app)
+    install(FILES ${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_SOURCE_DIR}/README.md
+            DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT app)
 endif()

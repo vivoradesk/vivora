@@ -1,0 +1,45 @@
+/* Windows resources for vivora.exe: the application icon and the version
+ * block Explorer shows under Properties -> Details.
+ *
+ * configure_file()'d from CMake so the version tracks project(VERSION); see
+ * src/app/CMakeLists.txt.
+ *
+ * Keep this file pure ASCII.  It has no BOM and the build passes no /utf-8, so
+ * rc.exe reads it in the system ANSI codepage -- an em dash or a (c) glyph here
+ * turns into mojibake in the file-properties dialog on a machine whose
+ * codepage differs from the one it was authored on.
+ */
+
+#include <windows.h>
+
+/* Numeric id 1: Explorer and the taskbar use the lowest-numbered icon. */
+1 ICON "@VIVORA_ICO_PATH_RC@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "Vivora Contributors"
+            VALUE "FileDescription",  "Vivora - low-latency remote desktop"
+            VALUE "FileVersion",      "@PROJECT_VERSION@.0"
+            VALUE "InternalName",     "vivora"
+            VALUE "LegalCopyright",   "(c) 2026 Vivora Contributors. AGPL-3.0-or-later."
+            VALUE "OriginalFilename", "vivora.exe"
+            VALUE "ProductName",      "Vivora"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@@VIVORA_VERSION_SUFFIX@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

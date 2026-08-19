@@ -41,8 +41,16 @@ static const char* flag_value(const char* name, char** argv, int argc, int& i) {
     return nullptr;
 }
 
+// Set by CMake from project(VERSION); the fallback only matters if someone
+// compiles this translation unit outside the project's build.
+#ifndef VIVORA_VERSION
+#define VIVORA_VERSION "0.0.0"
+#endif
+
 static void print_usage(const char* prog) {
-    std::printf("Vivora v0.1.0 — low-latency remote desktop\n\n");
+    // Version from the build, not a literal: the About dialog used to
+    // carry its own copy and they would have drifted at 0.1.1.
+    std::printf("Vivora v%s — low-latency remote desktop\n\n", VIVORA_VERSION);
     std::printf("Usage:\n");
     std::printf("  %s                             Launch GUI (default)\n", prog);
     std::printf("  %s --host [options]            Headless: start hosting\n", prog);
