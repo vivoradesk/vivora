@@ -50,6 +50,7 @@ public:
     // encoder at the new resolution.
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
     bool select_monitor(uint32_t index, bool seed_cursor) override;
+    bool supports_monitor_switch() const override { return true; }
 
     // Phase B+ lazy encoder (VIV-12).  start_encoder() (re)creates the
     // VideoToolbox session from the live capture geometry + remembered

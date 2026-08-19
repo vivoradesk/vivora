@@ -49,7 +49,10 @@ std::unique_ptr<ILinuxEncoder> create_linux_encoder(EncoderKind kind,
         return try_vaapi(cfg);
     }
 
-    // Amf / Qsv aren't Linux backends — VAAPI is the only other option.
+    // Vaapi forced, or a Windows-only kind (Amf / Qsv) that reached a Linux
+    // host through a shared config — VAAPI is the only other option here.
+    if (kind != EncoderKind::Vaapi)
+        log::info("ENC", "Requested encoder is not a Linux backend — using VAAPI");
     return try_vaapi(cfg);
 }
 

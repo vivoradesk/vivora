@@ -242,10 +242,13 @@ public:
     // GUI uses this for the idle-timeout warning + auto-disconnect feature.
     int64_t seconds_since_last_input() const;
 
-    // Force-disconnect every currently-attached client.  Socket stays
-    // open and new clients can still connect.  Triggered by the idle
-    // timeout from host_loop.
-    void disconnect_all_clients();
+    // Force-disconnect every currently-attached client.  Socket stays open and
+    // new clients can still connect.  The reason goes out as a sealed
+    // Disconnect packet so the viewer shows why and, crucially, does NOT
+    // auto-reconnect -- dropping clients silently left a viewer retrying for
+    // its full five-minute budget into a host that could not serve it.
+    void disconnect_all_clients(
+        protocol::DisconnectReason reason = protocol::DisconnectReason::HostShutdown);
 
     // VIV-52: drop the single client whose authenticated static key matches
     // `pubkey_hex` (case-insensitive), if one is attached.  Used to kick a

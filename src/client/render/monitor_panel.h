@@ -54,6 +54,8 @@ private:
     // optimistically mark it "viewing" so the highlight updates immediately;
     // the host's fresh MonitorList reconciles a moment later.
     void choose(uint32_t index);
+    // True when the host advertised at least one display it can switch to.
+    bool switching_supported() const;
 
     std::vector<protocol::MonitorDesc> monitors_;
     std::function<void(uint32_t)>      on_select_;

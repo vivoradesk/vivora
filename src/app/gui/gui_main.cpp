@@ -197,15 +197,19 @@ int run_gui(int argc, char** argv) {
         }
     }
 
-    // Hard requirement — without a tray we lose the "always on" promise.
-    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        log::error("GUI", "No system tray available on this desktop — refusing to start GUI");
-        return 1;
+    // A tray is how Vivora keeps its "always available" promise, but it is
+    // not a hard requirement and refusing to start without one was a bad
+    // trade: stock GNOME has no StatusNotifier host unless the AppIndicator
+    // extension is installed, so on a default Fedora or a GNOME session
+    // without extensions the app exited with code 1 and the user saw
+    // absolutely nothing happen.  Run anyway; the window simply becomes the
+    // only way to reach us, which means closing it has to quit.
+    const bool tray_available = QSystemTrayIcon::isSystemTrayAvailable();
+    if (!tray_available) {
+        log::warn("GUI", "No system tray on this desktop — the main window is "
+                         "the only way to reach Vivora, and closing it quits");
     }
-
-    // Stay alive when the main window closes; the tray "Quit" entry is
-    // the only path that actually ends the process.
-    QApplication::setQuitOnLastWindowClosed(false);
+    QApplication::setQuitOnLastWindowClosed(!tray_available);
 
     // Brand icon for taskbar / Alt-Tab / Explorer / window title bar.
     // QML windows pick it up via QGuiApplication::windowIcon by default
@@ -220,6 +224,7 @@ int run_gui(int argc, char** argv) {
     QQuickStyle::setStyle("Basic");
 
     AppController controller;
+    controller.setTrayAvailable(tray_available);
     Tray          tray;
     controller.setTray(&tray);
 

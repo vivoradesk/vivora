@@ -38,7 +38,11 @@ public:
     MonitorThumb(const protocol::MonitorDesc& d, std::function<void(uint32_t)> on_click,
                  QWidget* parent = nullptr)
         : QWidget(parent), desc_(d), on_click_(std::move(on_click)) {
-        setCursor(desc_.viewing ? Qt::ArrowCursor : Qt::PointingHandCursor);
+        // A tile only offers itself for clicking when clicking it will do
+        // something: not the one already streaming, and not on a host that
+        // cannot retarget capture at all.
+        const bool clickable = !desc_.viewing && desc_.switchable;
+        setCursor(clickable ? Qt::PointingHandCursor : Qt::ArrowCursor);
         setAttribute(Qt::WA_Hover, true);
 
         // Fixed height; width follows aspect, clamped so the strip stays sane.
@@ -250,10 +254,19 @@ void MonitorPanel::rebuild_thumbs() {
         delete item;
     }
 
-    count_label_->setText(monitors_.empty()
-        ? QString()
-        : QString("%1 display%2").arg(monitors_.size())
-              .arg(monitors_.size() == 1 ? "" : "s"));
+    QString count_text;
+    if (!monitors_.empty()) {
+        count_text = QString("%1 display%2").arg(monitors_.size())
+                         .arg(monitors_.size() == 1 ? "" : "s");
+        // Say why the tiles are inert rather than letting the user click and
+        // wonder.  Only worth saying when there is more than one to pick from.
+        // ASCII on purpose: this translation unit has no BOM and the build
+        // does not pass /utf-8, so a non-ASCII narrow literal is at the mercy
+        // of MSVC's source-charset guess.
+        if (monitors_.size() > 1 && !switching_supported())
+            count_text += QStringLiteral(" - this host can't switch displays");
+    }
+    count_label_->setText(count_text);
 
     // Always show a thumbnail per display — even a single one, so the user
     // sees what they're viewing rather than a bare text line (VIV-50 UX).
@@ -296,8 +309,9 @@ void MonitorPanel::rebuild_key_hint() {
         if (auto* w = it->widget()) { w->hide(); w->setParent(nullptr); w->deleteLater(); }
         delete it;
     }
-    // Nothing to switch between with a single display — hide the whole hint.
-    const bool has_switch = monitors_.size() > 1;
+    // Nothing to switch between with a single display, and nothing to switch
+    // WITH on a host that cannot retarget capture.
+    const bool has_switch = monitors_.size() > 1 && switching_supported();
     keycap_row_->setVisible(has_switch);
     switch_hint_->setVisible(has_switch);
     if (!has_switch) return;
@@ -312,7 +326,18 @@ void MonitorPanel::rebuild_key_hint() {
     }
 }
 
+bool MonitorPanel::switching_supported() const {
+    // The host stamps this per display; it is uniform in practice, so any
+    // entry answering yes means the host can retarget capture.
+    for (const auto& m : monitors_) if (m.switchable) return true;
+    return false;
+}
+
 void MonitorPanel::choose(uint32_t index) {
+    // A host that enumerates displays but cannot switch between them used to
+    // get a click, a warning in its own log, and a viewer panel that then
+    // claimed the switch had happened.  Refuse locally instead of lying.
+    if (!switching_supported()) return;
     if (on_select_) on_select_(index);
     // Optimistic local highlight: mark the chosen one viewing, clear the rest,
     // so the panel reflects the pick immediately.  The host re-advertises the
@@ -376,7 +401,7 @@ void MonitorPanel::keyPressEvent(QKeyEvent* e) {
     if (e->key() >= Qt::Key_1 && e->key() <= Qt::Key_9) {
         size_t n = static_cast<size_t>(e->key() - Qt::Key_1);
         if (n < monitors_.size() && !monitors_[n].viewing) {
-            choose(monitors_[n].index);
+            choose(monitors_[n].index);   // no-op when the host can't switch
         }
         return;
     }

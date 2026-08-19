@@ -45,7 +45,15 @@ constexpr const char* DEF_RENDEZVOUS = "rdv.vivora.dev:7000";
 constexpr const char* DEF_RELAY      = "relay.vivora.dev:7100";
 constexpr const char* DEF_LICENSE    = "";
 constexpr const char* DEF_STUN       = "stun.l.google.com:19302";
+// HEVC everywhere except Linux, where VAAPI on Intel iHD asserts on the
+// first IDR at some resolutions -- the CLI host has defaulted to H.264 for
+// that reason for a while and the GUI was still handing new Linux users a
+// broken first run.  See legacy_cli.cpp for the CLI side of the same rule.
+#if defined(VIVORA_LINUX)
+constexpr int   DEF_CODEC            = 0;            // h264
+#else
 constexpr int   DEF_CODEC            = 1;            // hevc
+#endif
 constexpr int   DEF_ENCODER          = 0;            // auto
 constexpr int   DEF_BITRATE          = 0;            // auto
 constexpr int   DEF_DISPLAY          = 0;

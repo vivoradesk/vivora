@@ -88,6 +88,11 @@ public:
     // connected → "Could not connect") apart from a normal session end.
     bool    everConnected()      const { return everConnected_; }
 
+    // Why the connect failed, phrased for a user.  Captured before the loop
+    // is torn down; empty when the session connected or is waiting on a TOFU
+    // trust decision.
+    QString initError()          const { return initError_; }
+
 signals:
     // Loop has fully torn down — session.stop(), platform.shutdown()
     // have run.  AppController removes us from its active-views list
@@ -125,6 +130,7 @@ private:
     // runs here so the GUI event loop stays responsive during a cold connect.
     std::thread                            connect_thread_;
     bool                                   everConnected_ = false;
+    QString                                initError_;
     // VIV-23 trust-prompt capture (see trustPromptPending above).
     bool    trustPending_  = false;
     bool    trustMismatch_ = false;

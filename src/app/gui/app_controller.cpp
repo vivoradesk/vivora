@@ -40,6 +40,53 @@
 
 namespace vivora::gui {
 
+#ifndef VIVORA_VERSION
+#define VIVORA_VERSION "0.0.0"
+#endif
+
+QString AppController::appVersion() const {
+    return QStringLiteral(VIVORA_VERSION);
+}
+
+// Index order here IS the wire format of the persisted encoderIndex setting,
+// and encoder_kind_for_index() below has to match it.  Windows keeps its
+// historical 0..3 so existing configs keep meaning what they meant.
+QStringList AppController::encoderOptions() const {
+#if defined(VIVORA_WINDOWS)
+    return {QStringLiteral("Automatic"), QStringLiteral("AMD (AMF)"),
+            QStringLiteral("NVIDIA (NVENC)"), QStringLiteral("Intel Quick Sync")};
+#elif defined(VIVORA_LINUX)
+    return {QStringLiteral("Automatic"), QStringLiteral("NVIDIA (NVENC)"),
+            QStringLiteral("VAAPI (Intel / AMD)")};
+#else
+    // macOS has exactly one encoder; the combo is informational.
+    return {QStringLiteral("VideoToolbox")};
+#endif
+}
+
+namespace {
+vivora::EncoderKind encoder_kind_for_index(int idx) {
+#if defined(VIVORA_WINDOWS)
+    switch (idx) {
+        case 1:  return vivora::EncoderKind::Amf;
+        case 2:  return vivora::EncoderKind::Nvenc;
+        case 3:  return vivora::EncoderKind::Qsv;
+        default: return vivora::EncoderKind::Auto;
+    }
+#elif defined(VIVORA_LINUX)
+    switch (idx) {
+        case 1:  return vivora::EncoderKind::Nvenc;
+        case 2:  return vivora::EncoderKind::Vaapi;
+        default: return vivora::EncoderKind::Auto;
+    }
+#else
+    (void)idx;
+    return vivora::EncoderKind::Auto;
+#endif
+}
+} // namespace
+
+
 AppController::AppController(QObject* parent) : QObject(parent) {
     settings_   = std::make_unique<Settings>(this);
     peers_      = std::make_unique<AddressBook>(this);
@@ -132,6 +179,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         if (tray_) tray_->setSharing(sharing_, clientCount_);
         log::info("AppController", "Host worker stopped");
     });
+    connect(hostWorker_.get(), &HostWorker::initWarning, this,
+            [this](QString reason) {
+        // Degraded, not failed: sharing continues.  Toast in-window and also
+        // balloon it, since the window may well be hidden at this point.
+        log::warn("AppController", "Host warning: %s", reason.toUtf8().constData());
+        emit toastRequested(reason);
+        if (tray_) tray_->notify("Vivora", reason);
+    });
     connect(hostWorker_.get(), &HostWorker::initFailed, this,
             [this](QString reason) {
         log::error("AppController", "Host init failed: %s",
@@ -148,11 +203,15 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             emit clientCountChanged();
         }
         if (tray_) tray_->setSharing(false, 0);
+        emit toastRequested(QStringLiteral("Couldn't start sharing — ") + reason);
         if (tray_) tray_->notify("Vivora: host failed to start", reason);
     });
     connect(hostWorker_.get(), &HostWorker::idleWarning, this,
             [this](int secs) {
         log::info("AppController", "Idle warning — disconnect in %ds", secs);
+        emit toastRequested(
+            QStringLiteral("No input from your viewer for %1 min — disconnecting in %2s.")
+                .arg(settings_->idleTimeoutMin()).arg(secs));
         if (tray_) tray_->notify("Vivora: idle",
             QString("No input from your viewer for %1 min — "
                     "disconnecting in %2s.")
@@ -308,7 +367,10 @@ void AppController::startSharing() {
     wc.manual_bitrate_bps = settings_->bitrateMbps() * 1'000'000u;
     wc.codec              = settings_->codecIndex() == 1
         ? vivora::VideoCodec::HEVC : vivora::VideoCodec::H264;
-    wc.encoder_kind       = vivora::EncoderKind::Auto;
+    // The Settings "Encoder" combo used to be decorative: this was pinned to
+    // Auto and encoderIndex was read nowhere, so picking NVENC to work around
+    // a broken AMF driver did nothing at all.
+    wc.encoder_kind       = encoder_kind_for_index(settings_->encoderIndex());
     wc.stun_server        = settings_->stunServer().toStdString();
     wc.rendezvous_server  = settings_->rendezvous().toStdString();
     {
@@ -402,6 +464,7 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         // pause is a plain connect failure (the worker couldn't reach the host)
         // — surface it, since the connect no longer fails synchronously.
         const bool neverConnected = !vs_ptr->everConnected();
+        const QString failReason   = vs_ptr->initError();
         QString code, newHex, oldHex;
         bool    mismatch = false;
         if (trustBroken) {
@@ -412,7 +475,13 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         }
         for (auto it = viewSessions_.begin(); it != viewSessions_.end(); ++it) {
             if (it->get() == vs_ptr) {
+                // We are inside the session's own finished() emission, so
+                // destroying it here would unwind the stack out from under
+                // the frame that emitted.  Hand ownership back to the QObject
+                // parent and let the event loop reap it.
+                it->release();
                 viewSessions_.erase(it);
+                vs_ptr->deleteLater();
                 activeViews_ = static_cast<int>(viewSessions_.size());
                 emit activeViewsChanged();
                 break;
@@ -432,8 +501,15 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
             emit trustPromptRequested(code, newFp, oldFp, mismatch);
             emit showWindowRequested();
         } else if (neverConnected) {
-            if (tray_) tray_->notify("Vivora",
-                QString("Could not connect to %1").arg(dial));
+            // Say WHY.  This used to be one balloon reading "Could not connect
+            // to <code>" for a mistyped code, an offline host, an unreachable
+            // rendezvous and a bad IP alike -- and on desktops where the tray
+            // cannot show messages, it said nothing at all.
+            const QString msg = failReason.isEmpty()
+                ? QStringLiteral("Could not connect to %1").arg(dial)
+                : failReason;
+            emit toastRequested(msg);
+            if (tray_) tray_->notify("Vivora", msg);
         }
     });
     if (!vs->start(vc)) {
@@ -441,8 +517,11 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         // connect handshake runs on a worker thread and reports success, a
         // TOFU trust pause, or a plain failure asynchronously via finished().
         log::error("AppController", "ViewSession::start failed");
-        if (tray_) tray_->notify("Vivora",
-            QString("Could not connect to %1").arg(peerCodeOrHex));
+        const QString msg = vs->initError().isEmpty()
+            ? QStringLiteral("Could not connect to %1").arg(peerCodeOrHex)
+            : vs->initError();
+        emit toastRequested(msg);
+        if (tray_) tray_->notify("Vivora", msg);
         return;
     }
     viewSessions_.push_back(std::move(vs));

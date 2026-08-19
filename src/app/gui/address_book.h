@@ -44,6 +44,10 @@ struct Peer {
 
 class AddressBook : public QAbstractListModel {
     Q_OBJECT
+    // QML has nothing to re-evaluate when it binds to rowCount(), which is a
+    // plain method: the Recent section stayed hidden until the next app
+    // start after the first connection.  Bind to `count` instead.
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
 public:
     enum Roles {
         AliasRole = Qt::UserRole + 1,
@@ -97,6 +101,13 @@ public:
     // For C++ callers (AppController, primarily).
     const Peer* findByPubkey(const QString& pubkeyHex) const;
     const Peer* findByCode  (const QString& peerCode) const;
+
+    int count() const { return static_cast<int>(peers_.size()); }
+
+signals:
+    void countChanged();
+
+public:
 
 private:
     // Shared impl behind touch / touchOutgoing / touchIncoming.  dir

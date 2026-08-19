@@ -46,9 +46,15 @@ enum class PacketType : uint8_t {
 // teardown from a network blip so it does not auto-reconnect.  Unknown values
 // are treated as a plain terminal disconnect (still no reconnect).
 enum class DisconnectReason : uint8_t {
-    Rejected     = 1,  // Host declined the approval prompt.
-    Kicked       = 2,  // Device removed from the account / key revoked.
-    HostShutdown = 3,  // Host is shutting down (reserved / future use).
+    Rejected      = 1,  // Host declined the approval prompt.
+    Kicked        = 2,  // Device removed from the account / key revoked.
+    HostShutdown  = 3,  // Host is shutting down.
+    EncoderFailed = 4,  // Host has no working video encoder.  Terminal: the
+                        // viewer must not auto-reconnect, because retrying
+                        // hits the same missing encoder every time.
+    IdleTimeout   = 5,  // No input for the host's idle window.  Also terminal:
+                        // an auto-reconnect here would immediately restart the
+                        // idle timer and undo the disconnect.
 };
 
 enum PacketFlags : uint8_t {

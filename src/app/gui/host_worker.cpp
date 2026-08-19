@@ -1,5 +1,7 @@
 #include "app/gui/host_worker.h"
 
+#include "host/input/input_injector.h"
+
 #include "app/host_loop.h"
 #include "common/utils/log.h"
 
@@ -98,6 +100,13 @@ void HostWorker::runOnWorkerThread() {
     }
     platform_.reset(p);
 #endif
+
+    // Video is about to work; input may not.  Say so before the first viewer
+    // connects and reports "the mouse does nothing".
+    if (const std::string why = vivora::host::InputInjector::unavailable_reason();
+        !why.empty()) {
+        emit initWarning(QString::fromStdString(why));
+    }
 
     vivora::HostLoopConfig lcfg;
     lcfg.port               = cfg_.port;

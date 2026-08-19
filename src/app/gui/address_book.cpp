@@ -92,6 +92,7 @@ void AddressBook::applyTouch(const QString& pubkeyHex,
     peers_.push_back(p);
     sortPeers();
     endResetModel();
+    emit countChanged();
     save();
 }
 
@@ -173,6 +174,7 @@ void AddressBook::remove(int row) {
     beginRemoveRows({}, row, row);
     peers_.remove(row);
     endRemoveRows();
+    emit countChanged();
     save();
 }
 

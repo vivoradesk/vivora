@@ -51,7 +51,7 @@ static void print_usage(const char* prog) {
     std::printf("  --port PORT       UDP port (default 9876)\n");
     std::printf("  --display N       Display index to capture (host, default 0)\n");
     std::printf("  --bitrate Mbps    Manual encoder bitrate; default is auto from resolution\n");
-    std::printf("  --encoder NAME    Force encoder backend: auto|amf|nvenc|qsv (default auto)\n");
+    std::printf("  --encoder NAME    Force encoder backend: auto|amf|nvenc|qsv|vaapi (default auto)\n");
     std::printf("  --codec NAME      Video codec: h264|hevc (default hevc)\n");
     std::printf("  --stun-server HP  STUN \"host:port\" for reflexive-address discovery\n");
     std::printf("                    (default stun.l.google.com:19302 — use --no-stun to disable)\n");
@@ -95,8 +95,9 @@ int run_legacy_cli(int argc, char** argv) {
             else if (std::strcmp(v, "amf")   == 0) encoder_kind = vivora::EncoderKind::Amf;
             else if (std::strcmp(v, "nvenc") == 0) encoder_kind = vivora::EncoderKind::Nvenc;
             else if (std::strcmp(v, "qsv")   == 0) encoder_kind = vivora::EncoderKind::Qsv;
+            else if (std::strcmp(v, "vaapi") == 0) encoder_kind = vivora::EncoderKind::Vaapi;
             else {
-                std::fprintf(stderr, "Error: --encoder must be one of: auto, amf, nvenc, qsv\n");
+                std::fprintf(stderr, "Error: --encoder must be one of: auto, amf, nvenc, qsv, vaapi\n");
                 return 1;
             }
         } else if ((v = flag_value("--codec", argv, argc, i)) != nullptr) {
