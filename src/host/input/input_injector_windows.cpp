@@ -2,6 +2,8 @@
 
 #include "host/input/input_injector.h"
 
+#include "common/protocol/scancode.h"
+
 #include <algorithm>
 
 #define WIN32_LEAN_AND_MEAN
@@ -153,13 +155,23 @@ public:
                 scan = static_cast<uint16_t>(
                     MapVirtualKeyW(event.vk_code, MAPVK_VK_TO_VSC));
             }
-            input.ki.wScan = scan;
+            // The wire's canonical space is PS/2 set 1, where an extended key
+            // is 0xE0nn (VIV-6).  SendInput wants that split: the 8-bit make
+            // code in wScan, the prefix expressed as KEYEVENTF_EXTENDEDKEY.
+            // Passing 0xE04B through unmasked -- which is what the previous
+            // code did on the branch it never exercised -- is not a scancode
+            // Windows recognises.
+            const bool extended_by_scan = protocol::set1_is_extended(scan);
+            input.ki.wScan = extended_by_scan ? protocol::set1_make_code(scan)
+                                              : static_cast<WORD>(scan);
             input.ki.wVk = event.vk_code;
             input.ki.dwFlags = KEYEVENTF_SCANCODE;
             if (event.type == protocol::InputEventType::KeyUp)
                 input.ki.dwFlags |= KEYEVENTF_KEYUP;
-            // Extended key detection (right ctrl, right alt, arrows, etc.)
-            if (scan > 0xFF ||
+            // A Windows viewer's nativeScanCode() carries no 0xE0 prefix, so
+            // the vk list is still what disambiguates Left Arrow from Keypad-4
+            // on that path.
+            if (extended_by_scan ||
                 event.vk_code == VK_RIGHT || event.vk_code == VK_LEFT ||
                 event.vk_code == VK_UP || event.vk_code == VK_DOWN ||
                 event.vk_code == VK_INSERT || event.vk_code == VK_DELETE ||

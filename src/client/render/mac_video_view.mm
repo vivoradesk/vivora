@@ -8,6 +8,8 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include "client/render/mac_video_view.h"
+
+#include "common/protocol/scancode.h"
 #include "common/utils/log.h"
 
 #include <vector>
@@ -370,7 +372,10 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     vivora::protocol::InputEvent ev;
     ev.type = down ? vivora::protocol::InputEventType::KeyDown
                    : vivora::protocol::InputEventType::KeyUp;
-    ev.scan_code = scan;
+    // The table above stores bare make codes, but the canonical wire space is
+    // set 1 WITH the 0xE0 prefix (VIV-6) -- otherwise a Linux host reading
+    // 0x4B presses Keypad-4 instead of Left Arrow.
+    ev.scan_code = vivora::protocol::win_scan_to_set1(scan, vk);
     ev.vk_code = vk;
     vivora::emit_input(impl, ev);
 }

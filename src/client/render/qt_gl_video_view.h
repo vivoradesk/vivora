@@ -20,6 +20,7 @@
 #include <QTimer>
 
 #include <cstdint>
+#include <map>
 #include <set>
 #include <functional>
 #include <vector>
@@ -102,7 +103,9 @@ protected:
 private:
     void emit_mouse_button(int qt_button, bool down);
     void emit_mouse_pos();
-    void emit_key(int qt_key, bool down);
+    // native_scan is Qt's nativeScanCode(): the X11-convention keycode, which
+    // is what makes the physical key identifiable regardless of layout.
+    void emit_key(int qt_key, uint32_t native_scan, bool down);
     // Flush KeyUp for every key the host currently believes is held — called
     // on focus loss and when the menu/panel steals focus so a modifier used
     // in a hotkey (Ctrl+F1) doesn't stick down on the host (VIV-50).
@@ -183,7 +186,11 @@ private:
 
     InputCallback input_cb_;
     // VK codes the host currently believes are held — for release_all_keys().
-    std::set<uint16_t> pressed_vks_;
+    // Keys the host currently believes are down, so focus loss can release
+    // them.  Keyed by canonical scancode (never 0 for a real key) with the
+    // virtual-key code as the value, because a key that has no vk mapping --
+    // anything on a non-Latin layout -- must still be tracked.
+    std::map<uint16_t, uint16_t> pressed_keys_;
 
     // Cursor shape cache keyed by host's shape_id; the widget's QCursor
     // is updated when active_shape_id_ changes.
