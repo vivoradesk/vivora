@@ -71,7 +71,7 @@ body:
         Attach `vivora.log` (and `vivora.log.1`, which holds the previous
         session — usually the interesting one after a crash) from:
         Windows `%LOCALAPPDATA%\Vivora\Vivora\`,
-        Linux `~/.local/share/Vivora/`,
+        Linux `~/.local/share/Vivora/Vivora/`,
         macOS `~/Library/Application Support/Vivora/`.
         Start with `VIVORA_LOG_LEVEL=debug` for a verbose run.
       render: text

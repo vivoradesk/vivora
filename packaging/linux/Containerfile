@@ -49,6 +49,28 @@ RUN curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERS
  && ln -s "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest"  /usr/local/bin/ctest \
  && cmake --version
 
+# OpenSSL 3, from source.
+#
+# Bullseye only has 1.1, and Qt binds to whichever major it was compiled
+# against -- a Qt built against 1.1 reports supportsSsl=0 on every modern
+# distribution, which means no update check, no announcements and no account
+# sign-in, so no Pro on Linux at all.  1.1 also went end of life in September
+# 2023, and unlike the Windows build (where TLS is Schannel and OpenSSL is
+# never actually used) this one would carry real traffic.
+#
+# --openssldir=/etc/ssl so it reads the *host* CA store at runtime, which is
+# where every distribution we target keeps one.
+ARG OPENSSL_VERSION=3.0.15
+RUN curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+      | tar xz -C /src \
+ && cd "/src/openssl-${OPENSSL_VERSION}" \
+ && ./Configure linux-x86_64 shared --prefix=/opt/openssl --openssldir=/etc/ssl \
+ && make -j${JOBS} >/dev/null \
+ && make install_sw >/dev/null \
+ && cd / && rm -rf "/src/openssl-${OPENSSL_VERSION}" \
+ && echo /opt/openssl/lib64 > /etc/ld.so.conf.d/openssl3.conf && ldconfig \
+ && /opt/openssl/bin/openssl version
+
 # Qt, from the GitHub mirrors (code.qt.io is not always reachable). Only the
 # three modules Vivora actually uses; qtbase alone is most of the build.
 WORKDIR /src
@@ -64,6 +86,7 @@ RUN cmake -S qtbase -B build-qtbase -G Ninja \
         -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
         -DFEATURE_xcb=ON -DFEATURE_xkbcommon=ON -DFEATURE_xkbcommon_x11=ON \
         -DFEATURE_opengl=ON -DFEATURE_egl=ON \
+        -DOPENSSL_ROOT_DIR=/opt/openssl -DFEATURE_openssl=ON \
  && cmake --build build-qtbase --parallel ${JOBS} \
  && cmake --install build-qtbase \
  && rm -rf build-qtbase
@@ -72,6 +95,8 @@ RUN cmake -S qtbase -B build-qtbase -G Ninja \
 # compiles Vivora perfectly and then cannot open a window at runtime.
 RUN test -f /opt/qt/plugins/platforms/libqxcb.so \
     || (echo "FATAL: Qt built without the xcb platform plugin" && exit 1)
+RUN test -f /opt/qt/plugins/tls/libqopensslbackend.so \
+    || (echo "FATAL: Qt built without the OpenSSL TLS backend" && exit 1)
 
 RUN cmake -S qtshadertools -B build-shader -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
@@ -88,6 +113,33 @@ RUN cmake -S qtdeclarative -B build-decl -G Ninja \
  && cmake --install build-decl \
  && rm -rf build-decl /src/qtbase /src/qtshadertools /src/qtdeclarative
 
+# Make the Qt we just built the image's system Qt.  Setting LD_LIBRARY_PATH
+# instead does not survive: linuxdeploy is itself an AppImage and its runtime
+# sanitises the variable, so it reported "Could not find dependency:
+# libQt6QuickControls2.so.6" and refused to deploy anything.
+RUN echo /opt/qt/lib > /etc/ld.so.conf.d/qt6.conf && ldconfig
+
 ENV CMAKE_PREFIX_PATH=/opt/qt
 ENV PATH=/opt/qt/bin:$PATH
 WORKDIR /work
+
+# Debian 11 carries PipeWire 0.3.19, which predates SPA_PTROFF and the
+# `command` callback in pw_stream_events -- src/host/capture/pipewire_capture.cpp
+# does not compile against it.
+#
+# Vendor the 0.3.48 headers (the version this project builds against on Ubuntu
+# 22.04) over the top, while still LINKING against Debian's library: every
+# PipeWire function the capture code calls has existed since 0.3.0, so the link
+# is satisfied, and a link error is exactly the signal we want if that ever
+# stops being true.  At runtime it is the user's own libpipewire that gets
+# loaded, because the AppImage deliberately does not bundle it.
+#
+# Appended after the Qt stages on purpose: putting it up with the other apt
+# packages would invalidate the cached Qt build, which is two hours.
+ARG PIPEWIRE_HEADERS=0.3.48
+RUN git clone -q --depth 1 --branch ${PIPEWIRE_HEADERS} \
+        https://github.com/PipeWire/pipewire.git /tmp/pw \
+ && (cd /tmp/pw/src/pipewire && find . -name '*.h' -exec cp --parents {} /usr/include/pipewire-0.3/pipewire/ \;) \
+ && (cd /tmp/pw/spa/include/spa && find . -name '*.h' -exec cp --parents {} /usr/include/spa-0.2/spa/ \;) \
+ && rm -rf /tmp/pw \
+ && grep -q SPA_PTROFF /usr/include/spa-0.2/spa/utils/defs.h

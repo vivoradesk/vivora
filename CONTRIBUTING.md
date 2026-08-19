@@ -79,7 +79,7 @@ Include the platform and version, and attach the log — it is at:
 | | |
 | --- | --- |
 | Windows | `%LOCALAPPDATA%\Vivora\Vivora\vivora.log` |
-| Linux | `~/.local/share/Vivora/vivora.log` |
+| Linux | `~/.local/share/Vivora/Vivora/vivora.log` |
 | macOS | `~/Library/Application Support/Vivora/vivora.log` |
 
 The previous session is kept alongside it as `vivora.log.1`, which is usually

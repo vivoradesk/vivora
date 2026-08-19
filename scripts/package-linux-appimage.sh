@@ -77,14 +77,34 @@ echo "==> populating AppDir"
 export QMAKE="$QT_PREFIX/bin/qmake6"
 [[ -x "$QMAKE" ]] || QMAKE="$QT_PREFIX/bin/qmake"
 export QML_SOURCES_PATHS="$PWD/qml"
-# Both platform plugins: Vivora's host path is portal/PipeWire based, so
-# Wayland sessions are the primary target, but the client still runs under
-# plenty of X11 desktops.
-export EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so"
-export QT_PLUGINS="platforms;platformthemes;imageformats;iconengines;xcbglintegrations;platforminputcontexts;tls;networkinformation;wayland-shell-integration;wayland-graphics-integration-client"
+# xcb only, deliberately.
+#
+# Native Wayland support lives in the separate qtwayland module, which the
+# build image does not compile -- and shipping it would change behaviour
+# rather than add to it: Qt prefers the wayland plugin when it exists, so a
+# Wayland session would stop going through XWayland, which is the
+# configuration every Linux test has run under. The client's relative-mouse
+# capture is X11-only by design too (Wayland forbids the pointer warp it
+# needs), so XWayland is the better target, not a fallback.
+#
+# On a Wayland desktop Qt finds no wayland plugin and picks xcb through
+# XWayland on its own. Native Wayland is its own piece of work.
+export QT_PLUGINS="platforms;platformthemes;imageformats;iconengines;xcbglintegrations;platforminputcontexts;tls;networkinformation"
 export PATH="$TOOLS:$PATH"
+# linuxdeploy resolves the binary's NEEDED entries through the normal loader
+# search path, and Qt lives in a prefix that is not on it -- without this it
+# reports "Could not find dependency: libQt6QuickControls2.so.6" and stops.
+export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Qt 6.5+ loads libxcb-cursor at runtime for the xcb platform plugin -- it is
+# not a NEEDED entry of anything, so nothing deploys it on its own, and
+# without it Qt aborts with "Could not load the Qt platform plugin xcb" on any
+# distribution that does not ship it.  Plenty do not.
+XCB_CURSOR="$(ls /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0 2>/dev/null || true)"
+[[ -n "$XCB_CURSOR" ]] || { echo "libxcb-cursor.so.0 missing from the build image" >&2; exit 1; }
 
 $LD --appdir "$APPDIR" \
+    -l "$XCB_CURSOR" \
     -e "$APPDIR/usr/bin/vivora" \
     -d "$APPDIR/usr/share/applications/dev.vivora.app.desktop" \
     -i "$APPDIR/usr/share/icons/hicolor/256x256/apps/dev.vivora.app.png" \
@@ -95,6 +115,11 @@ $LD --appdir "$APPDIR" \
 # the host's copy. A bundled libpipewire cannot reach the host's SPA plugins;
 # a bundled libGL cannot drive the host's GPU; a bundled libstdc++ that is
 # older than the host's Mesa breaks Mesa.
+# Note on what is NOT here: libxkbcommon.  libxkbcommon-x11 is bundled --
+# Qt needs it and not every distribution ships it -- and the two are one
+# source package sharing internal structures.  Pruning only the core half
+# left a Debian 11 -x11 running against the host 1.4.0, which segfaults
+# inside xkb_x11_keymap_new_from_device() before Qt opens a window.
 echo "==> pruning host-owned libraries"
 for lib in \
     libpipewire-0.3.so.0 libdbus-1.so.3 \
@@ -102,8 +127,13 @@ for lib in \
     libglib-2.0.so.0 libgobject-2.0.so.0 libgio-2.0.so.0 libgmodule-2.0.so.0 \
     libGL.so.1 libEGL.so.1 libGLdispatch.so.0 libGLX.so.0 libOpenGL.so.0 \
     libdrm.so.2 libgbm.so.1 \
-    libX11.so.6 libX11-xcb.so.1 libxcb*.so.* libXext.so.6 libXfixes.so.3 \
-    libwayland-client.so.0 libwayland-egl.so.1 libxkbcommon.so.0 \
+    libX11.so.6 libX11-xcb.so.1 libXext.so.6 libXfixes.so.3 \
+    libxcb.so.1 libxcb-shm.so.0 libxcb-render.so.0 libxcb-glx.so.0 \
+    libxcb-dri2.so.0 libxcb-dri3.so.0 libxcb-present.so.0 libxcb-sync.so.1 \
+    libxcb-xfixes.so.0 libxcb-randr.so.0 libxcb-shape.so.0 libxcb-xkb.so.1 \
+    libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 \
+    libxcb-render-util.so.0 libxcb-util.so.1 libxcb-xinerama.so.0 \
+    libwayland-client.so.0 libwayland-egl.so.1 \
     libfontconfig.so.1 libfreetype.so.6 \
     libstdc++.so.6 libgcc_s.so.1 libm.so.6 libc.so.6
 do
@@ -121,6 +151,13 @@ fi
 # ffmpeg has to be bundled: the .so major version differs on every
 # distribution, so leaving it to the host means the AppImage runs only where
 # it was built.
+ls "$APPDIR"/usr/lib/libxcb-cursor.so.* >/dev/null 2>&1 \
+    || { echo "FATAL: libxcb-cursor was not bundled; Qt will not start" >&2; exit 1; }
+# libxkbcommon and libxkbcommon-x11 travel together or not at all.
+if ls "$APPDIR"/usr/lib/libxkbcommon-x11.so.* >/dev/null 2>&1; then
+    ls "$APPDIR"/usr/lib/libxkbcommon.so.* >/dev/null 2>&1 \
+        || { echo "FATAL: libxkbcommon-x11 bundled without libxkbcommon" >&2; exit 1; }
+fi
 for must in libavcodec libavutil libswscale; do
     ls "$APPDIR"/usr/lib/$must.so.* >/dev/null 2>&1 \
         || { echo "FATAL: $must was not bundled" >&2; exit 1; }
