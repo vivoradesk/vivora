@@ -44,6 +44,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Static CRT to match static Qt build (Windows only)
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # Read sources as UTF-8 and emit UTF-8 (VIV-124).  The tree is UTF-8
+    # without a BOM, and without this MSVC reads narrow literals in whatever
+    # the build machine's ANSI codepage happens to be and re-encodes them into
+    # it -- so every em dash in a log message, and the separators in the
+    # monitor panel, compiled to something that depended on who built it.
+    add_compile_options(/utf-8)
 endif()
 
 # Global output directories
