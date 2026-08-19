@@ -6,6 +6,7 @@
 #include "common/net/stun_client.h"
 #include "common/protocol/packet.h"
 #include "common/protocol/input_event.h"
+#include "common/utils/env.h"
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 #include <algorithm>
@@ -972,9 +973,11 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     //
     // CLI mode (no gate) or VIVORA_AUTO_ACCEPT=1 dev override → mark
     // Approved immediately and register audio right here, matching
-    // pre-VIV-53 behaviour.
+    // pre-VIV-53 behaviour.  The override needs an explicitly truthy
+    // value: this bypasses the approval prompt, so VIVORA_AUTO_ACCEPT=0
+    // must leave the prompt in place rather than silently disable it.
     client.audio_port_pending = client_audio_port;
-    const bool dev_auto = std::getenv("VIVORA_AUTO_ACCEPT") != nullptr;
+    const bool dev_auto = util::env_flag("VIVORA_AUTO_ACCEPT");
     // prior_approved: same viewer re-handshaking an already-approved session —
     // keep it approved and skip the popup (VIV-92).
     if (!approval_gate_ || dev_auto || prior_approved) {
