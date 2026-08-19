@@ -1,0 +1,15 @@
+# Let members of the "input" group open /dev/uinput.
+#
+# Vivora injects remote keyboard and mouse events through the uinput
+# kernel interface, which is root-only on a default install.  Without
+# this rule a Linux host streams video perfectly and silently ignores
+# every keystroke -- the failure looks like a broken product rather than
+# a missing permission.
+#
+#   sudo cp 60-vivora-uinput.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo modprobe uinput
+#   sudo usermod -aG input "$USER"     # log out and back in
+#
+# static_node covers the case where uinput is built as a module and the
+# device node is created before any rule with a matching KERNEL= runs.
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"

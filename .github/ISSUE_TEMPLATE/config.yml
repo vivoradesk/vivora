@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vivoradesk/vivora/security/advisories/new
+    about: Report privately. Please do not open a public issue for these.
+  - name: Question or idea
+    url: https://github.com/vivoradesk/vivora/discussions
+    about: Usage questions and half-formed ideas are better as a discussion.

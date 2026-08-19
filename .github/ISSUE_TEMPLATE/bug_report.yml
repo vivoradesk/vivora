@@ -1,0 +1,85 @@
+name: Bug report
+description: Something is broken or behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here — see
+        [SECURITY.md](https://github.com/vivoradesk/vivora/blob/master/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Which side is affected
+      options:
+        - The host (the machine being shared)
+        - The client (the machine viewing)
+        - Both
+        - Neither / not a streaming issue
+    validations:
+      required: true
+
+  - type: input
+    id: host-platform
+    attributes:
+      label: Host platform
+      description: OS and version, plus GPU if the problem involves video.
+      placeholder: "Windows 11 24H2, RTX 3060"
+
+  - type: input
+    id: client-platform
+    attributes:
+      label: Client platform
+      placeholder: "Ubuntu 24.04, GNOME/Wayland, Intel UHD 770"
+
+  - type: input
+    id: version
+    attributes:
+      label: Vivora version
+      description: Settings → About, or `vivora --help` on the first line.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How were the two machines connected
+      options:
+        - Same LAN, direct IP
+        - Same LAN, peer code
+        - Over the internet, peer code (hole punched)
+        - Over the internet, through a relay
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        Attach `vivora.log` (and `vivora.log.1`, which holds the previous
+        session — usually the interesting one after a crash) from:
+        Windows `%LOCALAPPDATA%\Vivora\Vivora\`,
+        Linux `~/.local/share/Vivora/`,
+        macOS `~/Library/Application Support/Vivora/`.
+        Start with `VIVORA_LOG_LEVEL=debug` for a verbose run.
+      render: text
+
+  - type: textarea
+    id: hud
+    attributes:
+      label: Diagnostics HUD
+      description: |
+        For stream-quality problems (stutter, freezes, artefacts), press F9 in
+        the stream window and paste or screenshot what it shows.
