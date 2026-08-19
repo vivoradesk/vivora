@@ -177,45 +177,101 @@ endif()
 # the QML is registered via qt_add_qml_module(); we use a plain .qrc so we
 # list the libs explicitly.  Paths come from the prebuilt Qt 6.9 install.
 if(WIN32)
-    set(_VIVORA_QT_QML_DIR  "C:/qt6/build/qtbase/qml")
-    set(_VIVORA_QT_LIB_DIR  "C:/qt6/build/qtbase/lib")
-    set(_VIVORA_QT_DECL_DIR "C:/qt6/build/qtdeclarative/src")
-    set(_VIVORA_QT_BASE_DIR "C:/qt6/build/qtbase/src")
+    # Derive the Qt layout from Qt6_DIR instead of hardcoding one machine's
+    # paths.  Qt6_DIR is <qtbase-build>/lib/cmake/Qt6, so three hops up is the
+    # qtbase build root and one more is the Qt build root, whose sibling is
+    # qtdeclarative.  Overridable individually for a different layout.
+    get_filename_component(_qt_cmake_dir  "${Qt6_DIR}"       DIRECTORY)   # lib/cmake
+    get_filename_component(_qt_lib_dir    "${_qt_cmake_dir}" DIRECTORY)   # lib
+    get_filename_component(_qt_base_root  "${_qt_lib_dir}"   DIRECTORY)   # qtbase build
+    get_filename_component(_qt_build_root "${_qt_base_root}" DIRECTORY)   # Qt build root
+
+    set(VIVORA_QT_BASE_BUILD_DIR "${_qt_base_root}" CACHE PATH
+        "Qt qtbase *build* tree (contains lib/, qml/, plugins/, src/)")
+    set(VIVORA_QT_DECL_BUILD_DIR "${_qt_build_root}/qtdeclarative" CACHE PATH
+        "Qt qtdeclarative *build* tree")
+    set(VIVORA_QT_BUILD_CONFIG "Release" CACHE STRING
+        "Config subdirectory inside Qt's CMakeFiles/*.dir/<config>/ resource objects")
+
+    set(_VIVORA_QT_QML_DIR    "${VIVORA_QT_BASE_BUILD_DIR}/qml")
+    set(_VIVORA_QT_LIB_DIR    "${VIVORA_QT_BASE_BUILD_DIR}/lib")
+    set(_VIVORA_QT_PLUGIN_DIR "${VIVORA_QT_BASE_BUILD_DIR}/plugins")
+    set(_VIVORA_QT_BASE_DIR   "${VIVORA_QT_BASE_BUILD_DIR}/src")
+    set(_VIVORA_QT_DECL_DIR   "${VIVORA_QT_DECL_BUILD_DIR}/src")
+    set(_C                    "${VIVORA_QT_BUILD_CONFIG}")
+
+    if(NOT EXISTS "${_VIVORA_QT_QML_DIR}/QtQuick/qtquick2plugin.lib")
+        message(FATAL_ERROR
+            "Vivora needs a static Qt *build tree*, not an install prefix: it "
+            "links QML plugin libraries and resource object files that only "
+            "exist where Qt was compiled.
+"
+            "  Qt6_DIR                  = ${Qt6_DIR}
+"
+            "  VIVORA_QT_BASE_BUILD_DIR = ${VIVORA_QT_BASE_BUILD_DIR}
+"
+            "  VIVORA_QT_DECL_BUILD_DIR = ${VIVORA_QT_DECL_BUILD_DIR}
+"
+            "Expected ${_VIVORA_QT_QML_DIR}/QtQuick/qtquick2plugin.lib.  Point "
+            "the two VIVORA_QT_*_BUILD_DIR cache variables at your Qt build, or "
+            "see the README for how to produce one.")
+    endif()
     # Static QML resources (.qmltypes, the .qml files of the Basic style,
     # SG shaders, etc.) are compiled into individual qrc_*_init.cpp.obj
     # files that aren't packed into any .lib — qmake/CMake adds them
     # straight to the executable's link line.  We have to do the same
     # manually since we don't use qt_add_qml_module.
     file(GLOB _DB_SG_SHADER_OBJS
-        "${_VIVORA_QT_DECL_DIR}/quick/CMakeFiles/Quick_resources_*.dir/Release/.qt/rcc/qrc_*_init.cpp.obj")
+        "${_VIVORA_QT_DECL_DIR}/quick/CMakeFiles/Quick_resources_*.dir/${_C}/.qt/rcc/qrc_*_init.cpp.obj")
     set(_VIVORA_QML_RES_OBJS
         ${_DB_SG_SHADER_OBJS}
-        "${_VIVORA_QT_DECL_DIR}/qml/CMakeFiles/Qml_resources_1.dir/Release/.qt/rcc/qrc_qmake_QML_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/qmlmeta/CMakeFiles/QmlMeta_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/qmlmodels/CMakeFiles/QmlModels_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_Models_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/qmlworkerscript/CMakeFiles/QmlWorkerScript_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQml_WorkerScript_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quick/window/CMakeFiles/quickwindow_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Window_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/qml/CMakeFiles/Qml_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QML_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/qmlmeta/CMakeFiles/QmlMeta_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQml_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/qmlmodels/CMakeFiles/QmlModels_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQml_Models_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/qmlworkerscript/CMakeFiles/QmlWorkerScript_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQml_WorkerScript_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quick/window/CMakeFiles/quickwindow_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Window_init.cpp.obj"
         # QtQuick.Shapes (VIV-52: My Devices vector glyphs via PathSvg) — module
         # qmldir/qmltypes + its shader resources, same manual-link rule as above.
-        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Shapes_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_2.dir/Release/.qt/rcc/qrc_qtquickshapes_shaders_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quicklayouts/CMakeFiles/QuickLayouts_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Layouts_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quicktemplates/CMakeFiles/QuickTemplates2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Templates_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/CMakeFiles/QuickControls2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/CMakeFiles/qtquickcontrols2plugin_resources_1.dir/Release/.qt/rcc/qrc_indirectBasic_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrolsimpl/CMakeFiles/QuickControls2Impl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_impl_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_2.dir/Release/.qt/rcc/qrc_QuickControls2Basic_raw_qml_0_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_3.dir/Release/.qt/rcc/qrc_qtquickcontrols2basicstyle_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/impl/CMakeFiles/QuickControls2BasicStyleImpl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_impl_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogs/CMakeFiles/QuickDialogs2_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Dialogs_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_1.dir/Release/.qt/rcc/qrc_qmake_QtQuick_Dialogs_quickimpl_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_2.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImpl_raw_qml_0_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_3.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImpl_init.cpp.obj"
-        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_4.dir/Release/.qt/rcc/qrc_QuickDialogs2QuickImplShaders_init.cpp.obj"
-        "${_VIVORA_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_1.dir/Release/.qt/rcc/qrc_qpdf_init.cpp.obj"
-        "${_VIVORA_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_2.dir/Release/.qt/rcc/qrc_gui_shaders_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Shapes_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickshapes/CMakeFiles/QuickShapesPrivate_resources_2.dir/${_C}/.qt/rcc/qrc_qtquickshapes_shaders_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quicklayouts/CMakeFiles/QuickLayouts_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Layouts_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quicktemplates/CMakeFiles/QuickTemplates2_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Templates_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/CMakeFiles/QuickControls2_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Controls_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/CMakeFiles/qtquickcontrols2plugin_resources_1.dir/${_C}/.qt/rcc/qrc_indirectBasic_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrolsimpl/CMakeFiles/QuickControls2Impl_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Controls_impl_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_2.dir/${_C}/.qt/rcc/qrc_QuickControls2Basic_raw_qml_0_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/CMakeFiles/QuickControls2Basic_resources_3.dir/${_C}/.qt/rcc/qrc_qtquickcontrols2basicstyle_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickcontrols/basic/impl/CMakeFiles/QuickControls2BasicStyleImpl_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Controls_Basic_impl_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogs/CMakeFiles/QuickDialogs2_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Dialogs_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_1.dir/${_C}/.qt/rcc/qrc_qmake_QtQuick_Dialogs_quickimpl_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_2.dir/${_C}/.qt/rcc/qrc_QuickDialogs2QuickImpl_raw_qml_0_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_3.dir/${_C}/.qt/rcc/qrc_QuickDialogs2QuickImpl_init.cpp.obj"
+        "${_VIVORA_QT_DECL_DIR}/quickdialogs/quickdialogsquickimpl/CMakeFiles/QuickDialogs2QuickImpl_resources_4.dir/${_C}/.qt/rcc/qrc_QuickDialogs2QuickImplShaders_init.cpp.obj"
+        "${_VIVORA_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_1.dir/${_C}/.qt/rcc/qrc_qpdf_init.cpp.obj"
+        "${_VIVORA_QT_BASE_DIR}/gui/CMakeFiles/Gui_resources_2.dir/${_C}/.qt/rcc/qrc_gui_shaders_init.cpp.obj"
     )
+    # Fail here rather than at link time.  A wrong Qt layout used to make the
+    # glob above return nothing and every path below resolve to a file that
+    # does not exist, which surfaced two hundred lines later as a wall of
+    # unresolved symbols with no hint about the cause.
+    if(NOT _DB_SG_SHADER_OBJS)
+        message(FATAL_ERROR
+            "No Quick_resources_*.dir objects under ${_VIVORA_QT_DECL_DIR}/quick "
+            "- wrong Qt build tree, or built with a different configuration than "
+            "VIVORA_QT_BUILD_CONFIG=${_C}")
+    endif()
+    foreach(_obj IN LISTS _VIVORA_QML_RES_OBJS)
+        if(NOT EXISTS "${_obj}")
+            message(FATAL_ERROR
+                "Qt QML resource object missing:
+  ${_obj}
+"
+                "This build links Qt's internal resource objects by path, so it "
+                "is tied to the exact Qt version it was developed against "
+                "(6.9).  A different minor version renames some of them.")
+        endif()
+    endforeach()
     # Each QML plugin .lib is just metadata + the Q_PLUGIN_METADATA hook;
     # the actual qml_register_types_X / qInitResources_X / theme/init
     # symbols live in companion non-plugin libs (Qt6QuickLayouts.lib etc.).
@@ -262,7 +318,9 @@ endif()
 # we never call the QSslSocket APIs that would actually exercise either
 # path so the runtime behaviour doesn't matter.
 if(WIN32)
-    set(_VIVORA_OPENSSL_DIR "C:/OpenSSL-WinUniversal/lib/VC/x64/MT")
+    set(VIVORA_OPENSSL3_STATIC_DIR "C:/OpenSSL-WinUniversal/lib/VC/x64/MT" CACHE PATH
+        "Directory holding libssl_static.lib / libcrypto_static.lib (OpenSSL 3, /MT)")
+    set(_VIVORA_OPENSSL_DIR "${VIVORA_OPENSSL3_STATIC_DIR}")
     if(EXISTS "${_VIVORA_OPENSSL_DIR}/libssl_static.lib")
         target_link_libraries(vivora PRIVATE
             "${_VIVORA_OPENSSL_DIR}/libssl_static.lib"
@@ -280,7 +338,7 @@ if(WIN32)
     # first HTTPS request (CloudClient -> https://cloud.vivora.dev) crashes.
     # Schannel needs no OpenSSL — just the Windows security libs below.
     target_link_libraries(vivora PRIVATE
-        "${_VIVORA_QT_LIB_DIR}/../plugins/tls/qschannelbackend.lib"
+        "${_VIVORA_QT_PLUGIN_DIR}/tls/qschannelbackend.lib"
         secur32 crypt32 bcrypt ncrypt ws2_32
     )
 
@@ -290,7 +348,7 @@ if(WIN32)
     # gui_main.cpp (Q_IMPORT_PLUGIN(QNetworkListManagerNetworkInformation-
     # BackendFactory)).
     target_link_libraries(vivora PRIVATE
-        "${_VIVORA_QT_LIB_DIR}/../plugins/networkinformation/qnetworklistmanager.lib"
+        "${_VIVORA_QT_PLUGIN_DIR}/networkinformation/qnetworklistmanager.lib"
     )
 
     # Qt6's openssl TLS plugin tries to dlopen OpenSSL 1.1 at runtime
@@ -298,7 +356,9 @@ if(WIN32)
     # exe so QApplication startup doesn't blow up.  Long-term we want to
     # rebuild Qt6 without the openssl TLS plugin (Schannel-only) and
     # drop these copies entirely.
-    set(_VIVORA_OPENSSL11_BIN "C:/OpenSSL/bin")
+    set(VIVORA_OPENSSL11_BIN_DIR "C:/OpenSSL/bin" CACHE PATH
+        "Directory holding libcrypto-1_1-x64.dll / libssl-1_1-x64.dll")
+    set(_VIVORA_OPENSSL11_BIN "${VIVORA_OPENSSL11_BIN_DIR}")
     foreach(_dll libcrypto-1_1-x64.dll libssl-1_1-x64.dll)
         if(EXISTS "${_VIVORA_OPENSSL11_BIN}/${_dll}")
             add_custom_command(TARGET vivora POST_BUILD
