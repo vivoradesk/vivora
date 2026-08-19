@@ -1,0 +1,93 @@
+# Build image for the Linux release artefacts.
+#
+# Debian 11 on purpose: it carries glibc 2.31, and a binary linked against
+# 2.31 runs on everything newer. Building on the 22.04 workstation instead
+# would pin the floor at glibc 2.35 and lock out Ubuntu 20.04, Debian 11 and
+# the whole RHEL/Rocky/Alma 9 family, which is most of the corporate estate.
+#
+# Qt is compiled here rather than installed, because no distribution ships a
+# Qt new enough on a base this old.
+#
+#   podman build -t vivora-build -f packaging/linux/Containerfile .
+#
+# The Qt stage takes a couple of hours; the image caches it, so rebuilding
+# Vivora afterwards is a normal incremental build.
+
+FROM docker.io/library/debian:11
+
+ARG QT_VERSION=6.8.2
+ARG CMAKE_VERSION=3.28.6
+ARG JOBS=12
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Toolchain, then the libraries Vivora links, then the ones Qt needs to
+# produce a usable xcb/wayland platform plugin. A missing xcb dev package
+# does not fail the Qt build -- it silently produces a Qt that cannot open a
+# window, which is a much worse way to find out.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential ninja-build pkg-config perl python3 git curl ca-certificates \
+        file patchelf desktop-file-utils zsync \
+        libavcodec-dev libavutil-dev libswscale-dev \
+        libpipewire-0.3-dev libdbus-1-dev libpulse-dev \
+        libwayland-dev wayland-protocols libwayland-egl-backend-dev \
+        libgl-dev libegl-dev libglx-dev libopengl-dev libglu1-mesa-dev \
+        libxkbcommon-dev libxkbcommon-x11-dev \
+        libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+        libxcb1-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev \
+        libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev \
+        libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev \
+        libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-cursor-dev \
+        libfontconfig1-dev libfreetype6-dev libglib2.0-dev libssl-dev zlib1g-dev \
+        libva-dev libdrm-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Bullseye has CMake 3.18; Qt 6.8 wants 3.21+.
+RUN curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+      | tar xz -C /opt \
+ && ln -s "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake"  /usr/local/bin/cmake \
+ && ln -s "/opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest"  /usr/local/bin/ctest \
+ && cmake --version
+
+# Qt, from the GitHub mirrors (code.qt.io is not always reachable). Only the
+# three modules Vivora actually uses; qtbase alone is most of the build.
+WORKDIR /src
+RUN git clone -q --depth 1 --branch "v${QT_VERSION}" https://github.com/qt/qtbase.git \
+ && git clone -q --depth 1 --branch "v${QT_VERSION}" https://github.com/qt/qtshadertools.git \
+ && git clone -q --depth 1 --branch "v${QT_VERSION}" https://github.com/qt/qtdeclarative.git
+
+# -no-feature-relocatable: the default writes an absolute prefix into the
+# libraries, which is fine here because the AppImage rpath-patches them anyway.
+RUN cmake -S qtbase -B build-qtbase -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/qt \
+        -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
+        -DFEATURE_xcb=ON -DFEATURE_xkbcommon=ON -DFEATURE_xkbcommon_x11=ON \
+        -DFEATURE_opengl=ON -DFEATURE_egl=ON \
+ && cmake --build build-qtbase --parallel ${JOBS} \
+ && cmake --install build-qtbase \
+ && rm -rf build-qtbase
+
+# Fail loudly if the platform plugin did not get built: a Qt without xcb
+# compiles Vivora perfectly and then cannot open a window at runtime.
+RUN test -f /opt/qt/plugins/platforms/libqxcb.so \
+    || (echo "FATAL: Qt built without the xcb platform plugin" && exit 1)
+
+RUN cmake -S qtshadertools -B build-shader -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
+        -DCMAKE_INSTALL_PREFIX=/opt/qt \
+ && cmake --build build-shader --parallel ${JOBS} \
+ && cmake --install build-shader \
+ && rm -rf build-shader
+
+RUN cmake -S qtdeclarative -B build-decl -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
+        -DCMAKE_INSTALL_PREFIX=/opt/qt \
+        -DQT_BUILD_EXAMPLES=OFF -DQT_BUILD_TESTS=OFF \
+ && cmake --build build-decl --parallel ${JOBS} \
+ && cmake --install build-decl \
+ && rm -rf build-decl /src/qtbase /src/qtshadertools /src/qtdeclarative
+
+ENV CMAKE_PREFIX_PATH=/opt/qt
+ENV PATH=/opt/qt/bin:$PATH
+WORKDIR /work
