@@ -1,0 +1,125 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Windows is missing here on purpose. The Windows build links Qt's internal
+# resource object files by path out of a Qt build tree, so it cannot be
+# reproduced on a runner until the QML registration moves to
+# qt_add_qml_module(). Until then Windows artefacts are built by hand and the
+# release checklist covers them.
+jobs:
+  core:
+    name: core (no Qt)
+    runs-on: ubuntu-latest
+    # debian:11 rather than the runner image: glibc 2.31 is the floor the
+    # release artefacts are built against, and the gate should fail here
+    # rather than in packaging if something starts needing a newer one.
+    container: debian:11
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
+            libpulse-dev
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # VIVORA_BUILD_APP=OFF drops Qt, ffmpeg and PipeWire from the configure
+      # entirely, which is what makes this gate a couple of minutes instead of
+      # a couple of hours.
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVIVORA_BUILD_APP=OFF \
+            -DVIVORA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      # assert() compiles out under NDEBUG, and the shipped configuration is
+      # Release -- so a suite that only ran there would pass vacuously. The
+      # test suites use an explicit CHECK macro for this reason; running Debug
+      # as well also catches out-of-bounds access in the [size, capacity)
+      # window that Release and ASan both miss.
+      - name: Configure (Debug)
+        run: |
+          cmake -S . -B build-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVIVORA_BUILD_APP=OFF \
+            -DVIVORA_BUILD_TESTS=ON
+
+      - name: Build (Debug)
+        run: cmake --build build-debug
+
+      - name: Test (Debug)
+        run: ctest --test-dir build-debug --output-on-failure
+
+  linux-app:
+    name: linux app (Qt)
+    runs-on: ubuntu-latest
+    container: debian:11
+    # Compile-only, and not a merge blocker yet: the official Qt binaries are
+    # a different build from the one the release image compiles, so this job
+    # is expected to shake out missing dev packages for a while.
+    continue-on-error: true
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
+            python3 python3-pip python3-venv \
+            libavcodec-dev libavutil-dev libswscale-dev \
+            libpipewire-0.3-dev libdbus-1-dev libpulse-dev libwayland-dev \
+            libgl-dev libegl-dev libglx-dev libopengl-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev libfontconfig1-dev
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Qt
+        run: |
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install --quiet aqtinstall
+          /opt/venv/bin/aqt install-qt linux desktop 6.8.2 linux_gcc_64 \
+            -m qtdeclarative qtshadertools --outputdir /opt/qt
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=/opt/qt/6.8.2/gcc_64 \
+            -DVIVORA_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The signing key for Pro licences lives in the working tree of whoever
+      # runs the relay, next to a .gitignore entry telling git to skip it. One
+      # `git add -f` and it is public forever.
+      - name: No secrets committed
+        run: scripts/check-no-secrets.sh
+
+      - name: Validate desktop and AppStream metadata
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends appstream desktop-file-utils
+          appstreamcli validate --no-net packaging/linux/dev.vivora.app.metainfo.xml
