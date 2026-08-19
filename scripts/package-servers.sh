@@ -35,12 +35,22 @@ mkdir -p "$stage"
 # Explicit staging through install(), never a tar of the source tree: the
 # working tree holds license.sk.
 cmake --install "$BUILD" --component servers --prefix "$stage" >/dev/null
+
+# Flatten the FHS prefix into a bundle: this is something you unpack and run
+# install.sh from, not a tree you copy over /usr/local.  install.sh looks for
+# systemd/ and bin/ next to itself.
+mv "$stage/share/vivora/systemd" "$stage/systemd"
+mv "$stage/share/vivora/LICENSE" "$stage/LICENSE"
+rm -rf "$stage/share"
+
 install -m 0755 deploy/selfhost/install.sh "$stage/install.sh"
 install -m 0644 deploy/README.md           "$stage/README.md"
 
 for b in vivora-relay vivora-rendezvous; do
-    [[ -x "$stage/bin/$b" ]] || { echo "missing $b in staging" >&2; exit 1; }
+    [[ -x "$stage/bin/$b" ]]                  || { echo "missing bin/$b" >&2; exit 1; }
+    [[ -f "$stage/systemd/$b.service" ]]      || { echo "missing systemd/$b.service" >&2; exit 1; }
 done
+[[ -x "$stage/install.sh" ]] || { echo "missing install.sh" >&2; exit 1; }
 
 echo "== runtime dependencies =="
 ldd "$stage/bin/vivora-relay" | sed 's/^[[:space:]]*//'
