@@ -422,6 +422,12 @@ void FecDecoder::feed(const uint8_t* wire, size_t len,
             group.m = m;
             group.ranged = ranged;
             group.header_received = true;
+            // VIV-88: the group's composition is known from this moment, and
+            // with the production transmit order (all parity in the frame's
+            // tail) its data has already come and gone — so this is the clock
+            // the rescue-NACK grace window runs off.
+            group.first_seen_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
             group.data_shards.assign(k, {});
             group.parity_shards.assign(m, {});
             group.pkt_keys.resize(k);
@@ -611,6 +617,20 @@ void FecDecoder::try_recover(FecGroup& group,
     // Need at least K total shards (data or parity) to decode.
     const int total_present = group.received_data + group.received_parity;
     if (total_present < k) {
+        // VIV-88: tick() runs every poll, so without this a group that is one
+        // shard short is buried within milliseconds — long before a targeted
+        // retransmit could arrive, which would make the rescue NACK dead code.
+        // Hold a near-complete group open for the rescue window instead; the
+        // retx lands via the normal data path and closes it.  Bounded, and only
+        // for groups actually worth chasing: everything else fails immediately,
+        // exactly as before.  With the window at 0 (the default, and what any
+        // non-client user of the decoder gets) behaviour is unchanged.
+        const int shortfall = k - total_present;
+        if (rescue_window_ms_ > 0 && shortfall <= MAX_RESCUE_SHORTFALL) {
+            const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now_ms - group.first_seen_ms < rescue_window_ms_) return;
+        }
         // Not enough — give up on RS but keep group marked resolved so
         // we don't retry.  Frame assembler will handle the gap.
         ++total_failed_;
@@ -697,6 +717,43 @@ void FecDecoder::reset() {
     ring_.clear();
     ring_fifo_.clear();
     ewma_loss_ = 0.0f;
+}
+
+void FecDecoder::collect_rescue_keys(std::vector<uint32_t>& out, int64_t grace_ms,
+                                     int64_t rl_ms, size_t max_keys) {
+    if (max_keys == 0) return;
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    for (auto& [gid, group] : groups_) {
+        if (out.size() >= max_keys) break;
+        (void)gid;
+        // Unresolved groups whose layout we know. A group with no parity yet
+        // may still be mid-flight and we could not name its keys anyway.
+        if (group.resolved || !group.header_received) continue;
+
+        // How many more shards would resolve it: RS needs any k of k+m.
+        const int present = static_cast<int>(group.received_data)
+                          + static_cast<int>(group.received_parity);
+        const int shortfall = static_cast<int>(group.k) - present;
+        if (shortfall < 1 || shortfall > MAX_RESCUE_SHORTFALL) continue;
+
+        // Never chase packets that may simply still be in flight or reordered.
+        if (now_ms - group.first_seen_ms < grace_ms) continue;
+        if (group.last_nack_ms != 0 && now_ms - group.last_nack_ms < rl_ms) continue;
+
+        // Ask for exactly `shortfall` missing DATA shards — any of them closes
+        // the group, and only data packets live in the host's retransmit ring
+        // (parity is never stored there).
+        int asked = 0;
+        for (int j = 0; j < static_cast<int>(group.k) && asked < shortfall; ++j) {
+            if (!group.data_shards[j].empty()) continue;
+            if (out.size() >= max_keys) break;
+            out.push_back(group.pkt_keys[j]);
+            ++asked;
+        }
+        if (asked > 0) group.last_nack_ms = now_ms;
+    }
 }
 
 void FecDecoder::expire_old_groups() {

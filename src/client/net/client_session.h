@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -532,6 +533,26 @@ private:
     // packet (tens of fragments/frame × 60fps).  Cleared on entry; the
     // outer vector keeps its capacity between calls.
     std::vector<std::vector<uint8_t>> fec_recovered_scratch_;
+
+    // VIV-88 targeted FEC rescue: scratch for the near-complete groups' missing
+    // shard keys, plus a counter for how many we've asked for (HUD/diagnostics).
+    // The per-poll cap keeps rescue traffic a small fraction of the host's
+    // retransmit budget (MAX_RETX_PER_POLL) so it never starves the frame
+    // assembler's NACKs or inflates the retx ratio the bitrate controller
+    // treats as a congestion signal.
+    std::vector<uint32_t> rescue_keys_scratch_;
+    uint64_t              fec_rescue_requests_ = 0;
+    static constexpr size_t MAX_RESCUE_KEYS_PER_POLL = 8;
+
+    // Test hooks, read once in start().  VIVORA_SIM_LOSS=<percent> discards
+    // that share of incoming video packets so the loss path can be driven
+    // deterministically on a loopback rig (real loss needs a WiFi link or
+    // privileged tc/netem); VIVORA_FEC_RESCUE=0 turns the VIV-88 rescue off so
+    // the two behaviours can be A/B'd back to back on the same rig.
+    int          sim_loss_pct_       = 0;
+    uint64_t     sim_loss_dropped_   = 0;
+    std::mt19937 sim_loss_rng_{0xF00Du};
+    bool         fec_rescue_enabled_ = true;
 
     // Async socket-receive thread (VIV-81; VIVORA_PIPELINE=threaded).  A
     // dedicated thread drains the video socket into recv_ring_ continuously

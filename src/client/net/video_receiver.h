@@ -67,6 +67,19 @@ public:
         return assembler_.collect_nacks(gap_ms, rate_limit_ms);
     }
 
+    // VIV-88: wire keys for FEC groups sitting one or two shards short of
+    // recovery (see FecDecoder::collect_rescue_keys).  Complements the
+    // assembler NACK above, which can only see frames that already have a
+    // fragment in hand — a group wiped by a burst is invisible to it.
+    void collect_rescue_keys(std::vector<uint32_t>& out, int64_t grace_ms,
+                             int64_t rate_limit_ms, size_t max_keys) {
+        fec_decoder_.collect_rescue_keys(out, grace_ms, rate_limit_ms, max_keys);
+    }
+
+    // VIV-88: how long a near-complete group waits for its rescued shard before
+    // being declared lost (see FecDecoder::set_rescue_window_ms).
+    void set_fec_rescue_window_ms(int64_t ms) { fec_decoder_.set_rescue_window_ms(ms); }
+
     // Packet loss rate from FEC decoder (EWMA, 0.0–1.0).
     float    loss_rate()     const { return fec_decoder_.loss_rate(); }
     uint64_t fec_recovered() const { return fec_decoder_.total_recovered(); }

@@ -131,6 +131,15 @@ public:
     // steady percentage; legacy: 100*M/K (equivalent to the old K/(K+M) carve).
     uint32_t fec_overhead_pct() const {
         if (per_frame_fec_) return static_cast<uint32_t>(current_fec_pct());
+        // VIV-88: interleaved mode sizes every group off the ladder percentage,
+        // so report the ladder rather than 100*M/K of whichever group happened
+        // to be built last.  The instantaneous ratio swings frame to frame once
+        // the small-group parity floor kicks in (a 2-packet frame carries M=2 =
+        // "100% overhead"), and feeding that swing to the wire carve-out
+        // re-carves the encoder several times a second — the exact flapping
+        // VIV-84 had to fix.  Tiny frames are a rounding error in bytes, so the
+        // ladder is also the more honest estimate of what the wire carries.
+        if (fec_interleave_ > 1) return static_cast<uint32_t>(current_fec_pct());
         uint8_t k = fec_encoder_.group_size();
         uint8_t m = fec_encoder_.parity_count();
         return k ? static_cast<uint32_t>(100u * m / k) : 0;
@@ -226,6 +235,12 @@ private:
     // as failure-driven M climbs under burst loss.
     bool per_frame_fec_ = false;
     uint8_t fec_interleave_ = 1;   // VIV-82 burst interleaving depth; 1 = off
+    // VIV-88: smallest parity a group may carry, whatever the ratio says.  The
+    // percentage ladder is meaningless at K=2-4 (a static desktop's frames),
+    // where it rounds down to a single parity shard and one lost packet costs
+    // the frame.  Two shards there cost a couple of KB and buy the group a
+    // second life — and give the client's targeted rescue something to work on.
+    static constexpr int MIN_PARITY_SHARDS = 2;
     int current_fec_pct() const {
         int p = static_cast<int>(steady_m_) * 10;
         return p < 25 ? 25 : (p > 75 ? 75 : p);
