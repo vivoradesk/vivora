@@ -17,6 +17,21 @@
 
 namespace vivora {
 
+namespace {
+
+// Stamp the platform's switch capability onto every advertised display, so a
+// viewer never offers a "switch to this monitor" control that the host will
+// silently ignore (Linux enumerates displays but cannot retarget capture).
+std::vector<vivora::protocol::MonitorDesc>
+advertised_monitors(vivora::HostPlatform& platform) {
+    auto list = platform.list_monitors();
+    const bool can_switch = platform.supports_monitor_switch();
+    for (auto& m : list) m.switchable = can_switch;
+    return list;
+}
+
+} // namespace
+
 int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // Capture → encode → fragment → send all runs single-threaded on this
     // loop; a background compile or Windows Update scan preempting it adds
@@ -383,7 +398,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             if (prev_client_count == 0 && now_count > 0) {
                 if (!platform.start_encoder()) {
                     log::error("HOST", "start_encoder() failed — dropping connecting client");
-                    session.disconnect_all_clients();
+                    session.disconnect_all_clients(
+                        protocol::DisconnectReason::EncoderFailed);
                     prev_client_count = 0;
                     continue;
                 }
@@ -476,7 +492,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             if (idle_warned && idle_sec >= disc_at) {
                 log::info("HOST", "Idle %llds — force-disconnecting clients",
                           (long long)idle_sec);
-                session.disconnect_all_clients();
+                session.disconnect_all_clients(
+                    protocol::DisconnectReason::IdleTimeout);
                 idle_warned = false;
                 continue;   // skip this tick's encode work; loop top will
                             // see client_count==0 and take the lazy path
@@ -660,7 +677,7 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // VIV-50 monitor selection.  Answer a display-list request by
         // enumerating the platform, and apply a pending display switch.
         if (session.consume_monitor_list_request()) {
-            session.send_monitor_list(platform.list_monitors());
+            session.send_monitor_list(advertised_monitors(platform));
         }
         // VIV-112 codec negotiation: a client whose decoder can't handle the
         // configured codec (advertised in its HELLO caps, or a runtime decode
@@ -712,12 +729,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 loss_grace_until = std::chrono::steady_clock::now()
                                  + std::chrono::milliseconds(1500);
                 // Re-advertise so the panel's "viewing" highlight follows.
-                session.send_monitor_list(platform.list_monitors());
+                session.send_monitor_list(advertised_monitors(platform));
                 log::info("HOST", "Switched to display %u (%ux%u)",
                           want_monitor, cap_w, cap_h);
             } else {
                 log::warn("HOST", "Display switch to %u failed — staying on current",
                           want_monitor);
+                // Re-advertise so the viewer's optimistic highlight snaps back
+                // to the display we are actually streaming.  Without this the
+                // panel keeps claiming it switched.
+                session.send_monitor_list(advertised_monitors(platform));
             }
         }
 

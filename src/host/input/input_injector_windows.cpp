@@ -205,6 +205,9 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     return std::make_unique<WinInputInjector>();
 }
 
+// SendInput needs no permission beyond running as the user.
+std::string InputInjector::unavailable_reason() { return {}; }
+
 } // namespace vivora::host
 
 #endif // VIVORA_WINDOWS

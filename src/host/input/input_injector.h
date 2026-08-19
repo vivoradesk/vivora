@@ -3,6 +3,7 @@
 #include "common/protocol/input_event.h"
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace vivora::host {
 
@@ -24,6 +25,16 @@ public:
 
     // Factory: create the platform-appropriate injector.
     static std::unique_ptr<InputInjector> create();
+
+    // Why remote input will not work on this machine, phrased for a user, or
+    // an empty string when it will.
+    //
+    // Exists because the failure is otherwise invisible in the worst possible
+    // way: on Linux /dev/uinput is root-only by default, so a host streams a
+    // perfect picture and silently ignores every keystroke.  That reads as a
+    // broken product rather than a missing permission, and the fix only ever
+    // appeared in a log file.  Cheap enough to call before every share.
+    static std::string unavailable_reason();
 };
 
 } // namespace vivora::host

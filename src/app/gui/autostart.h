@@ -13,8 +13,12 @@ namespace vivora::gui {
 // remove the entry externally (Task Manager, regedit) and the Settings
 // checkbox must follow reality on next launch.
 //
-// macOS / Linux backends are a separate future issue; on those
-// platforms supported() is false and the UI keeps the toggle disabled.
+// Linux: an XDG autostart entry at $XDG_CONFIG_HOME/autostart/
+// dev.vivora.app.desktop.  Same rule as Windows -- the file on disk is the
+// source of truth, so removing it externally is reflected in the UI.
+//
+// macOS (LaunchAgent) is still a stub; there supported() is false and the
+// UI keeps the toggle disabled.
 class Autostart {
 public:
     // True when this build has a real backend for the current OS.
@@ -27,9 +31,9 @@ public:
     static void setEnabled(bool on);
 };
 
-#ifndef Q_OS_WIN
-// Non-Windows stub — the Windows implementation lives in autostart_win.cpp,
-// which is only added to the build on WIN32 (see src/app/CMakeLists.txt).
+#if !defined(Q_OS_WIN) && !defined(Q_OS_LINUX)
+// Stub for platforms with no backend yet (macOS).  autostart_win.cpp and
+// autostart_linux.cpp are added per-platform in src/app/CMakeLists.txt.
 inline bool Autostart::supported()   { return false; }
 inline bool Autostart::enabled()     { return false; }
 inline void Autostart::setEnabled(bool) {}

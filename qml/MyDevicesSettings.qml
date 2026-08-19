@@ -6,17 +6,18 @@ import QtQuick.Layouts
 // strip + tier badge, optional trial banner, then either the device table or
 // the ProGate (free tier), and the remote-removal footnote.
 //
-// Data/tier from the isolated DeviceMockModel.  `accountName` / `accountEmail`
-// default to the mock but can be fed the real signed-in identity by the
-// parent (see SettingsDialog) — the device rows themselves stay mock until the
-// VIV-52 backend lands.
+// Tier from the isolated DeviceMockModel.  `accountName` / `accountEmail` are
+// fed the real signed-in identity by the parent (see SettingsDialog) and are
+// empty when nobody is signed in — they used to default to a plausible-looking
+// fake person, which every fresh install then showed as its own account.
 ColumnLayout {
     id: pane
     property DevicePalette pal: DevicePalette {}
     property DeviceMockModel mock: DeviceMockModel {}
 
-    property string accountName: "Maxim Kozlov"
-    property string accountEmail: "maxim@vivora.dev"
+    property string accountName: ""
+    property string accountEmail: ""
+    readonly property bool signedIn: pane.accountEmail.length > 0
 
     signal notify(string message)
     signal upgradeRequested()
@@ -68,11 +69,15 @@ ColumnLayout {
             Rectangle {
                 Layout.preferredWidth: 44; Layout.preferredHeight: 44
                 radius: 12
-                color: pane.pal.ink
+                color: pane.signedIn ? pane.pal.ink : pane.pal.paperDeep
+                border.width: pane.signedIn ? 0 : 1
+                border.color: pane.pal.hairStrong
                 Label {
                     anchors.centerIn: parent
-                    text: pane._initials(pane.accountName, pane.accountEmail)
-                    color: pane.pal.paper
+                    text: pane.signedIn
+                          ? pane._initials(pane.accountName, pane.accountEmail)
+                          : "—"
+                    color: pane.signedIn ? pane.pal.paper : pane.pal.inkMid
                     font.family: pane.pal.sans
                     font.pixelSize: 16
                     font.weight: Font.Medium
@@ -82,14 +87,15 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
                 Label {
-                    text: pane.accountName
-                    color: pane.pal.ink
+                    text: pane.signedIn ? pane.accountName : "Not signed in"
+                    color: pane.signedIn ? pane.pal.ink : pane.pal.inkMid
                     font.family: pane.pal.sans
                     font.pixelSize: 14
                     font.weight: Font.Medium
                 }
                 Label {
-                    text: pane.accountEmail
+                    text: pane.signedIn ? pane.accountEmail
+                                        : "Sign in above to link this device to your account"
                     color: pane.pal.inkMid
                     font.family: pane.pal.mono
                     font.pixelSize: 11
@@ -148,7 +154,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.topMargin: 4
         pal: pane.pal
-        onStartTrialRequested: pane.notify("Starting your 14-day Pro trial…")
+        onUpgradeRequested: pane.upgradeRequested()
     }
 
     // ── Table (pro / trial) ─────────────────────────────────────────────

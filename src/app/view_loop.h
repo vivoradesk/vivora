@@ -91,6 +91,11 @@ public:
 
     int exit_code() const { return exit_code_; }
 
+    // Why init() returned false, phrased for a user, or empty when it
+    // succeeded or paused for a TOFU trust decision.  The GUI shows this
+    // instead of a single "Could not connect" for every possible cause.
+    const std::string& init_error() const { return init_error_; }
+
     // Live stats for the GUI; updated in iter().
     uint64_t frames_decoded() const { return frames_decoded_; }
     double   rtt_ms() const;
@@ -136,6 +141,7 @@ private:
     bool      codec_downgrade_tried_ = false;
     bool      audio_started_     = false;
     int       exit_code_         = 0;
+    std::string init_error_;
     bool      torn_down_         = false;
 
     // In-stream menu state (VIV-74).  view_only_ gates the input callback so

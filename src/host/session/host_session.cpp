@@ -1347,10 +1347,14 @@ int64_t HostSession::seconds_since_last_input() const {
         Clock::now() - last_input_time_).count();
 }
 
-void HostSession::disconnect_all_clients() {
+void HostSession::disconnect_all_clients(protocol::DisconnectReason reason) {
     if (clients_.empty()) return;
-    log::info("HostSession", "Force-disconnecting %zu client(s) (idle timeout)",
-              clients_.size());
+    log::info("HostSession", "Force-disconnecting %zu client(s), reason %u",
+              clients_.size(), static_cast<unsigned>(reason));
+    // Tell each viewer why while its cipher state is still live.  Without
+    // this they only notice on the recv timeout, report nothing useful, and
+    // then reconnect straight back into the same condition.
+    for (auto& kv : clients_) send_disconnect(kv.second, reason);
     clients_.clear();
     state_ = SessionState::Disconnected;
     // Socket stays open — new HELLOs from fresh clients will land in

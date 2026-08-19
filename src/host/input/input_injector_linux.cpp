@@ -1,6 +1,8 @@
 #ifdef VIVORA_LINUX
 
 #include "host/input/input_injector.h"
+
+#include <string>
 #include "common/utils/log.h"
 
 #include <fcntl.h>
@@ -351,6 +353,23 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     auto inj = std::make_unique<UinputInjector>();
     if (!inj->open_dev()) return nullptr;
     return inj;
+}
+
+std::string InputInjector::unavailable_reason() {
+    // Distinguish the two failures the user can actually act on: the module
+    // is not loaded at all, or it is loaded and we are not in a group that
+    // may write to it.  Everything else falls through to the generic text.
+    if (::access("/dev/uinput", F_OK) != 0) {
+        return "Remote keyboard and mouse are unavailable: /dev/uinput does not "
+               "exist. Load the module with `sudo modprobe uinput`, then install "
+               "the udev rule shipped in packaging/linux/.";
+    }
+    if (::access("/dev/uinput", W_OK) != 0) {
+        return "Remote keyboard and mouse are unavailable: no write access to "
+               "/dev/uinput. Install the udev rule from packaging/linux/ and run "
+               "`sudo usermod -aG input $USER`, then log out and back in.";
+    }
+    return {};
 }
 
 } // namespace vivora::host

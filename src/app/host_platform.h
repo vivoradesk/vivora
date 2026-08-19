@@ -45,6 +45,13 @@ struct HostPlatform {
     // the pointer IS the user's physical mouse (VIV-50).
     virtual bool select_monitor(uint32_t /*index*/, bool /*seed_cursor*/ = true) { return false; }
 
+    // Whether select_monitor() is implemented at all on this platform.  A host
+    // that enumerates displays but cannot retarget capture (Linux today) must
+    // say so: host_loop clears the `switchable` bit on every advertised
+    // display, and the viewer's panel then shows the list without offering a
+    // control that silently does nothing.
+    virtual bool supports_monitor_switch() const { return false; }
+
     // The codec the encoder actually produces.  May differ from what the
     // caller requested if the backend had to fall back (e.g. NVENC refusing
     // H.264 and using HEVC instead).  Defaults to HEVC.

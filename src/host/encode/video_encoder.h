@@ -20,9 +20,10 @@ namespace vivora {
 // Which hardware encoder backend to use. `Auto` probes available runtimes.
 enum class EncoderKind : uint8_t {
     Auto = 0,
-    Amf,     // AMD
-    Nvenc,   // NVIDIA
-    Qsv,     // Intel Quick Sync (oneVPL)
+    Amf,     // AMD, Windows
+    Nvenc,   // NVIDIA, Windows and Linux
+    Qsv,     // Intel Quick Sync (oneVPL), Windows
+    Vaapi,   // Linux, any vendor with a VA-API driver
 };
 
 struct EncoderConfig {

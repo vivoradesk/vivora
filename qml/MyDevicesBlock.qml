@@ -20,6 +20,7 @@ ColumnLayout {
     signal connectRequested(string peerCode, string pubkey, string devName)
     signal copyPeerCode(string code, string devName)
     signal notify(string message)
+    signal upgradeRequested()
 
     spacing: 0
 
@@ -123,7 +124,7 @@ ColumnLayout {
         visible: block.isFree
         Layout.fillWidth: true
         pal: block.pal
-        onStartTrialRequested: block.notify("Starting your 14-day Pro trial…")
+        onUpgradeRequested: block.upgradeRequested()
     }
 
     // Empty → no-other-devices card

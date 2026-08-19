@@ -111,6 +111,10 @@ const char* ClientSession::disconnect_status_text() const {
             return "Removed from your account";
         case protocol::DisconnectReason::HostShutdown:
             return "The host ended the session";
+        case protocol::DisconnectReason::EncoderFailed:
+            return "The host has no working video encoder";
+        case protocol::DisconnectReason::IdleTimeout:
+            return "Disconnected after a period of inactivity";
         default:
             return "Disconnected by host";
     }
@@ -297,11 +301,15 @@ bool ClientSession::establish(bool is_reconnect) {
 
     if (host_addr_.ip == 0) {
         log::error("ClientSession", "Invalid host IP: %s", host_ip_.c_str());
+        last_error_ = "That address isn't reachable. Check the IP or use the "
+                      "host's peer code instead.";
         return false;
     }
     if (!host_key_set_) {
         log::error("ClientSession",
             "Could not resolve host pubkey (rendezvous lookup failed)");
+        last_error_ = "Couldn't find that peer. Check the code, and that the "
+                      "other machine has Vivora open and is sharing.";
         return false;
     }
 

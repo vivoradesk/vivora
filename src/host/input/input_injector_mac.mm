@@ -302,6 +302,10 @@ std::unique_ptr<InputInjector> InputInjector::create() {
     return std::make_unique<MacInputInjector>();
 }
 
+// Accessibility is requested separately at startup on macOS; a
+// missing grant surfaces there, not here.
+std::string InputInjector::unavailable_reason() { return {}; }
+
 } // namespace vivora::host
 
 #endif // VIVORA_MACOS

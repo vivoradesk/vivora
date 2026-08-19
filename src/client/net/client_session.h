@@ -178,6 +178,12 @@ public:
     // User-visible terminal status for the view overlay.  Empty until a
     // Disconnect packet arrives.  Strings only — no ticket refs.
     const char* disconnect_status_text() const;
+
+    // Why start() returned false, phrased for a user ("Couldn't find that peer
+    // code..."), or empty when it succeeded / paused for a trust decision.
+    // Every connect failure used to collapse into one tray balloon that said
+    // "Could not connect" and nothing else.
+    const std::string& last_error() const { return last_error_; }
     double rtt_ms() const { return rtt_ms_; }
     // Wire path for the in-stream menu header (VIV-74).
     const char* transport_label() const { return relay_active_ ? "Relay" : "P2P"; }
@@ -326,6 +332,7 @@ private:
     // Stored connect target so a reconnect can re-run establish() without the
     // caller (VIV-54).  Everything else the reconnect needs (host key, peer
     // code, rendezvous/relay endpoints) is already held in the setters below.
+    std::string last_error_;   // user-facing reason start() failed
     std::string host_ip_;
     uint16_t    port_ = 0;
 

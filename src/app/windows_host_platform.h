@@ -32,6 +32,7 @@ public:
 
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
     bool select_monitor(uint32_t index, bool seed_cursor = true) override;
+    bool supports_monitor_switch() const override { return true; }
     int32_t input_origin_x() const override;
     int32_t input_origin_y() const override;
 

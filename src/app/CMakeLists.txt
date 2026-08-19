@@ -126,11 +126,13 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/app_icon.cpp
         ${CMAKE_SOURCE_DIR}/qml/qml.qrc
     )
+    # Start-at-login backend (VIV-18): HKCU Run key on Windows, an XDG
+    # autostart .desktop entry on Linux.  macOS still uses the inline no-op
+    # stubs in gui/autostart.h.
     if(WIN32)
-        # Start-at-login backend (VIV-18): HKCU Run key.  Non-Windows builds
-        # use the inline no-op stubs in gui/autostart.h until the macOS /
-        # Linux backends land (separate issue).
         target_sources(vivora PRIVATE gui/autostart_win.cpp)
+    elseif(UNIX AND NOT APPLE)
+        target_sources(vivora PRIVATE gui/autostart_linux.cpp)
     endif()
 endif()
 

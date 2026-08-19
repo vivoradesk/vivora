@@ -3,14 +3,18 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // Free-tier conversion teaser (devices.jsx ProGate).  Blurred "ghost" device
-// rows behind a lock chip + value prop + trial CTA.  Real QtQuick blur needs
-// the GraphicsEffects module; we approximate with low-opacity placeholder
-// blocks under a fade so no extra module has to be linked.
+// rows behind a lock chip, the value prop, and the upgrade CTA.  Real QtQuick
+// blur needs the GraphicsEffects module; we approximate with low-opacity
+// placeholder blocks under a fade so no extra module has to be linked.
+//
+// The CTA used to read "Start 14-day free trial" and open nothing -- the
+// trial entitlement is server-side work that has not shipped.  Advertising a
+// trial we cannot grant is worse than advertising the price we can charge.
 Rectangle {
     id: gate
     property DevicePalette pal: DevicePalette {}
 
-    signal startTrialRequested()
+    signal upgradeRequested()
 
     implicitWidth: 320
     implicitHeight: content.implicitHeight + 36
@@ -152,7 +156,7 @@ Rectangle {
                     spacing: 8
                     Glyph { name: "spark"; size: 13; color: gate.pal.paper; anchors.verticalCenter: parent.verticalCenter }
                     Label {
-                        text: "Start 14-day free trial"
+                        text: "Upgrade to Pro"
                         color: gate.pal.paper
                         font.family: gate.pal.sans
                         font.pixelSize: 13
@@ -165,7 +169,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: gate.startTrialRequested()
+                    onClicked: gate.upgradeRequested()
                 }
             }
             ColumnLayout {
@@ -173,7 +177,7 @@ Rectangle {
                 Label {
                     // Real Vivora Pro price — the handoff mockup's "$6/mo" is a
                     // placeholder.
-                    text: "<b>$9.90/mo</b> after trial"
+                    text: "<b>$9.90</b>/month"
                     textFormat: Text.RichText
                     color: gate.pal.inkMid
                     font.family: gate.pal.mono

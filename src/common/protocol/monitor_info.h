@@ -28,6 +28,11 @@ struct MonitorDesc {
     uint16_t height  = 0;
     bool     primary = false;   // host's primary display
     bool     viewing = false;   // the display currently being captured/streamed
+    // Whether SelectMonitor on this host will actually do anything.  Hosts
+    // that enumerate displays but cannot switch between them (Linux today)
+    // clear it, so the client shows the list without a control that silently
+    // does nothing.  Older clients mask this bit off and behave as before.
+    bool     switchable = true;
 };
 
 // Host -> client: the full set of capturable displays.
@@ -35,7 +40,7 @@ struct MonitorDesc {
 // Wire format:
 //   count(1B) | repeated count times:
 //     index(1B) | width(2B LE) | height(2B LE) | flags(1B)
-//   flags: bit0 = primary, bit1 = viewing
+//   flags: bit0 = primary, bit1 = viewing, bit2 = switchable
 // = 1 + count * 6 bytes
 struct MonitorListMessage {
     std::vector<MonitorDesc> monitors;
@@ -57,8 +62,9 @@ struct MonitorListMessage {
             buf.push_back(static_cast<uint8_t>(m.height & 0xFF));
             buf.push_back(static_cast<uint8_t>((m.height >> 8) & 0xFF));
             uint8_t flags = 0;
-            if (m.primary) flags |= 0x01;
-            if (m.viewing) flags |= 0x02;
+            if (m.primary)    flags |= 0x01;
+            if (m.viewing)    flags |= 0x02;
+            if (m.switchable) flags |= 0x04;
             buf.push_back(flags);
         }
         return buf;
@@ -78,6 +84,7 @@ struct MonitorListMessage {
             m.height  = static_cast<uint16_t>(p[3] | (p[4] << 8));
             m.primary = (p[5] & 0x01) != 0;
             m.viewing = (p[5] & 0x02) != 0;
+            m.switchable = (p[5] & 0x04) != 0;
             out.monitors.push_back(m);
             p += REC_SIZE;
         }

@@ -45,7 +45,9 @@ Window {
         { header: "GENERAL" },
         { icon: "◐", label: "Account",          index: 0 },
         { icon: "▢", label: "Appearance",       index: 1 },
-        { icon: "⌘", label: "Shortcuts",        index: 2 },
+        // Not the Command glyph: this pane exists on Windows and Linux too,
+        // where U+2318 means nothing to anyone.
+        { icon: "⌨", label: "Shortcuts",        index: 2 },
         { icon: "↻", label: "Startup",          index: 8 },
         { header: "SESSION" },
         { icon: "⇄", label: "Network",          index: 3 },
@@ -631,16 +633,15 @@ Window {
                     }
 
                     // ── My Devices (personal mesh) ───────────────────
-                    // Front-end-ahead-of-backend preview driven by the isolated
-                    // DeviceMockModel; account name/email come from the real
-                    // signed-in identity when available.  Preview tiers with the
-                    // VIVORA_DEVICES_VARIANT env var (pro | trial | free).
+                    // Device rows come from the real account list when signed
+                    // in and from DeviceMockModel otherwise; name and email are
+                    // empty unless someone is actually signed in.  Preview the
+                    // tiers with VIVORA_DEVICES_VARIANT (pro | trial | free).
                     MyDevicesSettings {
                         Layout.fillWidth: true
                         accountName: App.accountLoggedIn && App.accountEmail.length > 0
-                                     ? App.accountEmail.split("@")[0] : "Maxim Kozlov"
-                        accountEmail: App.accountLoggedIn && App.accountEmail.length > 0
-                                      ? App.accountEmail : "maxim@vivora.dev"
+                                     ? App.accountEmail.split("@")[0] : ""
+                        accountEmail: App.accountLoggedIn ? App.accountEmail : ""
                         onUpgradeRequested: App.openUpgradePage()
                     }
                 }
@@ -758,13 +759,16 @@ Window {
                     }
                     Field {
                         title: "Encoder"
-                        help: "Hardware encoder backend."
+                        help: "Hardware encoder backend. Automatic probes what this machine has."
                         CreamCombo {
-                            entries: [ { text: "Auto" },
-                                       { text: "AMD",    sub: "AMF" },
-                                       { text: "NVIDIA", sub: "NVENC" },
-                                       { text: "Intel",  sub: "QSV" } ]
-                            currentIndex: App.settings.encoderIndex
+                            // Backends come from C++: the list used to be a
+                            // hardcoded AMF/NVENC/QSV, which named three
+                            // Windows-only encoders to a Linux user.
+                            entries: App.encoderOptions.map(function (name) {
+                                return { text: name }
+                            })
+                            currentIndex: Math.min(App.settings.encoderIndex,
+                                                   App.encoderOptions.length - 1)
                             onActivated: App.settings.encoderIndex = currentIndex
                         }
                     }
@@ -801,11 +805,13 @@ Window {
                         }
                     }
                     Field {
-                        title: "HDR passthrough"
-                        help: "Stream HDR10 metadata when the host display supports it."
-                        CreamSwitch {
-                            checked: App.settings.hdrPassthrough
-                            onToggled: App.settings.hdrPassthrough = checked
+                        title: "HDR"
+                        help: "Detected from the captured surface. An HDR display promotes the stream to HEVC Main10 on its own; there is nothing to configure."
+                        Label {
+                            text: "Automatic"
+                            color: theme.textMuted
+                            font.family: theme.monoFont
+                            font.pixelSize: 12
                         }
                     }
                 }
@@ -827,14 +833,6 @@ Window {
                                        { text: "Auto-accept", sub: "advanced" } ]
                             currentIndex: App.settings.approvalMode
                             onActivated: App.settings.approvalMode = currentIndex
-                        }
-                    }
-                    Field {
-                        title: "One session at a time"
-                        help: "Reject new connections while a session is active."
-                        CreamSwitch {
-                            checked: App.settings.singleSessionLock
-                            onToggled: App.settings.singleSessionLock = checked
                         }
                     }
                     Field {
@@ -980,7 +978,7 @@ Window {
                     }
                     Field {
                         title: "Version"
-                        Label { text: "0.1.0"; color: theme.text; font.family: theme.monoFont }
+                        Label { text: App.appVersion; color: theme.text; font.family: theme.monoFont }
                     }
                     Field {
                         title: "Peer code"
@@ -1074,7 +1072,7 @@ Window {
                         title: "Start at login"
                         help: App.settings.startAtLoginSupported
                               ? "Launch Vivora automatically when you sign in."
-                              : "Windows only for now — macOS and Linux are on the way."
+                              : "Not available on this platform yet."
                         CreamSwitch {
                             enabled: App.settings.startAtLoginSupported
                             checked: App.settings.startAtLogin

@@ -89,6 +89,11 @@ signals:
     void stopped();
     // Platform init failed (no DXGI device, encoder unavailable, etc.).
     void initFailed(QString reason);
+    // Sharing started, but something the user should know about is degraded --
+    // today: remote input will not work because /dev/uinput is not writable.
+    // Not a failure: the video stream is fine, which is exactly why this has
+    // to be said out loud rather than left in the log.
+    void initWarning(QString reason);
     // Idle warning fired — clients have been silent for idle_timeout_min
     // and we'll force-disconnect them in `seconds_until_disconnect`
     // seconds unless they send input first.  AppController surfaces

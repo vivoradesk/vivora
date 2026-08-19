@@ -29,8 +29,10 @@ ApplicationWindow {
     readonly property bool statePulsing: App.sharing
 
     // The app stays running in the tray; closing the window only hides it.
+    // With no tray there is nothing to hide into, so the close goes through
+    // and the process exits (see setQuitOnLastWindowClosed in gui_main.cpp).
     onClosing: (close) => {
-        if (App.settings.minimizeToTray) {
+        if (App.trayAvailable && App.settings.minimizeToTray) {
             close.accepted = false
             window.hide()
         }
@@ -38,6 +40,13 @@ ApplicationWindow {
 
     Connections {
         target: App
+        // In-window toast.  Deliberately does not raise the window: the C++
+        // side also fires a tray balloon, so a message that arrives while the
+        // window is hidden is not lost, and one that arrives while the user is
+        // working elsewhere does not steal focus.
+        function onToastRequested(message) {
+            window.showToast(message)
+        }
         function onShowWindowRequested() {
             window.show()
             window.raise()
@@ -426,6 +435,45 @@ ApplicationWindow {
         anchors.margins: 12
         spacing: 10
 
+        // ── No system tray notice ────────────────────────────────────
+        // Stock GNOME ships no StatusNotifier host, so on those desktops
+        // Vivora has no tray icon to fall back to.  It still runs, but the
+        // window is the only handle on it and closing the window quits, so
+        // say that once rather than letting the user discover it.
+        Rectangle {
+            id: noTrayBanner
+            property bool dismissed: false
+            visible: !App.trayAvailable && !dismissed
+            Layout.fillWidth: true
+            Layout.preferredHeight: noTrayText.implicitHeight + 18
+            radius: 8
+            color: Qt.rgba(0.65, 0.45, 0.10, 0.10)
+            border.color: Qt.rgba(0.65, 0.45, 0.10, 0.45)
+            border.width: 1
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 10
+                spacing: 10
+                Label {
+                    id: noTrayText
+                    Layout.fillWidth: true
+                    text: "This desktop has no system tray, so Vivora quits when you " +
+                          "close this window. On GNOME, the AppIndicator extension adds one."
+                    color: theme.text
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    text: "✕"
+                    color: theme.textMuted
+                    font.pixelSize: 14
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: noTrayBanner.dismissed = true }
+                }
+            }
+        }
+
         // ── Update banner (VIV-69) — shown when a newer build is published ──
         Rectangle {
             id: updateBanner
@@ -760,6 +808,7 @@ ApplicationWindow {
                 MyDevicesBlock {
                     id: myDevicesBlock
                     Layout.fillWidth: true
+                    onUpgradeRequested: App.openUpgradePage()
                     // Connect a mesh device through the same path as the manual
                     // peer-code input — dial its peer code via App.connectToPeer.
                     onConnectRequested: (peerCode, pubkey, devName) => {
@@ -801,35 +850,83 @@ ApplicationWindow {
                     }
                 }
 
-                TextField {
-                    id: peerInput
+                // Enter used to be the only way to dial, with no button, no
+                // validation and no feedback -- a mistyped code just froze the
+                // window for a few seconds and then did nothing visible.
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 36
-                    leftPadding: 12
-                    rightPadding: 12
-                    placeholderText: "peer code (e.g. swift-tiger-4271)"
-                    placeholderTextColor: theme.inkFaint
-                    font.family: theme.monoFont
-                    font.pixelSize: 13
-                    color: theme.ink
-                    // selectByMouse + selectionColor → keep selection legible on
-                    // the warm-bg theme (default Qt palette picks blue that
-                    // clashes).
-                    selectByMouse: true
-                    selectionColor: theme.accent
-                    selectedTextColor: "#ffffff"
-                    background: Rectangle {
-                        color: theme.paper
-                        border.color: peerInput.activeFocus ? theme.ink : theme.hairStrong
-                        border.width: 1
-                        radius: 8
+                    spacing: 8
+
+                    TextField {
+                        id: peerInput
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 36
+                        leftPadding: 12
+                        rightPadding: 12
+                        placeholderText: "peer code (e.g. swift-tiger-4271)"
+                        placeholderTextColor: theme.inkFaint
+                        font.family: theme.monoFont
+                        font.pixelSize: 13
+                        color: theme.ink
+                        // selectByMouse + selectionColor → keep selection legible on
+                        // the warm-bg theme (default Qt palette picks blue that
+                        // clashes).
+                        selectByMouse: true
+                        selectionColor: theme.accent
+                        selectedTextColor: "#ffffff"
+
+                        readonly property string trimmed: text.trim()
+                        // A memorable code, or the raw 64-hex host key that the
+                        // Recent list and My Devices hand us.
+                        readonly property bool looksValid:
+                            /^[a-zA-Z]+-[a-zA-Z]+-[0-9]{4}$/.test(trimmed) ||
+                            /^[0-9a-fA-F]{64}$/.test(trimmed)
+                        readonly property bool showsError:
+                            trimmed.length > 0 && !looksValid
+
+                        background: Rectangle {
+                            color: theme.paper
+                            border.color: peerInput.showsError ? theme.red
+                                        : peerInput.activeFocus ? theme.ink
+                                        : theme.hairStrong
+                            border.width: 1
+                            radius: 8
+                        }
+                        onAccepted: dialPeer()
                     }
-                    onAccepted: {
-                        if (text.length > 0) {
-                            App.connectToPeer(text)
-                            text = ""
+
+                    Rectangle {
+                        Layout.preferredHeight: 36
+                        Layout.preferredWidth: connectLbl.implicitWidth + 28
+                        radius: 8
+                        enabled: peerInput.looksValid
+                        opacity: enabled ? 1 : 0.45
+                        color: connectHover.containsMouse && enabled ? theme.inkMid : theme.ink
+                        Label {
+                            id: connectLbl
+                            anchors.centerIn: parent
+                            text: "Connect"
+                            color: theme.paper
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: connectHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: peerInput.looksValid
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: dialPeer()
                         }
                     }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: peerInput.showsError
+                    text: "Peer codes look like swift-tiger-4271."
+                    color: theme.red
+                    font.pixelSize: 11
                 }
 
                 // Divider — sets the Recent list (which mixes outgoing ↑ and
@@ -839,13 +936,13 @@ ApplicationWindow {
                     Layout.preferredHeight: 1
                     Layout.topMargin: 2
                     color: theme.border
-                    visible: App.peers.rowCount() > 0
+                    visible: App.peers.count > 0
                 }
 
                 // Recent label + count badge
                 RowLayout {
                     Layout.fillWidth: true
-                    visible: App.peers.rowCount() > 0
+                    visible: App.peers.count > 0
                     Label {
                         text: "RECENT"
                         color: theme.inkMid
@@ -855,7 +952,7 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: App.peers.rowCount()
+                        text: App.peers.count
                         color: theme.inkFaint
                         font.family: theme.monoFont
                         font.pixelSize: 10
@@ -869,10 +966,10 @@ ApplicationWindow {
                 // goes to Recent rather than an empty gap.
                 AddressBookView {
                     id: recentList
-                    visible: App.peers.rowCount() > 0
+                    visible: App.peers.count > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: App.peers.rowCount() > 0 ? 114 : 0
+                    Layout.minimumHeight: App.peers.count > 0 ? 114 : 0
                     interactive: height < contentHeight
                     onPeerActivated: (alias, pubkey, code) => {
                         App.connectToPeer(pubkey.length > 0 ? pubkey : code)
@@ -918,6 +1015,14 @@ ApplicationWindow {
     // Transient toast — bottom-centre confirmation for actions that
     // otherwise give no visual feedback (copy, refresh).  showToast(text)
     // pops it for ~1.6s then fades.
+    // Dial whatever is in the peer input, if it looks dialable.
+    function dialPeer() {
+        var code = peerInput.trimmed
+        if (code.length === 0 || !peerInput.looksValid) return
+        App.connectToPeer(code)
+        peerInput.text = ""
+    }
+
     function showToast(text) {
         toast.text = text
         toast.opacity = 1.0

@@ -1,5 +1,7 @@
 #include "app/gui/view_session.h"
 
+#include <QTimer>
+
 #ifdef VIVORA_WINDOWS
 #include "app/windows_view_platform.h"
 #endif
@@ -127,12 +129,18 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     // macOS (AppKit) and Linux (X11) are NOT thread-safe for the platform work
     // loop_->init() ends up doing (Cocoa view / CoreVideo, X11), so connect on
     // the main thread — a worker there corrupts the view and crashes on
-    // teardown.  finishConnect() is still deferred to the next event-loop turn
-    // (queued) so the caller can finish start() and track us first, keeping the
-    // success/trust/failure handling identical to the Windows path.
-    const bool ok = loop_->init(*platform_, loop_cfg_);
-    QMetaObject::invokeMethod(this, [this, ok]() { finishConnect(ok); },
-                              Qt::QueuedConnection);
+    // teardown.
+    //
+    // That blocks the event loop for as long as the handshake takes (STUN, a
+    // rendezvous lookup that retries for up to 3 s, a relay BIND for another
+    // 3 s), so paint the "Connecting…" overlay and hand control back to Qt for
+    // one turn FIRST.  Otherwise the user gets a frozen window and no
+    // indication that anything is happening at all.
+    if (platform_) platform_->set_status("Connecting…");
+    QTimer::singleShot(0, this, [this]() {
+        const bool ok = loop_->init(*platform_, loop_cfg_);
+        finishConnect(ok);
+    });
 #endif
     return true;
 }
@@ -162,6 +170,8 @@ void ViewSession::finishConnect(bool ok) {
     } else {
         log::error("ViewSession", "ViewLoopState::init failed (rc=%d)",
                    loop_ ? loop_->exit_code() : -1);
+        // Grab the reason before loop_ goes away — AppController shows it.
+        if (loop_) initError_ = QString::fromStdString(loop_->init_error());
     }
     loop_.reset();
     platform_.reset();

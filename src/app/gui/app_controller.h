@@ -15,6 +15,7 @@
 #include <QPair>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <memory>
 #include <vector>
@@ -37,6 +38,19 @@ class ClipboardSync;
 class AppController : public QObject {
     Q_OBJECT
 
+    // Build version, single-sourced from CMake's project(VERSION) via the
+    // VIVORA_VERSION compile definition.  Settings -> About used to carry a
+    // hardcoded literal, which drifts the moment we ship 0.1.1.
+    Q_PROPERTY(QString appVersion    READ appVersion    CONSTANT)
+    // False when the desktop offers no StatusNotifier host -- stock GNOME
+    // without the AppIndicator extension, for one.  The app still runs; the
+    // window just becomes the only way to reach it, so closing it has to
+    // quit rather than hide.
+    Q_PROPERTY(bool    trayAvailable READ trayAvailable CONSTANT)
+    // Encoder backends this platform actually has, in the order the Settings
+    // combo shows them.  The list used to be a hardcoded AMF/NVENC/QSV in QML,
+    // which named three Windows backends to a Linux user.
+    Q_PROPERTY(QStringList encoderOptions READ encoderOptions CONSTANT)
     Q_PROPERTY(bool    sharing       READ sharing       NOTIFY sharingChanged)
     Q_PROPERTY(int     clientCount   READ clientCount   NOTIFY clientCountChanged)
     Q_PROPERTY(QString myPeerCode    READ myPeerCode    NOTIFY identityChanged)
@@ -88,6 +102,11 @@ class AppController : public QObject {
 public:
     explicit AppController(QObject* parent = nullptr);
     ~AppController() override;
+
+    QString appVersion() const;
+    QStringList encoderOptions() const;
+    bool    trayAvailable() const { return trayAvailable_; }
+    void    setTrayAvailable(bool v) { trayAvailable_ = v; }
 
     bool    sharing() const     { return sharing_; }
     int     clientCount() const { return clientCount_; }
@@ -220,6 +239,12 @@ public slots:
     Q_INVOKABLE void dismissPoll();
 
 signals:
+    // Transient, in-window message.  main.qml turns this into the same toast
+    // the copy/rename actions use.  Anything a user needs to READ has to come
+    // through here rather than a tray balloon: on Linux the tray may be absent
+    // entirely, and QSystemTrayIcon::supportsMessages() is false on plenty of
+    // desktops that do have one, so balloons get silently dropped.
+    void toastRequested(const QString& message);
     void sharingChanged();
     void clientCountChanged();
     void identityChanged();
@@ -304,6 +329,7 @@ private:
     // tooltip + UI feel responsive without burning a thread.
     QTimer  pollTimer_;
 
+    bool    trayAvailable_ = true;
     bool    sharing_     = false;
     int     clientCount_ = 0;
     int     activeViews_ = 0;
