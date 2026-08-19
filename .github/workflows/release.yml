@@ -1,0 +1,75 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# What this does and does not do.
+#
+# The server tarball is fully reproducible on a runner -- the servers need no
+# Qt, no ffmpeg and no PipeWire -- so it is built here and attached
+# automatically. The desktop artefacts are not: the Windows build links Qt's
+# internal resource objects out of a Qt build tree, and the Linux AppImage
+# needs the Debian 11 image that compiles Qt from source. Both are produced by
+# hand and uploaded to the draft this workflow opens.
+#
+# That is why the release is created as a DRAFT. Publishing it before the
+# desktop artefacts are attached would leave people on the download page with
+# nothing to download.
+jobs:
+  servers:
+    name: server tarball
+    runs-on: ubuntu-latest
+    container: debian:11
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
+            libpulse-dev
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Package
+        run: scripts/package-servers.sh build-servers dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: servers
+          path: dist/*
+
+  draft:
+    name: draft release
+    needs: servers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: servers
+          path: dist
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::$notes is missing - write the release notes before tagging"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "Vivora ${GITHUB_REF_NAME}" \
+            --notes-file "$notes" \
+            dist/*
+          echo "Draft created. Attach the Windows zip/msi and the Linux"
+          echo "AppImage, then publish."
