@@ -130,26 +130,33 @@ public:
         if (!event_source_) {
             log::error(TAG, "CGEventSourceCreate failed");
         }
-        // CGEventPost(kCGHIDEventTap, ...) is silently dropped unless the
-        // app is granted Accessibility.  Trigger the system prompt the
-        // first time we start injecting — and log a clear warning so the
-        // user knows why their clicks aren't landing if they decline.
-        CFStringRef key = kAXTrustedCheckOptionPrompt;
-        CFBooleanRef value = kCFBooleanTrue;
-        CFDictionaryRef options = CFDictionaryCreate(
-            kCFAllocatorDefault,
-            (const void**)&key, (const void**)&value, 1,
-            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        const bool trusted = AXIsProcessTrustedWithOptions(options);
-        if (options) CFRelease(options);
-        if (!trusted) {
-            log::warn(TAG, "Vivora is not granted Accessibility — remote "
-                          "mouse and keyboard events will be silently dropped. "
-                          "Open System Settings -> Privacy & Security -> "
-                          "Accessibility and add Vivora.app.");
-        } else {
+        // CGEventPost(kCGHIDEventTap, ...) is silently dropped unless the app
+        // is granted Accessibility.  Ask, and say plainly in the log why the
+        // clicks are not landing if the answer is no.
+        if (AXIsProcessTrusted()) {
             log::info(TAG, "Accessibility permission granted");
+            return;
         }
+        log::warn(TAG, "Vivora is not granted Accessibility — remote "
+                      "mouse and keyboard events will be silently dropped. "
+                      "Open System Settings -> Privacy & Security -> "
+                      "Accessibility and add Vivora.app.");
+
+        // Raise the request on the main thread.  It presents UI, and this
+        // constructor runs on the host loop's thread: asked from there macOS
+        // does nothing at all -- no dialog, and no entry in System Settings
+        // for the user to switch on.  That is why the permission looked
+        // impossible to grant rather than merely un-granted.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CFStringRef key = kAXTrustedCheckOptionPrompt;
+            CFBooleanRef value = kCFBooleanTrue;
+            CFDictionaryRef options = CFDictionaryCreate(
+                kCFAllocatorDefault,
+                (const void**)&key, (const void**)&value, 1,
+                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            AXIsProcessTrustedWithOptions(options);
+            if (options) CFRelease(options);
+        });
     }
 
     ~MacInputInjector() override {
