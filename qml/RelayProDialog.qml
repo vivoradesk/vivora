@@ -34,7 +34,7 @@ Dialog {
         readonly property color accent:     "#3D6BFA"
         readonly property color accentSoft: "#e8edfe"
         readonly property color hair:       "#e4ded0"
-        readonly property string mono:      "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string mono:       App.monoFont
     }
 
     background: Rectangle {

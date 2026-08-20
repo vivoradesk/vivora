@@ -42,6 +42,14 @@ class AppController : public QObject {
     // VIVORA_VERSION compile definition.  Settings -> About used to carry a
     // hardcoded literal, which drifts the moment we ship 0.1.1.
     Q_PROPERTY(QString appVersion    READ appVersion    CONSTANT)
+    // The UI's two typefaces, resolved to a family that actually exists on
+    // this machine.  QML cannot do this itself: font.family takes ONE name,
+    // and the QML font type exposes no `families` list, so the CSS-style
+    // stacks the QML used to carry ("JetBrains Mono, Cascadia Mono, ...")
+    // were looked up verbatim, matched nothing, and every one of them fell
+    // back to the default face.
+    Q_PROPERTY(QString monoFont      READ monoFont      CONSTANT)
+    Q_PROPERTY(QString sansFont      READ sansFont      CONSTANT)
     // False when the desktop offers no StatusNotifier host -- stock GNOME
     // without the AppIndicator extension, for one.  The app still runs; the
     // window just becomes the only way to reach it, so closing it has to
@@ -104,6 +112,8 @@ public:
     ~AppController() override;
 
     QString appVersion() const;
+    QString monoFont() const;
+    QString sansFont() const;
     QStringList encoderOptions() const;
     bool    trayAvailable() const { return trayAvailable_; }
     void    setTrayAvailable(bool v) { trayAvailable_ = v; }

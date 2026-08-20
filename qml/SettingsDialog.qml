@@ -31,7 +31,7 @@ Window {
         readonly property color border:    "#d4cdba"
         readonly property color accent:    "#3D6BFA"
         readonly property color warn:      "#b6801b"   // amber notice
-        readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string monoFont:  App.monoFont
     }
 
     property int currentIndex: 3   // default to Network (most-used)

@@ -240,7 +240,7 @@ ApplicationWindow {
         readonly property color error:     "#dc3545"   // red
         readonly property color selected:  "#ded8c8"   // subtle active/selected fill
         readonly property color ctrlBg:     "#fbfaf5"   // near-white control fill (poll modal)
-        readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string monoFont:  App.monoFont
 
         // ── Design-handoff tokens (used by the restyled launcher) ──────
         readonly property color paper:      "#f6f4ef"

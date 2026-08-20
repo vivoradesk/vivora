@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include "app/gui/app_controller.h"
 
+#include <QFontDatabase>
+
 #include "app/gui/address_book.h"
 #include "app/gui/clipboard_sync.h"
 #include "app/gui/host_worker.h"
@@ -47,6 +49,42 @@ namespace vivora::gui {
 
 QString AppController::appVersion() const {
     return QStringLiteral(VIVORA_VERSION);
+}
+
+namespace {
+
+// First family from `wanted` that the font database actually has, or the
+// last entry as a give-up.  Resolved once: the database does not change
+// under a running app, and the bundled faces are registered before this
+// runs.
+QString first_available_family(const QStringList& wanted) {
+    const QStringList have = QFontDatabase::families();
+    for (const QString& f : wanted) {
+        if (have.contains(f, Qt::CaseInsensitive)) {
+            // Worth a line: it says whether the bundled face was actually
+            // registered, or whether the UI quietly fell back to a system one.
+            log::info("GUI", "UI font: %s", f.toUtf8().constData());
+            return f;
+        }
+    }
+    log::warn("GUI", "none of the wanted font families are installed: %s",
+              wanted.join(", ").toUtf8().constData());
+    return wanted.isEmpty() ? QString() : wanted.last();
+}
+
+} // namespace
+
+QString AppController::monoFont() const {
+    static const QString f = first_available_family(
+        { "JetBrains Mono", "Cascadia Mono", "Consolas", "Menlo",
+          "DejaVu Sans Mono", "monospace" });
+    return f;
+}
+
+QString AppController::sansFont() const {
+    static const QString f = first_available_family(
+        { "Inter", "Segoe UI", "Helvetica Neue", "DejaVu Sans", "sans-serif" });
+    return f;
 }
 
 // Index order here IS the wire format of the persisted encoderIndex setting,

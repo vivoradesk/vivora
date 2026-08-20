@@ -29,6 +29,6 @@ QtObject {
     readonly property color amberSoft:   Qt.rgba(182/255, 128/255, 27/255, 0.12)
     readonly property color amberBorder: Qt.rgba(182/255, 128/255, 27/255, 0.28)
 
-    readonly property string sans: "Inter, Segoe UI, -apple-system, sans-serif"
-    readonly property string mono: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+    readonly property string sans:  App.sansFont
+    readonly property string mono:  App.monoFont
 }

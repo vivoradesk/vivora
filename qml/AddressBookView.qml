@@ -24,7 +24,7 @@ ListView {
 
     signal peerActivated(string alias, string pubkey, string code)
 
-    readonly property string monoFont: "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+    readonly property string monoFont:  App.monoFont
 
     // One row per wheel notch.  A plain Flickable/ListView scrolls ~2 rows per
     // notch (a fraction of the viewport), which feels like it skips items in a

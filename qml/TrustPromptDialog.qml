@@ -48,7 +48,7 @@ Dialog {
         readonly property color warnBg:    "#faf2dd"
         readonly property color warnBorder:"#ead9ab"
         readonly property color warn:      "#b6801b"
-        readonly property string mono:     "JetBrains Mono, Cascadia Mono, Consolas, monospace"
+        readonly property string mono:      App.monoFont
     }
 
     background: Rectangle {
