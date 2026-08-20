@@ -85,7 +85,9 @@ protected:
     QPaintEngine* paintEngine() const override { return nullptr; }
 
 private:
-    void send_event(const protocol::InputEvent& ev);
+    // force=true bypasses the overlay suppression, for releasing keys the
+    // host already has down -- see the comment on the definition.
+    void send_event(const protocol::InputEvent& ev, bool force = false);
     protocol::MouseButton qt_to_button(Qt::MouseButton btn);
 
     // Apply shape+visibility → setCursor().  Called from the two hooks above

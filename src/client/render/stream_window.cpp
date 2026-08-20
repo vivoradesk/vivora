@@ -540,15 +540,21 @@ bool StreamWindow::nativeEvent(const QByteArray& eventType, void* message, qintp
     return QWidget::nativeEvent(eventType, message, result);
 }
 
-void StreamWindow::send_event(const protocol::InputEvent& ev) {
+void StreamWindow::send_event(const protocol::InputEvent& ev, bool force) {
     // While an overlay (in-stream menu / monitor panel) is up, the user is
     // interacting with the UI, not the host — forwarding input would drive
     // the remote cursor underneath the overlay (and on a loopback session it
     // teleports the LOCAL cursor away, making the overlay unclickable).  The
     // Mac view has suppressed input while its menu is open since VIV-74; the
     // Windows window never did (VIV-50).
-    if ((menu_ && menu_->isVisible())
-        || (monitor_panel_ && monitor_panel_->isVisible()))
+    //
+    // `force` exists for exactly one caller: releasing keys the host already
+    // has down.  That is not user input reaching the host, it is cleanup of
+    // input that already reached it, and suppressing it is what left Ctrl
+    // stuck.  Ctrl+F1 opens the menu, so the menu is visible by the time the
+    // focus-out release runs and every KeyUp was dropped here.
+    if (!force && ((menu_ && menu_->isVisible())
+                   || (monitor_panel_ && monitor_panel_->isVisible())))
         return;
     if (input_cb_) input_cb_(ev);
 }
@@ -821,7 +827,7 @@ void StreamWindow::focusOutEvent(QFocusEvent* event) {
             ev.type = protocol::InputEventType::KeyUp;
             ev.scan_code = scan;
             ev.vk_code = static_cast<uint16_t>(vk);
-            send_event(ev);
+            send_event(ev, /*force=*/true);
         }
         log::info("INPUT", "focus lost, released %zu stuck key(s)", pressed_keys_.size());
         pressed_keys_.clear();

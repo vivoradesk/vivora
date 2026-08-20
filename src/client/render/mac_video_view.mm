@@ -15,6 +15,7 @@
 #include <vector>
 #include <functional>
 #include <atomic>
+#include <set>
 #include <unordered_map>
 #include <cmath>
 
@@ -67,6 +68,9 @@ namespace vivora { struct MacVideoViewImpl; }
     // dismissed the menu so it doesn't reach the host.
     BOOL menuOpen;
     CFTimeInterval ignoreMouseUntil;
+    // Every key the host currently believes is held, so it can be released
+    // when the menu takes over and stops us forwarding the real keyUp.
+    std::set<uint16_t> pressedKeys;
 }
 @property (nonatomic, strong) AVSampleBufferDisplayLayer* videoLayer;
 @property (nonatomic, strong) CALayer* cursorLayer;
@@ -181,6 +185,10 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 - (void)setMenuOpen:(BOOL)open {
     menuOpen = open;
     if (open) {
+        // Before the gates close on keyUp: and flagsChanged:, let go of
+        // whatever the host is holding -- including the Cmd or Ctrl that was
+        // part of the hotkey which opened this menu.
+        [self releaseAllKeys];
         // Free the cursor (drop relative mode) and make it visible so the
         // user can actually interact with the menu — otherwise it stays
         // frozen/hidden from the stream's relative-mouse handling.
@@ -376,12 +384,31 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     if (!vivora::mac_key_to_win(macKeyCode, &legacy_scan, &vk)) vk = 0;
     if (scan == 0 && vk == 0) return;
 
+    if (down) pressedKeys.insert(macKeyCode);
+    else      pressedKeys.erase(macKeyCode);
+
     vivora::protocol::InputEvent ev;
     ev.type = down ? vivora::protocol::InputEventType::KeyDown
                    : vivora::protocol::InputEventType::KeyUp;
     ev.scan_code = scan;
     ev.vk_code = vk;
     vivora::emit_input(impl, ev);
+}
+
+- (void)releaseAllKeys {
+    // Send a keyUp for everything the host thinks is down.
+    //
+    // Opening the menu is the case that matters, and the hotkey guarantees it
+    // bites: Cmd+F1 forwards the Cmd press, then the menu opens, and from
+    // then on keyUp: and flagsChanged: both return early -- so the release
+    // never goes out and the modifier stays held on the host forever. Same
+    // defect the Windows and Linux viewers had.
+    //
+    // This walks a copy, because sendKey mutates the set.
+    if (pressedKeys.empty()) return;
+    std::set<uint16_t> held;
+    held.swap(pressedKeys);
+    for (uint16_t kc : held) [self sendKey:kc down:NO];
 }
 
 - (void)keyDown:(NSEvent*)event {
