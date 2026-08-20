@@ -28,39 +28,27 @@
 #include "common/net/winsock_socket.h"
 #endif
 
-// Static Qt: every QML plugin is a static library and must be explicitly
-// pulled in via Q_IMPORT_PLUGIN.  Class names come from each module's
-// qmldir 'classname' entry.  Order matters only in that style plugins
-// must be present before QtQuick.Controls instantiates a control.
+// Static Qt: a plugin is a static library, and the ones the linker cannot
+// discover on its own have to be anchored with Q_IMPORT_PLUGIN.
 //
-// Windows uses a static Qt build at C:/qt6 so we anchor every plugin
-// here.  macOS uses Homebrew Qt6 which is dynamic — the loader finds
-// plugins from the framework bundle and these macros would be
-// unresolved-symbol errors against missing static libs.  Linux GUI
-// will choose its own path once it gets wired up.
+// The QML plugins used to be listed here by hand. They are not any more:
+// qt_add_qml_module() plus qt_import_qml_plugins() works out which QML modules
+// this app imports and generates the initializers for exactly those (VIV-121).
+// Adding an import to a .qml file no longer means editing this file, and
+// nothing here is tied to a particular Qt build layout.
+//
+// What remains are the two backends that are not QML at all, so nothing can
+// infer them. Windows only: macOS uses a dynamic Homebrew Qt, and Linux a
+// dynamic from-source one, where the loader finds plugins itself.
 #ifdef VIVORA_WINDOWS
-Q_IMPORT_PLUGIN(QtQmlPlugin)
-Q_IMPORT_PLUGIN(QtQmlModelsPlugin)
-Q_IMPORT_PLUGIN(QtQmlWorkerScriptPlugin)
-Q_IMPORT_PLUGIN(QtQuick2Plugin)
-Q_IMPORT_PLUGIN(QtQuick_WindowPlugin)
-// QtQuick.Shapes — vector glyph rendering for the My Devices UI (VIV-52).
-Q_IMPORT_PLUGIN(QmlShapesPlugin)
-Q_IMPORT_PLUGIN(QtQuickLayoutsPlugin)
-Q_IMPORT_PLUGIN(QtQuickTemplates2Plugin)
-Q_IMPORT_PLUGIN(QtQuickControls2Plugin)
-Q_IMPORT_PLUGIN(QtQuickControls2ImplPlugin)
-Q_IMPORT_PLUGIN(QtQuickControls2BasicStylePlugin)
-Q_IMPORT_PLUGIN(QtQuickControls2BasicStyleImplPlugin)
-Q_IMPORT_PLUGIN(QtQuickDialogsPlugin)
-Q_IMPORT_PLUGIN(QtQuickDialogs2QuickImplPlugin)
 // TLS backend for QNetworkAccessManager (CloudClient talks to
 // https://cloud.vivora.dev).  Static Qt registers no TLS backend unless its
 // plugin is imported; without one the first HTTPS request crashes.  Schannel
-// is the native Windows backend — no OpenSSL runtime dependency.
+// is the native Windows backend -- no OpenSSL dependency, which is what let
+// the OpenSSL 1.1 DLLs leave the ship set (VIV-122).
 Q_IMPORT_PLUGIN(QSchannelBackend)
 // Network information backend (Network List Manager) for
-// QNetworkInformation — drives the VIV-57 rendezvous refresh on network
+// QNetworkInformation -- drives the VIV-57 rendezvous refresh on network
 // change.  Same static-Qt rule as the TLS backend: no plugin imported,
 // no backend registered (NetworkChangeWatcher then logs a warning and
 // the host falls back to the 30 s keepalive only).
@@ -95,9 +83,28 @@ QString lock_file_path() {
 constexpr const char* IPC_SERVER_NAME = "vivora-instance";
 constexpr const char* IPC_RAISE_CMD   = "raise\n";
 
+// Send Qt's own diagnostics to our log.
+//
+// Without this they go nowhere on Windows: the GUI links as a windowed
+// subsystem, so there is no console for Qt to write to.  That hid exactly the
+// class of failure the user cannot diagnose either -- a QML error leaves them
+// with no window at all, and the log file they would send us said nothing
+// about why.
+void qt_message_to_log(QtMsgType type, const QMessageLogContext&, const QString& msg) {
+    const std::string text = msg.toStdString();
+    switch (type) {
+    case QtDebugMsg:    log::debug("Qt", "%s", text.c_str()); break;
+    case QtInfoMsg:     log::info ("Qt", "%s", text.c_str()); break;
+    case QtWarningMsg:  log::warn ("Qt", "%s", text.c_str()); break;
+    case QtCriticalMsg:
+    case QtFatalMsg:    log::error("Qt", "%s", text.c_str()); break;
+    }
+}
+
 } // namespace
 
 int run_gui(int argc, char** argv) {
+    qInstallMessageHandler(qt_message_to_log);
     QApplication app(argc, argv);
 
 #ifdef VIVORA_WINDOWS
@@ -267,9 +274,9 @@ int run_gui(int argc, char** argv) {
     engine.rootContext()->setContextProperty(
         "VivoraDevicesVariant",
         qEnvironmentVariable("VIVORA_DEVICES_VARIANT"));
-    engine.load(QUrl("qrc:/qml/main.qml"));
+    engine.loadFromModule("Vivora", "Main");
     if (engine.rootObjects().isEmpty()) {
-        log::error("GUI", "Failed to load main.qml");
+        log::error("GUI", "Failed to load Vivora/Main.qml");
         return 1;
     }
 
