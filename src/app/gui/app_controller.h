@@ -245,6 +245,12 @@ signals:
     // entirely, and QSystemTrayIcon::supportsMessages() is false on plenty of
     // desktops that do have one, so balloons get silently dropped.
     void toastRequested(const QString& message);
+    // A connection failed in the one way the Vivora-operated relay would have
+    // fixed -- the peer was found, the direct path did not come up -- and the
+    // relay was skipped for want of a Pro licence.  QML turns this into an
+    // explanation with an upgrade button, because otherwise the user sees a
+    // bare "couldn't reach that host" and never learns a relay exists.
+    void proRelayWouldHelp(const QString& peer);
     void sharingChanged();
     void clientCountChanged();
     void identityChanged();

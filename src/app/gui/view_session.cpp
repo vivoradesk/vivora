@@ -171,7 +171,10 @@ void ViewSession::finishConnect(bool ok) {
         log::error("ViewSession", "ViewLoopState::init failed (rc=%d)",
                    loop_ ? loop_->exit_code() : -1);
         // Grab the reason before loop_ goes away — AppController shows it.
-        if (loop_) initError_ = QString::fromStdString(loop_->init_error());
+        if (loop_) {
+            initError_     = QString::fromStdString(loop_->init_error());
+            connectFailure_ = loop_->connect_failure();
+        }
     }
     loop_.reset();
     platform_.reset();
@@ -207,6 +210,17 @@ void ViewSession::onTick() {
             trustOldHex_   = QString::fromStdString(tp.stored_hex);
             log::info("ViewSession", "Reconnect stopped: host key changed for '%s'",
                       tp.code.c_str());
+        }
+        // A session can also fail after init() succeeded: the loop starts, the
+        // hole punch never lands, and it gives up without a single frame.  That
+        // is the common NAT failure, and until now it left the GUI with nothing
+        // to say -- the stream window showed a message and vanished.
+        if (loop_) {
+            if (initError_.isEmpty())
+                initError_ = QString::fromStdString(loop_->init_error());
+            if (connectFailure_ == ViewLoopState::ConnectFailure::None)
+                connectFailure_ = loop_->connect_failure();
+            everStreamed_ = loop_->frames_decoded() > 0;
         }
         tick_.stop();
         loop_.reset();

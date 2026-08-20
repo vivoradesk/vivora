@@ -47,6 +47,18 @@ ApplicationWindow {
         function onToastRequested(message) {
             window.showToast(message)
         }
+        function onProRelayWouldHelp(peer) {
+            if (relayProLoader.alreadyShown) {
+                window.showToast("Couldn't reach " + peer +
+                                 " directly. Vivora Pro's relay would.")
+                return
+            }
+            relayProLoader.alreadyShown = true
+            relayProLoader.peer = peer
+            relayProLoader.active = true
+            window.show()
+            window.raise()
+        }
         function onShowWindowRequested() {
             window.show()
             window.raise()
@@ -129,6 +141,22 @@ ApplicationWindow {
             mismatch:       trustLoader.mismatch
             onTrusted:   { App.resolveTrustPrompt(true);  trustLoader.active = false }
             onDismissed: { App.resolveTrustPrompt(false); trustLoader.active = false }
+        }
+    }
+    // Explains a failed connect that the Vivora relay would have fixed, and
+    // offers Pro.  Shown at most once per run: after that the plain toast
+    // carries the message, because a modal that reappears on every retry stops
+    // being an explanation and becomes nagging.
+    Loader {
+        id: relayProLoader
+        active: false
+        property string peer: ""
+        property bool   alreadyShown: false
+        sourceComponent: RelayProDialog {
+            visible: true
+            peer: relayProLoader.peer
+            onUpgradeRequested: App.openUpgradePage()
+            onClosed: relayProLoader.active = false
         }
     }
     // VIV-111 macOS Screen Recording permission prompt.  One at a time is fine
