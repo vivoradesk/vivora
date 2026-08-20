@@ -86,6 +86,13 @@ if [ -n "${DISPLAY:-}" ]; then
     log="$HOME/.local/share/Vivora/Vivora/vivora.log"
     if [ -f "$log" ]; then
         grep -E "GUI ready|No system tray|error" "$log" | tail -5
+        # Which TLS backend came up.  cert-only means HTTPS is dead, and with
+        # it the update check, announcements and account sign-in -- worth
+        # failing on, because the app starts perfectly well without it.
+        grep -E "TLS:" "$log" | tail -1
+        if grep -q "supportsSsl=0" "$log"; then
+            echo "FAIL: no working TLS backend"; kill $pid 2>/dev/null || true; exit 1
+        fi
         if grep -q "GUI ready" "$log"; then echo "  GUI reached ready"; else
             echo "FAIL: GUI never reported ready"; kill $pid 2>/dev/null || true; exit 1; fi
     else

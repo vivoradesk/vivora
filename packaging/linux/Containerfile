@@ -60,6 +60,14 @@ RUN curl -fsSL "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERS
 #
 # --openssldir=/etc/ssl so it reads the *host* CA store at runtime, which is
 # where every distribution we target keeps one.
+#
+# Qt is then built with FEATURE_openssl_linked, so its TLS backend carries a
+# real DT_NEEDED on these libraries instead of dlopening "libssl.so.3" by
+# name at runtime.  Runtime resolution picks up whatever the host has: on
+# Ubuntu 22.04 (OpenSSL 3.0) that happened to work, on Fedora 40 (3.2) the
+# backend quietly failed to register and the app fell back to cert-only --
+# no HTTPS, so no update check, no announcements and no account sign-in.
+# Linking makes the loader resolve them from the AppImage every time.
 ARG OPENSSL_VERSION=3.0.15
 RUN mkdir -p /src \
  && curl -fsSL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
@@ -88,6 +96,7 @@ RUN cmake -S qtbase -B build-qtbase -G Ninja \
         -DFEATURE_xcb=ON -DFEATURE_xkbcommon=ON -DFEATURE_xkbcommon_x11=ON \
         -DFEATURE_opengl=ON -DFEATURE_egl=ON \
         -DOPENSSL_ROOT_DIR=/opt/openssl -DFEATURE_openssl=ON \
+        -DFEATURE_openssl_linked=ON \
  && cmake --build build-qtbase --parallel ${JOBS} \
  && cmake --install build-qtbase \
  && rm -rf build-qtbase

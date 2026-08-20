@@ -103,6 +103,19 @@ export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 XCB_CURSOR="$(ls /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0 2>/dev/null || true)"
 [[ -n "$XCB_CURSOR" ]] || { echo "libxcb-cursor.so.0 missing from the build image" >&2; exit 1; }
 
+# OpenSSL is deliberately NOT bundled, even though Qt's TLS backend links it.
+#
+# Bundling was tried and is worse: the loader resolves DT_NEEDED by soname, so
+# a libcrypto.so.3 the host had already pulled into the process (through dbus,
+# glib, krb5 -- something always has) wins over the copy in the AppDir, leaving
+# our libssl paired with a different libcrypto.  On Fedora 40 that produced a
+# backend that loaded, failed to initialise, and left the app on cert-only with
+# no error anyone would see.
+#
+# Letting both halves come from the host keeps them a matched set, and gets the
+# distribution's CA store and security updates for free.  A host with only
+# OpenSSL 1.1 simply fails to load the plugin: no HTTPS, but the app still runs.
+
 $LD --appdir "$APPDIR" \
     -l "$XCB_CURSOR" \
     -e "$APPDIR/usr/bin/vivora" \
@@ -134,6 +147,7 @@ for lib in \
     libxcb-icccm.so.4 libxcb-image.so.0 libxcb-keysyms.so.1 \
     libxcb-render-util.so.0 libxcb-util.so.1 libxcb-xinerama.so.0 \
     libwayland-client.so.0 libwayland-egl.so.1 \
+    libssl.so.3 libcrypto.so.3 \
     libfontconfig.so.1 libfreetype.so.6 \
     libstdc++.so.6 libgcc_s.so.1 libm.so.6 libc.so.6
 do
