@@ -93,6 +93,16 @@ public:
     // trust decision.
     QString initError()          const { return initError_; }
 
+    // Classified form of the same thing; AppController uses it to decide
+    // whether the managed relay would actually have helped.
+    ViewLoopState::ConnectFailure connectFailure() const { return connectFailure_; }
+
+    // Whether a single frame ever arrived.  everConnected() only says the loop
+    // started; this says the session actually did something, which is what
+    // separates "your networks would not let you through" from "the stream
+    // ran and then ended".
+    bool    everStreamed()       const { return everStreamed_; }
+
 signals:
     // Loop has fully torn down — session.stop(), platform.shutdown()
     // have run.  AppController removes us from its active-views list
@@ -131,6 +141,9 @@ private:
     std::thread                            connect_thread_;
     bool                                   everConnected_ = false;
     QString                                initError_;
+    bool                                   everStreamed_ = false;
+    ViewLoopState::ConnectFailure          connectFailure_ =
+        ViewLoopState::ConnectFailure::None;
     // VIV-23 trust-prompt capture (see trustPromptPending above).
     bool    trustPending_  = false;
     bool    trustMismatch_ = false;

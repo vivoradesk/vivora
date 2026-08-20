@@ -18,6 +18,7 @@
         <file>DeviceMockModel.qml</file>
         <file>MyDevicesBlock.qml</file>
         <file>RemoveDeviceDialog.qml</file>
+        <file>RelayProDialog.qml</file>
         <file>SettingsDeviceRow.qml</file>
         <file>MyDevicesSettings.qml</file>
     </qresource>

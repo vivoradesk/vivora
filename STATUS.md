@@ -109,9 +109,12 @@ Listed so we know what to say when someone reports "doesn't work on my X."
 
 ### Before 0.1 ships
 
-- **Packaging.** Windows installer + portable zip, Linux AppImage, a tarball of the two servers for self-hosters. Nothing here is published yet.
-- **Linux desktop parity.** Start-at-login, a legible failure when `/dev/uinput` is not writable, and not exiting silently when the desktop has no system tray.
-- **CI.** No automated build or test run exists.
+- **Publishing.** The artefacts build and have been smoke-tested — Windows
+  installer and portable zip, Linux AppImage (glibc floor 2.30, verified on
+  Fedora 40, Rocky 9 and Ubuntu 22.04), and a server tarball that installs on
+  Debian 11. Nothing is published yet; the repository is still private.
+- **CI.** Linux builds and tests on every push; Windows artefacts are still
+  built by hand (VIV-121).
 
 ### After 0.1
 

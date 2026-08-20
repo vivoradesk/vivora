@@ -95,6 +95,37 @@ The `UpgradeCode` GUID in `vivora.wxs` must never change: it is how Windows
 recognises a later release as an upgrade rather than a second parallel
 install.
 
+## Building the Linux artefacts
+
+Both are built inside the image from `linux/Containerfile`, which is Debian 11
+plus a from-source Qt and OpenSSL 3.  Debian 11 on purpose: glibc 2.31 is the
+oldest thing worth targeting, and a binary linked against it runs on everything
+newer.  Building on a current distribution instead would lock out Ubuntu 20.04,
+Debian 11 and the whole RHEL 9 family.
+
+```sh
+podman build -t vivora-build -f packaging/linux/Containerfile .   # ~2.5h, cached
+podman run --rm -v "$PWD:/work" -w /work vivora-build     bash scripts/package-linux-appimage.sh build-appimage dist
+podman run --rm -v "$PWD:/work" -w /work vivora-build     bash scripts/package-servers.sh build-servers dist
+```
+
+The image compiles Qt, so the first build takes hours and every one after that
+is a normal incremental build.  Do not build the release artefacts outside it:
+the servers built on Ubuntu 22.04 will not even start on Debian 11.
+
+Then check the result somewhere it was not built:
+
+```sh
+scripts/smoke-appimage.sh dist/Vivora-0.1.0-linux-x64.AppImage
+scripts/smoke-appimage.sh dist/*.AppImage docker.io/library/rockylinux:9
+```
+
+That script has earned its place several times over.  It caught a missing
+libxcb-cursor (Qt dlopens it, so nothing deploys it and Qt aborts), a
+libxkbcommon pair split between bundle and host (segfault before the first
+window), and a Qt built against the wrong OpenSSL major (no HTTPS at all,
+which the app is perfectly happy to start without).
+
 ## Windows code signing notes (future)
 
 For an MSI installer the same `dev.vivora.app` string goes into the

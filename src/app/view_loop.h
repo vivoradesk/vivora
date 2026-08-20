@@ -96,6 +96,19 @@ public:
     // instead of a single "Could not connect" for every possible cause.
     const std::string& init_error() const { return init_error_; }
 
+    // The same thing, classified, because some callers need to act on it
+    // rather than display it.  The GUI only suggests the Pro relay for
+    // HostUnreachable: that is the failure a relay actually fixes.  Offering
+    // it for a mistyped peer code would be blaming a subscription for a typo.
+    enum class ConnectFailure {
+        None = 0,
+        BadPeerFormat,          // not a peer code and not a 64-hex key
+        RendezvousUnreachable,  // could not resolve or reach the rendezvous
+        PeerNotFound,           // rendezvous answered, that peer is not there
+        HostUnreachable,        // peer found, but the session never came up
+    };
+    ConnectFailure connect_failure() const { return connect_failure_; }
+
     // Live stats for the GUI; updated in iter().
     uint64_t frames_decoded() const { return frames_decoded_; }
     double   rtt_ms() const;
@@ -142,6 +155,7 @@ private:
     bool      audio_started_     = false;
     int       exit_code_         = 0;
     std::string init_error_;
+    ConnectFailure connect_failure_ = ConnectFailure::None;
     bool      torn_down_         = false;
 
     // In-stream menu state (VIV-74).  view_only_ gates the input callback so

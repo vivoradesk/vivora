@@ -149,7 +149,7 @@ int run_gui(int argc, char** argv) {
     // there directly.  Path: AppLocalDataLocation/vivora.log:
     //   Windows: %LOCALAPPDATA%\Vivora\Vivora\vivora.log
     //   macOS:   ~/Library/Application Support/Vivora/vivora.log
-    //   Linux:   ~/.local/share/Vivora/vivora.log
+    //   Linux:   ~/.local/share/Vivora/Vivora/vivora.log
     {
         const QString dir = QStandardPaths::writableLocation(
             QStandardPaths::AppLocalDataLocation);

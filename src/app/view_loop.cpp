@@ -312,6 +312,15 @@ bool ViewLoopState::iter_threaded() {
             disconnecting_ = true;
             disconnect_at_ = Clock::now();
             update_status("Host didn't accept the connection, or is unreachable");
+            // The session started and never produced a frame, with no explicit
+            // disconnect from the host: the rendezvous found the peer and the
+            // two ends could not reach each other.  That is the failure a
+            // relay exists to fix, so record it for the GUI (see
+            // AppController::connectToPeer).
+            init_error_      = "Found the host, but couldn't reach it. Something "
+                               "between the two networks is blocking the "
+                               "connection.";
+            connect_failure_ = ConnectFailure::HostUnreachable;
         }
         const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - disconnect_at_).count();
@@ -605,6 +614,7 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             init_error_ = std::string("Couldn't reach the rendezvous server (")
                         + cfg.rendezvous_server + "). Check your connection, "
                           "or set a different one in Settings.";
+            connect_failure_ = ConnectFailure::RendezvousUnreachable;
         } else {
             session_.set_rendezvous(rdv);
             if (peer_code::looks_like_hex_pubkey(cfg.peer_pubkey_hex)) {
@@ -613,6 +623,7 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                     log::error("VIEW", "Invalid --peer hex");
                     init_error_ = "That key isn't valid. A host key is 64 "
                                   "hexadecimal characters.";
+                    connect_failure_ = ConnectFailure::BadPeerFormat;
                     exit_code_ = 1;
                     return false;
                 }
@@ -632,6 +643,7 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
                     "--peer must be a 64-char hex pubkey OR an 'adjective-noun-NNNN' code");
                 init_error_ = "That doesn't look like a peer code. Codes look "
                               "like swift-tiger-4271.";
+                connect_failure_ = ConnectFailure::BadPeerFormat;
                 exit_code_ = 1;
                 return false;
             }
@@ -672,8 +684,22 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
             // Prefer the session's specific reason; otherwise keep anything
             // an earlier step already recorded (e.g. rendezvous DNS), and
             // only then fall back to something generic.
-            if (!session_.last_error().empty())  init_error_ = session_.last_error();
-            else if (init_error_.empty())        init_error_ = "Couldn't reach that host.";
+            if (!session_.last_error().empty()) {
+                // ClientSession only records a reason for the two failures it
+                // can name: an unusable address, and a peer the rendezvous
+                // does not know.  Both mean "we never found anything to talk
+                // to", which no relay can help with.
+                init_error_ = session_.last_error();
+                connect_failure_ = ConnectFailure::PeerNotFound;
+            } else if (!init_error_.empty()) {
+                // Something earlier already explained itself (rendezvous DNS).
+            } else {
+                // The peer resolved and the session still did not come up:
+                // hole punching failed, or the path is blocked.  This is the
+                // one a relay fixes.
+                init_error_ = "Couldn't reach that host.";
+                connect_failure_ = ConnectFailure::HostUnreachable;
+            }
         }
         exit_code_ = 1;
         return false;
@@ -838,6 +864,15 @@ bool ViewLoopState::iter() {
             update_status("Host didn't accept the connection, or is unreachable");
             log::warn("VIEW", "Connection closed before any video — "
                               "host rejected the request or is unreachable");
+            // The session started and never produced a frame, with no explicit
+            // disconnect from the host: the rendezvous found the peer and the
+            // two ends could not reach each other.  That is the failure a
+            // relay exists to fix, so record it for the GUI (see
+            // AppController::connectToPeer).
+            init_error_      = "Found the host, but couldn't reach it. Something "
+                               "between the two networks is blocking the "
+                               "connection.";
+            connect_failure_ = ConnectFailure::HostUnreachable;
         }
         const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - disconnect_at_).count();

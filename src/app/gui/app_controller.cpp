@@ -16,6 +16,7 @@
 #include "common/crypto/license_pubkey.h"
 #include "common/crypto/license_token.h"
 #include "common/crypto/peer_pin.h"
+#include "common/utils/env.h"
 #include "common/utils/log.h"
 #include "common/utils/peer_code.h"
 
@@ -427,6 +428,11 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
 #if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
+    // Whether this dial skipped the Vivora relay because there is no Pro
+    // licence.  Captured into the finished() handler below so a failure can
+    // say so instead of leaving the user guessing.
+    bool relayGatedThisDial = false;
+
     GuiViewConfig vc;
     vc.host_ip            = "";  // rendezvous resolves
     vc.port               = static_cast<uint16_t>(settings_->hostPort());
@@ -444,6 +450,7 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         vc.relay_server = gated ? std::string() : relay.toStdString();
         if (gated) log::info("AppController",
             "Managed relay needs Pro — connecting via direct/rendezvous only");
+        relayGatedThisDial = gated;
     }
     vc.license_file       = settings_->licenseFile().toStdString();
     vc.view_fps_cap       = settings_->viewFpsCap();
@@ -456,15 +463,27 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
     auto vs = std::make_unique<ViewSession>(this);
     ViewSession* vs_ptr = vs.get();
     connect(vs_ptr, &ViewSession::finished, this,
-            [this, vs_ptr, dial = peerCodeOrHex] {
+            [this, vs_ptr, dial = peerCodeOrHex, relayGatedThisDial] {
         // VIV-54: capture a pending TOFU trust question (host key changed during
         // an auto-reconnect) BEFORE the session is destroyed by erase().
         const bool trustBroken = vs_ptr->trustPromptPending();
         // A session that never reached the connected state and isn't a trust
         // pause is a plain connect failure (the worker couldn't reach the host)
         // — surface it, since the connect no longer fails synchronously.
-        const bool neverConnected = !vs_ptr->everConnected();
+        // Two shapes of failure reach here.  init() can fail outright (bad
+        // peer code, rendezvous down), and the loop can start and then never
+        // produce a frame -- which is what a blocked hole punch looks like.
+        // Both are "this connect did not work" as far as the user is
+        // concerned, and neither used to reach the main window at all in the
+        // second case.
+        const bool neverConnected = !vs_ptr->everConnected() || !vs_ptr->everStreamed();
         const QString failReason   = vs_ptr->initError();
+        // Only HostUnreachable: the peer was found and the direct path still
+        // did not come up.  Suggesting a subscription for a mistyped code, an
+        // offline host or a DNS problem would be worse than saying nothing.
+        const bool relayWouldHelp  =
+            relayGatedThisDial &&
+            vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::HostUnreachable;
         QString code, newHex, oldHex;
         bool    mismatch = false;
         if (trustBroken) {
@@ -508,7 +527,13 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
             const QString msg = failReason.isEmpty()
                 ? QStringLiteral("Could not connect to %1").arg(dial)
                 : failReason;
-            emit toastRequested(msg);
+            if (relayWouldHelp) {
+                log::info("AppController",
+                    "Direct path failed and the managed relay was Pro-gated");
+                emit proRelayWouldHelp(dial);
+            } else {
+                emit toastRequested(msg);
+            }
             if (tray_) tray_->notify("Vivora", msg);
         }
     });
@@ -747,6 +772,15 @@ void AppController::refreshLicense() {
                           crypto::LICENSE_TOKEN_SIZE, path.toUtf8().constData());
             }
         }
+    }
+
+    // Development hook: pretend this install has no Pro licence, so the
+    // free-tier surfaces (the device-mesh gate, the relay-would-help prompt)
+    // can be exercised on a machine that does.  Otherwise there is no way to
+    // see what a new user sees short of signing out of the account.
+    if (util::env_flag("VIVORA_FORCE_FREE")) {
+        licensePro_ = false;
+        log::warn("AppController", "VIVORA_FORCE_FREE — reporting no Pro licence");
     }
 
     if (tray_) tray_->setPro(licensePro_);

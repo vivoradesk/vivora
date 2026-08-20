@@ -79,7 +79,7 @@ Include the platform and version, and attach the log — it is at:
 | | |
 | --- | --- |
 | Windows | `%LOCALAPPDATA%\Vivora\Vivora\vivora.log` |
-| Linux | `~/.local/share/Vivora/vivora.log` |
+| Linux | `~/.local/share/Vivora/Vivora/vivora.log` |
 | macOS | `~/Library/Application Support/Vivora/vivora.log` |
 
 The previous session is kept alongside it as `vivora.log.1`, which is usually
@@ -89,6 +89,30 @@ the one you want after a crash. For a verbose run, start the app with
 For stream-quality reports, the F9 diagnostics HUD in the stream window is
 worth a screenshot: it shows the negotiated codec, framerate, bitrate, FEC
 ratio and RTT.
+
+## Development hooks
+
+A handful of environment variables exist to reach states that are otherwise
+hard to arrive at. All are off unless set to a truthy value, and none of them
+change what a normal run does.
+
+| Variable | Effect |
+| --- | --- |
+| `VIVORA_LOG_LEVEL=debug` | verbose logging |
+| `VIVORA_LOG_MAX_MB` | log rotation threshold (default 8) |
+| `VIVORA_FORCE_FREE=1` | report no Pro licence, so the free-tier surfaces can be seen on an account that has one |
+| `VIVORA_AUTO_ACCEPT=1` | skip the connection-approval prompt |
+| `VIVORA_AUTO_CONNECT=<code>` | dial a peer on launch |
+| `VIVORA_NO_AUTOSTART=1` | do not start sharing on launch |
+| `VIVORA_DEVICES_VARIANT=pro\|trial\|free\|empty` | preview a My Devices state |
+| `VIVORA_FAKE_APPROVAL=1` | raise a synthetic approval prompt shortly after launch |
+
+To exercise the "your networks won't let you through" path — the one that
+offers the Pro relay — start a host with `--rendezvous`, note its peer code,
+kill it, and dial that code within the registration TTL with
+`VIVORA_FORCE_FREE=1`. The rendezvous still knows the peer, so the lookup
+succeeds and the connection then goes nowhere, which is exactly the shape of a
+blocked hole punch.
 
 Security issues do **not** go in the issue tracker — see
 [`SECURITY.md`](SECURITY.md).
