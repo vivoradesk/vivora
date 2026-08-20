@@ -366,16 +366,20 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
 }
 
 - (void)sendKey:(uint16_t)macKeyCode down:(BOOL)down {
-    uint16_t scan = 0, vk = 0;
-    if (!vivora::mac_key_to_win(macKeyCode, &scan, &vk)) return;
+    // The scancode is what the host actually presses (VIV-6); the shared table
+    // covers the whole Apple keyboard including the keypad, F13..F20 and the
+    // JIS keys.  vk comes along only so a pre-VIV-6 host still works, and its
+    // table is Latin-only -- a key it cannot name is not a reason to drop the
+    // event.
+    const uint16_t scan = vivora::protocol::mac_kc_to_set1(macKeyCode);
+    uint16_t legacy_scan = 0, vk = 0;
+    if (!vivora::mac_key_to_win(macKeyCode, &legacy_scan, &vk)) vk = 0;
+    if (scan == 0 && vk == 0) return;
 
     vivora::protocol::InputEvent ev;
     ev.type = down ? vivora::protocol::InputEventType::KeyDown
                    : vivora::protocol::InputEventType::KeyUp;
-    // The table above stores bare make codes, but the canonical wire space is
-    // set 1 WITH the 0xE0 prefix (VIV-6) -- otherwise a Linux host reading
-    // 0x4B presses Keypad-4 instead of Left Arrow.
-    ev.scan_code = vivora::protocol::win_scan_to_set1(scan, vk);
+    ev.scan_code = scan;
     ev.vk_code = vk;
     vivora::emit_input(impl, ev);
 }
@@ -559,9 +563,9 @@ static void normalize_mouse(MacVideoViewImpl* impl, double px, double py,
     *out_yn = yn;
 }
 
-// Mac kVK_ → (Windows PS/2 set 1 scan code, Windows VK).
-// Scan codes are the low-byte form; the Windows injector adds the E0 prefix
-// automatically for extended keys based on the VK.
+// Mac kVK_ -> Windows VK, for the legacy fallback only.  The scan code it
+// also returns is unused now that mac_kc_to_set1() produces the canonical
+// wire value directly; it is kept so the two columns stay readable together.
 static bool mac_key_to_win(uint16_t mac_kc, uint16_t* out_scan, uint16_t* out_vk) {
     uint16_t scan = 0, vk = 0;
     switch (mac_kc) {

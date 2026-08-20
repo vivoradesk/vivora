@@ -1,6 +1,7 @@
 #ifdef VIVORA_MACOS
 
 #include "host/input/input_injector.h"
+#include "common/protocol/scancode.h"
 #include "common/utils/log.h"
 
 #import <ApplicationServices/ApplicationServices.h>
@@ -13,8 +14,13 @@ namespace {
 
 static constexpr const char* TAG = "MAC_INPUT";
 
-// Windows VK → Mac kVK. Covers the same keys as the forward table in
-// mac_video_view.mm. Returns -1 if unknown.
+// Windows VK -> Mac kVK.  The fallback path only: a peer that sends
+// scan_code = 0 -- an older build, or a viewer whose platform could not name
+// the physical key -- still gets its Latin keys through here.
+//
+// Everything else goes through set1_to_mac_kc(), because a virtual key is a
+// layout-derived character and cannot express a key on a Cyrillic or CJK
+// layout at all (VIV-6 / VIV-123).  Returns -1 if unknown.
 static int win_vk_to_mac_kc(uint16_t vk) {
     switch (vk) {
         // Letters (A-Z)
@@ -171,7 +177,7 @@ public:
             break;
         case protocol::InputEventType::KeyDown:
         case protocol::InputEventType::KeyUp:
-            handle_key(event.vk_code,
+            handle_key(event.scan_code, event.vk_code,
                        event.type == protocol::InputEventType::KeyDown);
             break;
         }
@@ -276,8 +282,12 @@ private:
         }
     }
 
-    void handle_key(uint16_t vk, bool down) {
-        int mac_kc = win_vk_to_mac_kc(vk);
+    void handle_key(uint16_t scan, uint16_t vk, bool down) {
+        // Prefer the physical key (VIV-6).  vk is Latin-only and
+        // layout-derived, so a viewer on a Cyrillic or CJK layout sends 0 for
+        // most of its keys -- those used to be dropped here and type nothing.
+        int mac_kc = protocol::set1_to_mac_kc(scan);
+        if (mac_kc < 0) mac_kc = win_vk_to_mac_kc(vk);
         if (mac_kc < 0) return;
 
         CGEventRef ev = CGEventCreateKeyboardEvent(
