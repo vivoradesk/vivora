@@ -151,7 +151,6 @@ yours differs:
 | `VIVORA_QT_DECL_BUILD_DIR` | derived: `<qt build root>/qtdeclarative` |
 | `VIVORA_QT_BUILD_CONFIG` | `Release` |
 | `VIVORA_OPENSSL3_STATIC_DIR` | `C:/OpenSSL-WinUniversal/lib/VC/x64/MT` |
-| `VIVORA_OPENSSL11_BIN_DIR` | `C:/OpenSSL/bin` |
 
 Because the object-file names encode Qt's internal target names, this is tied
 to the Qt version it was developed against. Migrating the QML registration to

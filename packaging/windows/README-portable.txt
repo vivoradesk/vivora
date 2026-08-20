@@ -40,14 +40,14 @@ page - that is a stronger guarantee than a signature you cannot inspect:
 What is in this folder
 ----------------------
 
-  vivora.exe                the whole application
-  libcrypto-1_1-x64.dll     required by the Qt build we link against; no
-  libssl-1_1-x64.dll        Vivora traffic goes through them (TLS uses
-                            Schannel, the media path uses Monocypher)
+  vivora.exe                the whole application - Qt, the codecs and the
+                            crypto are all linked in, there is no runtime to
+                            install and no DLL to keep beside it
   LICENSE                   GNU AGPL v3
   THIRD-PARTY-NOTICES.md    what else is in the binary and under what terms
 
-The app will not start without the two DLLs - keep the folder together.
+TLS goes through Schannel, the Windows system library; the streaming path is
+encrypted with Monocypher, which is compiled into the exe.
 
 
 Where it keeps things

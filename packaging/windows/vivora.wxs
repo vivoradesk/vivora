@@ -59,15 +59,6 @@
       <Component>
         <File Id="vivora.exe" Source="!(bindpath.stage)\vivora.exe" KeyPath="yes" />
       </Component>
-      <!-- Qt's TLS plugin resolves these before any Vivora code runs.  Without
-           them the app hangs at startup with no window and no log, so they are
-           not optional payload. -->
-      <Component>
-        <File Source="!(bindpath.stage)\libcrypto-1_1-x64.dll" KeyPath="yes" />
-      </Component>
-      <Component>
-        <File Source="!(bindpath.stage)\libssl-1_1-x64.dll" KeyPath="yes" />
-      </Component>
       <Component>
         <File Source="!(bindpath.stage)\LICENSE" KeyPath="yes" />
       </Component>

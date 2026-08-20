@@ -308,30 +308,32 @@ if(WIN32)
     )
 endif()
 
-# Static Qt 6.x pulls Qt6Network in transitively from Qt6::Qml; QtNetwork
-# in turn references OpenSSL 3 (TLS backend).  This particular pre-built
-# Qt has the OpenSSL 1.1 import lib (libcrypto64MD.lib) baked into its
-# link config but the source code references OpenSSL 3 symbols
-# (OSSL_PARAM_*).  Mismatch.  Link our own OpenSSL 3 static libs first
-# so the missing OSSL_PARAM symbols resolve, and pass /FORCE:MULTIPLE
-# to swallow the duplicate-symbol errors from the stale 1.1 reference —
-# we never call the QSslSocket APIs that would actually exercise either
-# path so the runtime behaviour doesn't matter.
+# One translation unit inside Qt6Network -- qpassworddigestor.cpp, reached via
+# QAuthenticator -- calls the OpenSSL 3 KDF API (EVP_KDF_*, OSSL_PARAM_*).
+# Nothing we ship uses PBKDF2, but the symbols have to resolve, so link OpenSSL
+# 3 statically: it costs a few hundred KB in the exe and no DLL on disk.
+#
+# This used to need /FORCE:MULTIPLE, because Qt also dragged in the OpenSSL 1.1
+# import libs through the openssl TLS plugin and the two definitions collided.
+# With that plugin excluded (VIV-122) there is one definition of everything and
+# the link is clean -- which also retires the LNK4088 "image may not run"
+# warning the forced link was producing on every build.
 if(WIN32)
     set(VIVORA_OPENSSL3_STATIC_DIR "C:/OpenSSL-WinUniversal/lib/VC/x64/MT" CACHE PATH
         "Directory holding libssl_static.lib / libcrypto_static.lib (OpenSSL 3, /MT)")
-    set(_VIVORA_OPENSSL_DIR "${VIVORA_OPENSSL3_STATIC_DIR}")
-    if(EXISTS "${_VIVORA_OPENSSL_DIR}/libssl_static.lib")
+    if(EXISTS "${VIVORA_OPENSSL3_STATIC_DIR}/libcrypto_static.lib")
         target_link_libraries(vivora PRIVATE
-            "${_VIVORA_OPENSSL_DIR}/libssl_static.lib"
-            "${_VIVORA_OPENSSL_DIR}/libcrypto_static.lib"
+            "${VIVORA_OPENSSL3_STATIC_DIR}/libcrypto_static.lib"
             crypt32
         )
-        target_link_options(vivora PRIVATE "/FORCE:MULTIPLE" "/IGNORE:4006" "/IGNORE:4088")
     else()
-        message(WARNING "OpenSSL static libs not found at ${_VIVORA_OPENSSL_DIR}")
+        message(FATAL_ERROR
+            "libcrypto_static.lib not found under ${VIVORA_OPENSSL3_STATIC_DIR}.
+"
+            "Qt6Network references the OpenSSL 3 KDF API and will not link "
+            "without it; point VIVORA_OPENSSL3_STATIC_DIR at an OpenSSL 3 /MT "
+            "static build.")
     endif()
-
     # Native Windows TLS backend (Schannel) for QNetworkAccessManager.  Static
     # Qt registers no TLS backend unless its plugin lib is linked AND imported
     # (Q_IMPORT_PLUGIN(QSchannelBackendPlugin) in gui_main.cpp); without one the
@@ -351,22 +353,21 @@ if(WIN32)
         "${_VIVORA_QT_PLUGIN_DIR}/networkinformation/qnetworklistmanager.lib"
     )
 
-    # Qt6's openssl TLS plugin tries to dlopen OpenSSL 1.1 at runtime
-    # (legacy hardcoded import).  Copy the matching DLLs next to the
-    # exe so QApplication startup doesn't blow up.  Long-term we want to
-    # rebuild Qt6 without the openssl TLS plugin (Schannel-only) and
-    # drop these copies entirely.
-    set(VIVORA_OPENSSL11_BIN_DIR "C:/OpenSSL/bin" CACHE PATH
-        "Directory holding libcrypto-1_1-x64.dll / libssl-1_1-x64.dll")
-    set(_VIVORA_OPENSSL11_BIN "${VIVORA_OPENSSL11_BIN_DIR}")
-    foreach(_dll libcrypto-1_1-x64.dll libssl-1_1-x64.dll)
-        if(EXISTS "${_VIVORA_OPENSSL11_BIN}/${_dll}")
-            add_custom_command(TARGET vivora POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_VIVORA_OPENSSL11_BIN}/${_dll}"
-                        "$<TARGET_FILE_DIR:vivora>/${_dll}")
-        endif()
-    endforeach()
+    # Do not let Qt auto-import the OpenSSL TLS backend (VIV-122).
+    #
+    # With a static Qt, CMake adds an initializer object for every plugin of a
+    # type the target uses, which pulled in qopensslbackend.lib and with it an
+    # implicit dependency on libcrypto-1_1-x64.dll / libssl-1_1-x64.dll -- two
+    # DLLs that reached end of life in September 2023 and were being shipped
+    # beside a remote-access product.  Nothing called them: TLS goes through
+    # Schannel, imported by hand just above, and the media path is Monocypher.
+    # They were there only because the exe would not start without them.
+    #
+    # EXCLUDE_BY_TYPE drops the whole tls category, Schannel included; the
+    # explicit qschannelbackend.lib link plus Q_IMPORT_PLUGIN(QSchannelBackend)
+    # in gui_main.cpp is what actually registers a backend, and that is
+    # unaffected.
+    qt_import_plugins(vivora EXCLUDE_BY_TYPE tls)
 endif()
 
 # Client networking (cross-platform)
@@ -526,14 +527,9 @@ endif()
 # FHS names precisely.
 
 if(WIN32)
+    # One self-contained exe.  The two OpenSSL 1.1 DLLs that used to ship
+    # beside it are gone with the openssl TLS plugin (VIV-122).
     install(TARGETS vivora RUNTIME DESTINATION . COMPONENT app)
-    # Qt's TLS plugin dlopens OpenSSL 1.1 at startup; the build copies both
-    # DLLs next to the exe (see the POST_BUILD step above).  OPTIONAL because a
-    # build configured without them still produces a usable app.
-    install(FILES
-        "$<TARGET_FILE_DIR:vivora>/libcrypto-1_1-x64.dll"
-        "$<TARGET_FILE_DIR:vivora>/libssl-1_1-x64.dll"
-        DESTINATION . COMPONENT app OPTIONAL)
     install(FILES ${CMAKE_SOURCE_DIR}/LICENSE DESTINATION . COMPONENT app)
 
 elseif(UNIX AND NOT APPLE)
