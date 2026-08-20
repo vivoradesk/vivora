@@ -1155,8 +1155,14 @@ void ClientSession::handle_cursor_shape(const uint8_t* payload, size_t len) {
 
     protocol::CursorShapeMessage msg;
     if (protocol::CursorShapeMessage::deserialize(body.data(), body.size(), msg)) {
+        log::debug("CURSOR", "shape %u reassembled: %ux%u, %zu bytes",
+                   msg.shape_id, (unsigned)msg.width, (unsigned)msg.height,
+                   msg.bgra.size());
         pending_shape_ = std::move(msg);
         pending_shape_valid_ = true;
+    } else {
+        log::warn("CURSOR", "shape %u failed to deserialize (%zu bytes)",
+                  shape_id, body.size());
     }
     // Drop the buffer whether or not deserialization succeeded — we
     // can't do anything more with these fragments.

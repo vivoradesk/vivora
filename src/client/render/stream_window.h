@@ -123,6 +123,9 @@ private:
     uint32_t active_shape_id_ = 0;
     bool host_cursor_visible_ = true;
     bool have_active_shape_ = false;
+    // True once a host-provided shape has actually been applied, so a
+    // not-yet-arrived id can hold the current cursor instead of reverting.
+    bool have_applied_shape_ = false;
 
     bool  relative_mode_ = false;
     bool  loopback_      = false;   // session views this same machine (VIV-50)

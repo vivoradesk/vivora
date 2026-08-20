@@ -957,11 +957,15 @@ void QtGlVideoView::refresh_cursor() {
     auto it = cursor_cache_.find(active_shape_id_);
     if (it != cursor_cache_.end()) {
         setCursor(it->second);
-    } else {
-        // Host says visible but we haven't received that shape yet — fall
-        // back to a plain arrow so the user isn't left invisible.
-        setCursor(Qt::ArrowCursor);
+        have_applied_shape_ = true;
+        return;
     }
+    // Not here yet, which is normal for a moment: the host announces the new
+    // id in the position message and the bitmap follows in the next one.
+    // Hold what we are showing rather than snapping back to the local arrow,
+    // or the cursor flickers on every change.
+    if (have_applied_shape_) return;
+    setCursor(Qt::ArrowCursor);
 }
 
 } // namespace vivora::client

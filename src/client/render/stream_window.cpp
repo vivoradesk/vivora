@@ -407,13 +407,29 @@ void StreamWindow::refresh_cursor() {
     }
     auto it = cursor_cache_.find(active_shape_id_);
     if (it != cursor_cache_.end()) {
+        log::debug("CURSOR", "apply host shape %u (%zu cached)",
+                   active_shape_id_, cursor_cache_.size());
         setCursor(it->second);
-    } else {
-        // Host says visible but we haven't received that shape yet (first
-        // packet may have been dropped) — fall back to a plain arrow so
-        // the user isn't left with an invisible cursor.
-        setCursor(Qt::ArrowCursor);
+        have_applied_shape_ = true;
+        return;
     }
+    // The shape has not arrived yet.  That is normal for a moment: the host
+    // announces a new id in the position message it sends every frame, and
+    // the bitmap follows in the next one.
+    //
+    // Hold whatever we are already showing rather than snapping back to the
+    // local arrow.  Falling back on every miss made the cursor flicker
+    // between the host's shape and ours, and when the host churned ids
+    // faster than a bitmap could cross the wire it meant the host's cursor
+    // was never seen at all.
+    if (have_applied_shape_) {
+        log::debug("CURSOR", "shape %u not here yet - holding previous",
+                   active_shape_id_);
+        return;
+    }
+    // Nothing has ever arrived — a plain arrow beats an invisible cursor.
+    log::debug("CURSOR", "no host shape yet - local arrow");
+    setCursor(Qt::ArrowCursor);
 }
 
 bool StreamWindow::init_renderer(ID3D11Device* device, uint32_t width, uint32_t height, DXGI_FORMAT format) {

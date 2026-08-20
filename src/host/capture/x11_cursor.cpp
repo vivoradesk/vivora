@@ -48,6 +48,10 @@ struct X11Cursor::Impl {
     unsigned long last_serial = 0;
     bool     have_serial = false;
     uint32_t next_id = 1;
+    // The last shape we reported, kept so an unchanged bitmap can be
+    // recognised as unchanged -- see the comment in poll().
+    Shape    last_shape;
+    bool     have_last_shape = false;
 
     XCloseDisplay_t         XCloseDisplay = nullptr;
     XFree_t                 XFree = nullptr;
@@ -126,29 +130,62 @@ bool X11Cursor::poll(float& x_norm, float& y_norm, bool& visible,
     y_norm  = clamp01(float(img->y) / float(impl_->screen_h));
     visible = true;
 
-    if (!impl_->have_serial || img->cursor_serial != impl_->last_serial) {
-        impl_->last_serial = img->cursor_serial;
-        impl_->have_serial = true;
-        shape.id        = impl_->next_id++;
-        shape.width     = img->width;
-        shape.height    = img->height;
-        shape.hotspot_x = img->xhot;
-        shape.hotspot_y = img->yhot;
-        const size_t n = static_cast<size_t>(img->width) * img->height;
-        shape.bgra.resize(n * 4);
-        // XFixes pixels are premultiplied ARGB packed in the low 32 bits of
-        // each `long`; repack to BGRA byte order for the wire/CursorShape.
-        for (size_t i = 0; i < n; ++i) {
-            const unsigned long p = img->pixels[i];
-            shape.bgra[i * 4 + 0] = static_cast<uint8_t>(p & 0xFF);          // B
-            shape.bgra[i * 4 + 1] = static_cast<uint8_t>((p >> 8) & 0xFF);   // G
-            shape.bgra[i * 4 + 2] = static_cast<uint8_t>((p >> 16) & 0xFF);  // R
-            shape.bgra[i * 4 + 3] = static_cast<uint8_t>((p >> 24) & 0xFF);  // A
-        }
-        shape_changed = true;
+    // Decide whether the cursor IMAGE changed -- which is not the same
+    // question as whether XFixes handed us a different cursor object.
+    //
+    // cursor_serial identifies the cursor instance, and GNOME/mutter creates
+    // a fresh one constantly: on this desktop it changes on nearly every
+    // poll while the pointer sits still over a plain arrow. Trusting it made
+    // the host announce a new shape id ~60 times a second, and that broke the
+    // viewer outright -- the position message always carried an id one newer
+    // than the bitmap that had arrived, so the lookup missed every time and
+    // the viewer fell back to its local arrow forever. The one case that did
+    // work, dragging a window edge, worked only because the pointer grab
+    // holds the serial still long enough for a bitmap to land.
+    //
+    // So compare the pixels. It is 2 KB of memcmp at most once per poll, and
+    // it makes the shape id mean what the viewer assumes it means: a
+    // distinct image.
+    if (impl_->have_serial && img->cursor_serial == impl_->last_serial) {
+        impl_->XFree(img);      // same instance: nothing can have changed
+        return true;
+    }
+    impl_->last_serial = img->cursor_serial;
+    impl_->have_serial = true;
+
+    Shape candidate;
+    candidate.width     = img->width;
+    candidate.height    = img->height;
+    candidate.hotspot_x = img->xhot;
+    candidate.hotspot_y = img->yhot;
+    const size_t n = static_cast<size_t>(img->width) * img->height;
+    candidate.bgra.resize(n * 4);
+    // XFixes pixels are premultiplied ARGB packed in the low 32 bits of
+    // each `long`; repack to BGRA byte order for the wire/CursorShape.
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned long p = img->pixels[i];
+        candidate.bgra[i * 4 + 0] = static_cast<uint8_t>(p & 0xFF);          // B
+        candidate.bgra[i * 4 + 1] = static_cast<uint8_t>((p >> 8) & 0xFF);   // G
+        candidate.bgra[i * 4 + 2] = static_cast<uint8_t>((p >> 16) & 0xFF);  // R
+        candidate.bgra[i * 4 + 3] = static_cast<uint8_t>((p >> 24) & 0xFF);  // A
+    }
+    impl_->XFree(img);
+
+    const Shape& prev = impl_->last_shape;
+    if (impl_->have_last_shape &&
+        prev.width     == candidate.width &&
+        prev.height    == candidate.height &&
+        prev.hotspot_x == candidate.hotspot_x &&
+        prev.hotspot_y == candidate.hotspot_y &&
+        prev.bgra      == candidate.bgra) {
+        return true;            // new cursor object, same picture
     }
 
-    impl_->XFree(img);
+    candidate.id            = impl_->next_id++;
+    impl_->last_shape       = candidate;
+    impl_->have_last_shape  = true;
+    shape                   = std::move(candidate);
+    shape_changed           = true;
     return true;
 }
 

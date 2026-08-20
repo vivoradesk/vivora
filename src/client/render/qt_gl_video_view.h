@@ -197,6 +197,9 @@ private:
     std::unordered_map<uint32_t, QCursor> cursor_cache_;
     uint32_t active_shape_id_ = 0;
     bool     have_active_shape_ = false;
+    // True once a host shape has actually been applied, so a not-yet-arrived
+    // id holds the current cursor instead of reverting to the local arrow.
+    bool     have_applied_shape_ = false;
 
     // Relative-mouse mode (host hid the cursor — game / 3D app).  Only
     // active on X11 because Wayland refuses programmatic pointer warps,
