@@ -131,31 +131,25 @@ capable GPU.
 
 ### Windows
 
-Needs MSVC 2022 and a **statically built Qt 6.9**, and this is the least
-friendly part of the project. The build links QML plugin libraries and Qt's
-internal resource object files by path, which only exist where Qt was
-compiled - so a stock Qt *installation* will not work, you need the build tree
-it came out of.
+Needs MSVC 2022 and Qt 6.8 or newer. A stock Qt installation works:
 
 ```powershell
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DQt6_DIR=<qt>/qtbase/lib/cmake/Qt6
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<qt>/msvc2022_64
+cmake --build build
 ```
 
-Everything else is derived from `Qt6_DIR`, and CMake fails immediately with a
-useful message if the layout is not what it expects. Override individually if
-yours differs:
+The **released** binaries are built against a statically linked Qt so that
+`vivora.exe` is a single self-contained file with no runtime to install. That
+is the only difference; point `CMAKE_PREFIX_PATH` at a static Qt and the same
+commands produce it.
+
+One variable is Windows-specific. Qt's network module implements PBKDF2 with
+the OpenSSL 3 key-derivation API, so those symbols have to resolve even though
+no Vivora traffic goes through OpenSSL - TLS is Schannel:
 
 | Variable | Default |
 | --- | --- |
-| `VIVORA_QT_BASE_BUILD_DIR` | derived: `<Qt6_DIR>/../../..` |
-| `VIVORA_QT_DECL_BUILD_DIR` | derived: `<qt build root>/qtdeclarative` |
-| `VIVORA_QT_BUILD_CONFIG` | `Release` |
 | `VIVORA_OPENSSL3_STATIC_DIR` | `C:/OpenSSL-WinUniversal/lib/VC/x64/MT` |
-
-Because the object-file names encode Qt's internal target names, this is tied
-to the Qt version it was developed against. Migrating the QML registration to
-`qt_add_qml_module()` would remove the whole arrangement, and is the follow-up
-that also unblocks building Windows in CI.
 
 ### macOS
 

@@ -5,11 +5,11 @@ on:
     branches: [master, main]
   pull_request:
 
-# Windows is missing here on purpose. The Windows build links Qt's internal
-# resource object files by path out of a Qt build tree, so it cannot be
-# reproduced on a runner until the QML registration moves to
-# qt_add_qml_module(). Until then Windows artefacts are built by hand and the
-# release checklist covers them.
+# The Windows job is compile-only and not a merge blocker. It builds against
+# the official Qt binaries, which are shared libraries, while the artefacts we
+# ship are built against a static Qt -- so it proves the source and the CMake
+# are portable, not that the release build works. That still catches the thing
+# it exists to catch: a change that only compiles on one machine.
 jobs:
   core:
     name: core (no Qt)
@@ -105,6 +105,37 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+  windows-app:
+    name: windows app (Qt)
+    runs-on: windows-latest
+    # Unblocked by moving the QML to qt_add_qml_module (VIV-121): before that
+    # the link line named Qt's internal resource objects by absolute path and
+    # nothing but the developer's machine could satisfy it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.2'
+          modules: 'qtshadertools'
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DVIVORA_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
   hygiene:
     name: hygiene

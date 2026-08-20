@@ -256,19 +256,20 @@ if(WIN32)
     # (Q_IMPORT_PLUGIN(QSchannelBackendPlugin) in gui_main.cpp); without one the
     # first HTTPS request (CloudClient -> https://cloud.vivora.dev) crashes.
     # Schannel needs no OpenSSL — just the Windows security libs below.
-    target_link_libraries(vivora PRIVATE
-        Qt6::QSchannelBackendPlugin
-        secur32 crypt32 bcrypt ncrypt ws2_32
-    )
+    target_link_libraries(vivora PRIVATE secur32 crypt32 bcrypt ncrypt ws2_32)
+    if(NOT QT6_IS_SHARED_LIBS_BUILD)
+        target_link_libraries(vivora PRIVATE Qt6::QSchannelBackendPlugin)
+        target_compile_definitions(vivora PRIVATE VIVORA_QT_STATIC)
+    endif()
 
     # QNetworkInformation backend (Network List Manager) — VIV-57 network-
     # change rendezvous refresh.  Same static-plugin rule as Schannel above:
     # the .lib must be on the link line AND the plugin imported in
     # gui_main.cpp (Q_IMPORT_PLUGIN(QNetworkListManagerNetworkInformation-
     # BackendFactory)).
-    target_link_libraries(vivora PRIVATE
-        Qt6::QNLMNIPlugin
-    )
+    if(NOT QT6_IS_SHARED_LIBS_BUILD)
+        target_link_libraries(vivora PRIVATE Qt6::QNLMNIPlugin)
+    endif()
 
     # Do not let Qt auto-import the OpenSSL TLS backend (VIV-122).
     #

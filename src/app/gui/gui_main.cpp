@@ -38,9 +38,10 @@
 // nothing here is tied to a particular Qt build layout.
 //
 // What remains are the two backends that are not QML at all, so nothing can
-// infer them. Windows only: macOS uses a dynamic Homebrew Qt, and Linux a
-// dynamic from-source one, where the loader finds plugins itself.
-#ifdef VIVORA_WINDOWS
+// infer them, and only when Qt itself is static -- with a shared Qt (macOS,
+// Linux, and a Windows CI runner using the official binaries) the loader finds
+// plugins on disk and these macros would be unresolved symbols.
+#if defined(VIVORA_WINDOWS) && defined(VIVORA_QT_STATIC)
 // TLS backend for QNetworkAccessManager (CloudClient talks to
 // https://cloud.vivora.dev).  Static Qt registers no TLS backend unless its
 // plugin is imported; without one the first HTTPS request crashes.  Schannel
@@ -108,10 +109,10 @@ int run_gui(int argc, char** argv) {
     QApplication app(argc, argv);
 
 #ifdef VIVORA_WINDOWS
-    // Force the native Schannel TLS backend.  The static Qt also exposes an
-    // OpenSSL backend, but it's wired against a mismatched OpenSSL 1.1/3 set
-    // (linked with /FORCE:MULTIPLE) and crashes mid-handshake.  Schannel uses
-    // Windows' own TLS — no OpenSSL.  Must run before any QSslSocket is used.
+    // Force the native Schannel TLS backend.  Since VIV-122 it is the only one
+    // linked in, so this is belt and braces rather than a fix -- but it is the
+    // line that would fail loudly if an OpenSSL backend ever crept back in,
+    // which is worth keeping.  Must run before any QSslSocket is used.
     if (!QSslSocket::setActiveBackend(QStringLiteral("schannel")))
         log::warn("GUI", "could not select Schannel TLS backend");
 #endif

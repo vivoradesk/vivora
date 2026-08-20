@@ -6,19 +6,23 @@ on:
 
 permissions:
   contents: write
+  # The AppImage job pulls the prebuilt Debian 11 image from GHCR.
+  packages: read
 
 # What this does and does not do.
 #
-# The server tarball is fully reproducible on a runner -- the servers need no
-# Qt, no ffmpeg and no PipeWire -- so it is built here and attached
-# automatically. The desktop artefacts are not: the Windows build links Qt's
-# internal resource objects out of a Qt build tree, and the Linux AppImage
-# needs the Debian 11 image that compiles Qt from source. Both are produced by
-# hand and uploaded to the draft this workflow opens.
+# The server tarball and the Linux AppImage are both built here. The AppImage
+# needs a Debian 11 image with Qt compiled from source, which takes hours; that
+# image is built once by build-image.yml and pushed to the registry, so this
+# job pulls it and does a normal incremental compile.
 #
-# That is why the release is created as a DRAFT. Publishing it before the
-# desktop artefacts are attached would leave people on the download page with
-# nothing to download.
+# The Windows artefacts are still produced by hand. The build itself no longer
+# needs a machine-local Qt (VIV-121), but the zip and the MSI have never been
+# made on a runner, and a release is the wrong place to find out.
+#
+# That is why the release is created as a DRAFT: publishing it before the
+# Windows artefacts are attached would leave people on the download page with
+# half of what the notes promise.
 jobs:
   servers:
     name: server tarball
@@ -44,9 +48,57 @@ jobs:
           name: servers
           path: dist/*
 
+  appimage:
+    name: linux AppImage
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/vivora-build:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # The image already carries Qt, ffmpeg, PipeWire headers and the
+      # linuxdeploy tools; the script does the AppDir staging, the prune of the
+      # libraries that must come from the host, and the squash.
+      - name: Package
+        run: scripts/package-linux-appimage.sh build-appimage dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*
+
+  smoke:
+    name: AppImage on Fedora
+    needs: appimage
+    # On the runner itself, not in a container: the smoke test starts a
+    # container of its own, which a job already inside one cannot do.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+          path: dist
+
+      # The whole point is the libraries we deliberately did not bundle -- mesa,
+      # glib, dbus, fontconfig, the xcb stack. Fedora has a completely different
+      # set from the Debian 11 this was built in, so if it starts there the
+      # bundle/prune split is right. Headless, so it checks loading and the CLI,
+      # not rendering.
+      - name: Run it somewhere it was not built
+        run: |
+          chmod +x dist/*.AppImage
+          scripts/smoke-appimage.sh dist/*.AppImage
+
   draft:
     name: draft release
-    needs: servers
+    needs: [servers, appimage, smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +106,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: servers
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
           path: dist
 
       - name: Create draft release
@@ -71,5 +128,5 @@ jobs:
             --title "Vivora ${GITHUB_REF_NAME}" \
             --notes-file "$notes" \
             dist/*
-          echo "Draft created. Attach the Windows zip/msi and the Linux"
-          echo "AppImage, then publish."
+          echo "Draft created with the server tarball and the AppImage."
+          echo "Attach the Windows zip and msi, then publish."
