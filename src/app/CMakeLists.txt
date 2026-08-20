@@ -435,6 +435,9 @@ if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
         libavcodec libavutil libswscale)
+    # Headers only -- libpipewire is resolved at runtime (VIV-126), so that a
+    # machine that only ever views a remote screen does not need it installed
+    # in order to start the binary at all.
     pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
     pkg_check_modules(DBUS     REQUIRED IMPORTED_TARGET dbus-1)
     # wl_output enumeration for the VIV-50 monitor list (the portal doesn't
@@ -452,6 +455,7 @@ if(UNIX AND NOT APPLE)
         # wired into HostSession via LinuxHostPlatform.  Audio capture
         # via PulseAudio monitor is pending (L3 sub-task).
         ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_capture.cpp
+        ${CMAKE_SOURCE_DIR}/src/host/capture/pipewire_dyn.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/x11_cursor.cpp
         ${CMAKE_SOURCE_DIR}/src/host/capture/wayland_outputs.cpp
         ${CMAKE_SOURCE_DIR}/src/host/encode/vaapi_encoder.cpp
@@ -465,12 +469,12 @@ if(UNIX AND NOT APPLE)
     )
     target_include_directories(vivora PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/nvenc
+        ${PIPEWIRE_INCLUDE_DIRS}
     )
     target_link_libraries(vivora PRIVATE
         Qt6::OpenGL
         Qt6::OpenGLWidgets
         PkgConfig::LIBAV
-        PkgConfig::PIPEWIRE
         PkgConfig::DBUS
         ${CMAKE_DL_LIBS}
     )

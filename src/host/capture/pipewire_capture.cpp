@@ -5,7 +5,9 @@
 
 #include <dbus/dbus.h>
 
-#include <pipewire/pipewire.h>
+// Resolves libpipewire at runtime and redirects the pw_* calls below; see
+// pipewire_dyn.h for why this is not a plain link (VIV-126).
+#include "host/capture/pipewire_dyn.h"
 #include <spa/param/video/format-utils.h>
 #include <spa/debug/types.h>
 #include <spa/utils/result.h>
@@ -26,6 +28,10 @@
 #include <unistd.h>
 
 namespace vivora::host {
+
+std::string PipeWireCapture::unavailable_reason() {
+    return pwdyn::unavailable_reason();
+}
 
 namespace {
 
@@ -461,6 +467,15 @@ static const pw_stream_events kStreamEvents = {
 // ────────────────────────────────────────────────────────────────────
 
 bool PipeWireCapture::init(FrameCallback cb) {
+    // Before the portal flow, not after it: libpipewire is resolved at
+    // runtime (VIV-126), and a machine without it should be told so instead
+    // of being walked through a screen-capture permission dialog for a
+    // session nothing can consume.
+    if (!pwdyn::load()) {
+        log::error(TAG, "%s", pwdyn::unavailable_reason().c_str());
+        return false;
+    }
+
     impl_->cb = std::move(cb);
 
     DBusError err;
