@@ -148,7 +148,14 @@ void HostWorker::runOnWorkerThread() {
         }, Qt::QueuedConnection);
     };
 
-    vivora::run_host_loop(*platform_, lcfg);
+    std::string loop_error;
+    lcfg.error_out = &loop_error;
+    const int rc = vivora::run_host_loop(*platform_, lcfg);
+    if (rc != 0 && !loop_error.empty()) {
+        // The return code used to be dropped on the floor, so a loop that
+        // gave up before it ever ran looked exactly like a normal stop.
+        emit initFailed(QString::fromStdString(loop_error));
+    }
 
     // Loop exited (stop requested or unrecoverable error).  Tear down
     // the platform on this thread before signalling stopped().

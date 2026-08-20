@@ -5,6 +5,7 @@
 #include "host/encode/video_encoder.h"
 #include "host/session/host_approval_gate.h"
 #include <atomic>
+#include <string>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -47,6 +48,12 @@ struct HostLoopConfig {
     // Required by Pro-managed relay (--require-license); ignored by
     // self-host instances.
     const char* license_file = nullptr;
+
+    // Filled with a sentence for the user when the loop gives up before it
+    // ever runs.  The CLI has the log; the GUI has nothing else to show, and
+    // "sharing stopped" with no reason is what a port clash used to look
+    // like from the outside.
+    std::string* error_out = nullptr;
 
     // Idle-timeout (GUI Phase B).  When clients sit silent for
     // `idle_timeout_min` minutes, host_loop fires `on_idle_warning`

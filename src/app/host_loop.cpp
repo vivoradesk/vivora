@@ -133,6 +133,9 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             if (cfg.relay_session_hex && *cfg.relay_session_hex) {
                 if (!crypto::hex_decode_32(cfg.relay_session_hex, sid)) {
                     log::error("HOST", "Invalid --relay-session — expected 64 lowercase hex chars");
+                    if (cfg.error_out)
+                        *cfg.error_out = "Invalid relay session id — expected 64 "
+                                         "lowercase hex characters.";
                     return 1;
                 }
                 have_sid = true;
@@ -162,6 +165,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     }
     if (!session.start(cfg.port)) {
         log::error("HOST", "Failed to start session on port %u", cfg.port);
+        if (cfg.error_out) {
+            // Overwhelmingly this is a second copy of Vivora already sharing:
+            // the first one holds the port, the second starts, fails, and used
+            // to stop with nothing said -- so from the outside the machine
+            // simply stopped accepting connections.
+            *cfg.error_out =
+                "Could not listen on port " + std::to_string(cfg.port) +
+                ". Another copy of Vivora is probably already sharing on this "
+                "machine — quit it, or choose a different port in Settings.";
+        }
         return 1;
     }
     log::info("HOST", "Waiting for client on port %u... (Ctrl+C to stop)", cfg.port);
