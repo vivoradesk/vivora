@@ -4,6 +4,9 @@
 #include "common/utils/log.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <dirent.h>
 #include <dlfcn.h>
 
 namespace vivora::host {
@@ -37,6 +40,26 @@ typedef int       (*XDisplayWidth_t)(XDisplay*, int);
 typedef int       (*XDisplayHeight_t)(XDisplay*, int);
 typedef int       (*XFree_t)(void*);
 typedef XFixesCursorImage* (*XFixesGetCursorImage_t)(XDisplay*);
+// Whether the desktop session is Wayland, and therefore whether the X server
+// we just opened is XWayland.
+bool is_wayland_session() {
+    if (const char* w = std::getenv("WAYLAND_DISPLAY"); w && *w) return true;
+    if (const char* t = std::getenv("XDG_SESSION_TYPE");
+        t && std::strcmp(t, "wayland") == 0) return true;
+    // No environment to go on -- started from ssh or a service. The
+    // compositor's socket lives in the user's runtime directory either way.
+    const char* rt = std::getenv("XDG_RUNTIME_DIR");
+    if (!rt || !*rt) return false;
+    DIR* d = ::opendir(rt);
+    if (!d) return false;
+    bool found = false;
+    while (dirent* e = ::readdir(d)) {
+        if (std::strncmp(e->d_name, "wayland-", 8) == 0) { found = true; break; }
+    }
+    ::closedir(d);
+    return found;
+}
+
 } // namespace
 
 struct X11Cursor::Impl {
@@ -97,6 +120,38 @@ bool X11Cursor::init() {
         shutdown();
         return false;
     }
+
+    // Refuse to be the cursor source on a Wayland session.
+    //
+    // XFixes reports the X server's cursor, and on a Wayland session that
+    // server is XWayland, which only knows about the cursors X11 clients set.
+    // Native Wayland clients -- the browser, the file manager, most of a
+    // modern desktop -- set theirs through the compositor, and XFixes never
+    // sees them: it keeps handing back the last X11 cursor. The viewer then
+    // shows the right shape over an X11 window and a stale one everywhere
+    // else, which is exactly what was reported.
+    //
+    // The portal's own cursor handling has no such blind spot, because the
+    // compositor is the one drawing, so leave the cursor to it on Wayland.
+    // Detecting it takes three tries, because no single one covers every way
+    // the host gets started.  XWayland only began advertising its extension
+    // in 22.1's successor, so on an Ubuntu 22.04 desktop that check alone
+    // finds nothing; the environment says so plainly but is empty when the
+    // host is launched over ssh; the compositor's socket is visible either
+    // way, because $XDG_RUNTIME_DIR is per user, not per login.
+    if (is_wayland_session()) {
+        const char* force = std::getenv("VIVORA_X11_CURSOR");
+        if (!(force && force[0] == '1')) {
+            log::info(TAG, "Wayland session — leaving the cursor to the portal "
+                           "(XFixes cannot see Wayland clients' cursors; set "
+                           "VIVORA_X11_CURSOR=1 to override)");
+            shutdown();
+            return false;
+        }
+        log::warn(TAG, "Wayland session but VIVORA_X11_CURSOR=1 — the cursor "
+                       "will be wrong over Wayland-native windows");
+    }
+
     const int scr = XDefaultScreen(impl_->dpy);
     impl_->screen_w = std::max(1, XDisplayWidth(impl_->dpy, scr));
     impl_->screen_h = std::max(1, XDisplayHeight(impl_->dpy, scr));

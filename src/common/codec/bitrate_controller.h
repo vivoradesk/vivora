@@ -130,6 +130,25 @@ public:
         probe_ceiling_bps_ = std::max(ceiling, bounds_.min_bps);
         log::info("BitrateCtl", "Probe BW %u kbps -> ceiling %u kbps",
                   bps / 1000, probe_ceiling_bps_ / 1000);
+
+        // The probe usually lands AFTER warmup has finished, and warmup
+        // latched its recovery ceiling from whatever was known then -- which
+        // was nothing, so it took the conservative WARMUP_CEILING.  Nothing
+        // revisited that, so every session stayed pinned at 10 Mbps no matter
+        // what the link turned out to be: measured here at 1.7 Gbps of
+        // headroom on a LAN, with a 1920x1200 target of 16.6 Mbps, and the
+        // picture capped at 10.
+        //
+        // Raise it, never lower it.  Lowering would fight the loss governors,
+        // which own every downward move; this only restores the headroom the
+        // probe was run to find in the first place, and the climb toward it
+        // is still the small-step one under those same governors.
+        if (recovery_ceiling_bps_ > 0 && probe_ceiling_bps_ > recovery_ceiling_bps_) {
+            log::info("BitrateCtl",
+                      "Recovery ceiling %u -> %u kbps (probe landed after warmup)",
+                      recovery_ceiling_bps_ / 1000, probe_ceiling_bps_ / 1000);
+            recovery_ceiling_bps_ = probe_ceiling_bps_;
+        }
     }
 
     // Diagnostic: raise the hard ceiling above WARMUP_CEILING_BPS so a

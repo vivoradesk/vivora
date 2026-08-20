@@ -100,33 +100,31 @@ if(VIVORA_MAC_APP_BUNDLE)
         MACOSX_PACKAGE_LOCATION "Resources")
     # Codesign identity for the bundle.  Two modes:
     #   "-"        : ad-hoc (no cert).  Easy, but the designated requirement
-    #                is the cdhash, which changes every build — so TCC grants
-    #                (Screen Recording / Accessibility) DON'T survive rebuilds
-    #                and macOS re-prompts (worse on macOS 15+/26: it can even
-    #                loop on relaunch).  We reset TCC each build so the next
-    #                launch at least re-grants cleanly.
+    #                is the cdhash, which changes every build - so TCC grants
+    #                (Screen Recording / Accessibility) do NOT survive
+    #                rebuilds and macOS re-prompts.
     #   "<name>"   : a code-signing certificate (e.g. a one-time self-signed
-    #                "Vivora Dev" in the login keychain).  Its DR is
-    #                identifier+cert — STABLE across rebuilds and relaunches —
-    #                so grants persist and no reset is needed.  No Apple
-    #                Developer account required; a real Developer ID swaps in
-    #                here for distribution (VIV-14).
-    # Create the self-signed cert once (see docs/macos-codesign or VIV-14),
-    # then configure with -DVIVORA_MAC_CODESIGN_IDENTITY="Vivora Dev".
+    #                "Vivora Dev" in the login keychain).  Its designated
+    #                requirement is identifier+cert, stable across rebuilds.
+    #                No Apple Developer account required; a real Developer ID
+    #                swaps in here for distribution (VIV-14).
+    # Create the self-signed cert once (see docs/macos-codesign.md), then
+    # configure with -DVIVORA_MAC_CODESIGN_IDENTITY="Vivora Dev".
+    #
+    # The signing runs through a script rather than inline, because a
+    # certificate needs an unlocked keychain and an SSH session never has one:
+    # codesign fails with errSecInternalComponent, the build stops after the
+    # link, and what is left behind still runs on the linker's own ad-hoc
+    # signature -- under the wrong signing identifier, which is what TCC keys
+    # grants on.  The script falls back to ad-hoc with a loud explanation
+    # instead, and resets the grants either way.
     set(VIVORA_MAC_CODESIGN_IDENTITY "-" CACHE STRING
         "codesign identity for Vivora.app (- = ad-hoc; a keychain cert name = stable TCC)")
     add_custom_command(TARGET vivora POST_BUILD
-        COMMAND codesign --force --sign "${VIVORA_MAC_CODESIGN_IDENTITY}" --identifier dev.vivora.app
+        COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/macos/codesign-app.sh"
+                "${VIVORA_MAC_CODESIGN_IDENTITY}"
                 $<TARGET_BUNDLE_DIR:vivora>
         COMMENT "Codesigning Vivora.app (identity: ${VIVORA_MAC_CODESIGN_IDENTITY})")
-    if(VIVORA_MAC_CODESIGN_IDENTITY STREQUAL "-")
-        # Ad-hoc only: cdhash changed → the old grant is dead.  Reset so the
-        # next launch re-prompts and registers.  A stable cert needs no reset.
-        add_custom_command(TARGET vivora POST_BUILD
-            COMMAND tccutil reset ScreenCapture dev.vivora.app || true
-            COMMAND tccutil reset Accessibility dev.vivora.app || true
-            COMMENT "Ad-hoc build: resetting TCC grants (set VIVORA_MAC_CODESIGN_IDENTITY for stable grants)")
-    endif()
 endif()
 
 # GUI sources land on all three desktop platforms — same Qt 6 + QML +
