@@ -1,0 +1,49 @@
+<!--
+  Binary assets: the app icon, the tray icons and the bundled fonts.
+
+  These stay a plain .qrc on purpose. VIV-121 moved the QML into a proper
+  module because qt_import_qml_plugins() only works for qt_add_qml_module()
+  targets; nothing about that reasoning applies to images and fonts, and a
+  .qrc keeps the aliases readable next to the files they rename.
+
+  They used to live in qml.qrc alongside the QML, which is how they were lost
+  when that file was deleted. Nothing said so: a missing resource yields a
+  null QIcon, and QSystemTrayIcon then quietly declines to show at all.
+-->
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file alias="app/16.png">../icons/win/vivora-16.png</file>
+        <file alias="app/32.png">../icons/win/vivora-32.png</file>
+        <file alias="app/48.png">../icons/win/vivora-48.png</file>
+        <file alias="app/64.png">../icons/win/vivora-64.png</file>
+        <file alias="app/128.png">../icons/win/vivora-128.png</file>
+        <file alias="app/256.png">../icons/win/vivora-256.png</file>
+
+        <file alias="tray/idle-16.png">../icons/tray/tray-idle-16.png</file>
+        <file alias="tray/idle-22.png">../icons/tray/tray-idle-22.png</file>
+        <file alias="tray/idle-32.png">../icons/tray/tray-idle-32.png</file>
+        <file alias="tray/idle-44.png">../icons/tray/tray-idle-44.png</file>
+        <file alias="tray/idle-64.png">../icons/tray/tray-idle-64.png</file>
+
+        <file alias="tray/sharing-16.png">../icons/tray/tray-sharing-16.png</file>
+        <file alias="tray/sharing-22.png">../icons/tray/tray-sharing-22.png</file>
+        <file alias="tray/sharing-32.png">../icons/tray/tray-sharing-32.png</file>
+        <file alias="tray/sharing-44.png">../icons/tray/tray-sharing-44.png</file>
+        <file alias="tray/sharing-64.png">../icons/tray/tray-sharing-64.png</file>
+
+        <file alias="tray/error-16.png">../icons/tray/tray-error-16.png</file>
+        <file alias="tray/error-22.png">../icons/tray/tray-error-22.png</file>
+        <file alias="tray/error-32.png">../icons/tray/tray-error-32.png</file>
+        <file alias="tray/error-44.png">../icons/tray/tray-error-44.png</file>
+        <file alias="tray/error-64.png">../icons/tray/tray-error-64.png</file>
+    </qresource>
+    <qresource prefix="/fonts">
+        <file alias="Inter-Regular.ttf">fonts/Inter-Regular.ttf</file>
+        <file alias="Inter-Medium.ttf">fonts/Inter-Medium.ttf</file>
+        <file alias="Inter-SemiBold.ttf">fonts/Inter-SemiBold.ttf</file>
+        <file alias="Inter-Bold.ttf">fonts/Inter-Bold.ttf</file>
+        <file alias="JetBrainsMono-Regular.ttf">fonts/JetBrainsMono-Regular.ttf</file>
+        <file alias="JetBrainsMono-Bold.ttf">fonts/JetBrainsMono-Bold.ttf</file>
+    </qresource>
+</RCC>

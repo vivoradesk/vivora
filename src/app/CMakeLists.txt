@@ -149,6 +149,10 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
         gui/polls_client.cpp
         gui/tray.cpp
         gui/app_icon.cpp
+        # App icon, tray icons and the bundled fonts.  Kept as a .qrc: the
+        # module treatment in VIV-121 is about QML registration and has
+        # nothing to say about images and fonts.
+        ${CMAKE_SOURCE_DIR}/qml/assets.qrc
     )
     # Start-at-login backend (VIV-18): HKCU Run key on Windows, an XDG
     # autostart .desktop entry on Linux.  macOS still uses the inline no-op
