@@ -45,17 +45,15 @@ GPL components, in which case the combination is GPL v2 or later. Either is
 compatible with this program's AGPL v3. Source: <https://ffmpeg.org/>.
 Not bundled on Windows or macOS.
 
-**OpenSSL 1.1** (`libcrypto-1_1-x64.dll`, `libssl-1_1-x64.dll`) — Windows
-builds only. Dual OpenSSL/SSLeay licence.
+**OpenSSL 3** — Windows builds only, linked statically. Apache Licence 2.0.
 Copyright The OpenSSL Project.
 
-These two libraries are present only because the Qt build Vivora links against
-registers an OpenSSL TLS backend that resolves them at startup. **Nothing in
-Vivora routes traffic through them** — TLS uses Schannel, the platform
-implementation, and the media path uses Monocypher, not OpenSSL at all. They
-are nonetheless end-of-life (no security fixes since September 2023) and
-removing them by rebuilding Qt with `-schannel -no-openssl` is tracked as a
-follow-up.
+Present for a single function: one translation unit inside Qt's network module
+implements PBKDF2 with the OpenSSL 3 key-derivation API. **No Vivora traffic
+goes through OpenSSL** — TLS uses Schannel, the Windows system implementation,
+and the streaming path uses Monocypher. Earlier 0.1 builds shipped two
+end-of-life OpenSSL 1.1 DLLs beside the exe for the same indirect reason; those
+are gone.
 
 ## Headers only, not redistributed
 

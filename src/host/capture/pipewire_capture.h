@@ -65,6 +65,11 @@ public:
         std::vector<uint8_t> bgra;  // width*height*4
     };
 
+    // Empty when screen capture is usable.  Otherwise one sentence the user
+    // can act on -- today that means libpipewire is not installed (VIV-126).
+    // Cheap and side-effect free; safe to call before constructing anything.
+    static std::string unavailable_reason();
+
     PipeWireCapture();
     ~PipeWireCapture();
 

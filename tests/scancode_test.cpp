@@ -149,6 +149,108 @@ void test_unmapped_is_zero() {
     CHECK(set1_to_evdev(0xE0FF) == 0);
 }
 
+// Every mac keycode that maps must map back to itself, and no two may share a
+// set-1 code. This is the only test macOS input gets — the platform has no CI
+// and the tables are exact inverses by hand, which is exactly the kind of
+// thing that rots silently.
+void test_mac_roundtrip_and_injectivity() {
+    printf("  mac kVK <-> set1 round-trip...\n");
+    std::map<uint16_t, uint16_t> seen;   // set1 -> mac kc
+    int mapped = 0;
+    for (uint16_t kc = 0; kc < 256; ++kc) {
+        const uint16_t s1 = mac_kc_to_set1(kc);
+        if (s1 == 0) continue;
+        ++mapped;
+        CHECK(set1_to_mac_kc(s1) == static_cast<int>(kc));
+        const auto it = seen.find(s1);
+        if (it != seen.end()) {
+            std::fprintf(stderr, "FAIL collision: mac kc 0x%X and 0x%X both -> 0x%X\n",
+                         it->second, kc, s1);
+            ++g_tests_failed;
+        }
+        seen[s1] = kc;
+        ++g_tests_run;
+    }
+    // A full Apple keyboard: alphanumerics, both modifier pairs, the arrow
+    // cluster, F1..F20, the whole keypad and the JIS extras.
+    CHECK(mapped >= 110);
+
+    // And the other direction: anything set1_to_mac_kc claims must come back.
+    for (uint32_t s1 = 1; s1 < 0x10000; ++s1) {
+        const int kc = set1_to_mac_kc(static_cast<uint16_t>(s1));
+        if (kc < 0) continue;
+        CHECK(mac_kc_to_set1(static_cast<uint16_t>(kc)) == s1);
+    }
+}
+
+// A mac viewer and a Linux host have no table in common — they meet in set 1.
+// These are the keys where getting it wrong is silent: the letter still types,
+// just the wrong one.
+void test_mac_to_evdev_bridge() {
+    printf("  mac kVK -> evdev, end to end...\n");
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x00)) == 30);   // A
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x0C)) == 16);   // Q
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x24)) == 28);   // Return -> KEY_ENTER
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x31)) == 57);   // Space
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x33)) == 14);   // Delete -> KEY_BACKSPACE
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x75)) == 111);  // ForwardDelete -> KEY_DELETE
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x7B)) == 105);  // Left arrow
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x37)) == 125);  // Command -> KEY_LEFTMETA
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x3A)) == 56);   // Option  -> KEY_LEFTALT
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x3D)) == 100);  // RightOption -> KEY_RIGHTALT
+    CHECK(set1_to_evdev(mac_kc_to_set1(0x3E)) == 97);   // RightControl
+
+    // ...and back, which is the direction VIV-123 was actually about.
+    CHECK(set1_to_mac_kc(evdev_to_set1(30))  == 0x00);  // A
+    CHECK(set1_to_mac_kc(evdev_to_set1(16))  == 0x0C);  // Q — the Cyrillic case
+    CHECK(set1_to_mac_kc(evdev_to_set1(105)) == 0x7B);  // Left arrow
+    CHECK(set1_to_mac_kc(evdev_to_set1(100)) == 0x3D);  // Right Alt
+    CHECK(set1_to_mac_kc(evdev_to_set1(96))  == 0x4C);  // Keypad Enter
+}
+
+// The arrow-versus-keypad split has to survive the mac tables too, in both
+// directions — mac numbers the two clusters separately, set 1 does not.
+void test_mac_extended_split() {
+    printf("  mac extended split...\n");
+    CHECK(mac_kc_to_set1(0x7B) == 0xE04B);   // Left arrow
+    CHECK(mac_kc_to_set1(0x56) == 0x4B);     // Keypad 4
+    CHECK(mac_kc_to_set1(0x4C) == 0xE01C);   // Keypad Enter
+    CHECK(mac_kc_to_set1(0x24) == 0x1C);     // Return
+    CHECK(mac_kc_to_set1(0x4B) == 0xE035);   // Keypad /
+    CHECK(set1_to_mac_kc(0xE04B) == 0x7B);
+    CHECK(set1_to_mac_kc(0x4B)   == 0x56);
+}
+
+// A Windows viewer's bare make code has to survive canonicalisation and land
+// on the right mac key — this is the full Windows -> macOS host path.
+void test_win_to_mac_bridge() {
+    printf("  Windows make code -> mac kVK...\n");
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x4B, 0x25)) == 0x7B);  // VK_LEFT -> Left
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x4B, 0x64)) == 0x56);  // VK_NUMPAD4 -> Keypad 4
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x1D, 0xA3)) == 0x3E);  // right Ctrl
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x1D, 0x11)) == 0x3B);  // left Ctrl
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x5B, 0x5B)) == 0x37);  // LWin -> Command
+    CHECK(set1_to_mac_kc(win_scan_to_set1(0x1E, 0x41)) == 0x00);  // A
+}
+
+// Unmappable must say -1, not 0 — 0 is a real mac keycode (the A key), so a
+// caller that treats "unknown" as 0 would type an A for every key macOS has
+// no equivalent for.
+void test_mac_unmapped() {
+    printf("  mac unmapped codes...\n");
+    CHECK(set1_to_mac_kc(0) == -1);
+    CHECK(set1_to_mac_kc(0x46) == -1);      // ScrollLock
+    CHECK(set1_to_mac_kc(0xE037) == -1);    // PrintScreen
+    CHECK(set1_to_mac_kc(0xE05D) == -1);    // menu key
+    CHECK(set1_to_mac_kc(0x70) == -1);      // KEY_KATAKANAHIRAGANA
+    CHECK(set1_to_mac_kc(0xE0FF) == -1);
+    CHECK(mac_kc_to_set1(0x3F) == 0);       // fn — handled locally by macOS
+    CHECK(mac_kc_to_set1(0x51) == 0);       // keypad equals — no PC key
+    CHECK(mac_kc_to_set1(0xFF) == 0);
+    // 0x00 is A, and must not be confused with "nothing".
+    CHECK(mac_kc_to_set1(0x00) == 0x1E);
+}
+
 } // namespace
 
 int main() {
@@ -160,6 +262,11 @@ int main() {
     test_qt_native_offset();
     test_win_scan_canonicalisation();
     test_unmapped_is_zero();
+    test_mac_roundtrip_and_injectivity();
+    test_mac_to_evdev_bridge();
+    test_mac_extended_split();
+    test_win_to_mac_bridge();
+    test_mac_unmapped();
     printf("scancode_test: %d checks, %d failed\n", g_tests_run, g_tests_failed);
     return g_tests_failed == 0 ? 0 : 1;
 }

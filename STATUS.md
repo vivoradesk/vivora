@@ -77,9 +77,11 @@ Listed so we know what to say when someone reports "doesn't work on my X."
 2. **No software encoder fallback anywhere.** If hardware encoder init fails (driver mismatch, headless server, container without DRM nodes) the host bails. An x264 path would buy server / VM / very-old-hardware compatibility at the cost of CPU.
 3. **NVENC on Windows: HEVC only.** Deliberate — AMF and QSV cover H.264, and codec negotiation picks a common one. It does mean an NVIDIA-only Windows host cannot serve an H.264-only client.
 4. **Client software decode fallback on Windows / macOS** — same shape as Linux's. Not in today.
-5. **macOS hosts still inject keys from the virtual-key code**, not the
-   scancode the wire now carries, so a viewer on a non-Latin layout types
-   correctly against Windows and Linux hosts but not against a macOS one.
+5. **macOS key injection is unverified.** All three hosts now press the
+   physical key the wire carries rather than a layout-derived virtual key, and
+   the mapping tables are unit-tested in both directions, but the macOS half
+   has only been compiled — it has not been driven from a viewer on a non-Latin
+   layout the way Windows and Linux have.
 6. **Linux host cannot switch monitors.** It enumerates displays and advertises them, but `select_monitor` is unimplemented, so the client's picker cannot actually change the captured display.
 
 ### Network / protocol stack (cross-platform)
@@ -113,8 +115,9 @@ Listed so we know what to say when someone reports "doesn't work on my X."
   installer and portable zip, Linux AppImage (glibc floor 2.30, verified on
   Fedora 40, Rocky 9 and Ubuntu 22.04), and a server tarball that installs on
   Debian 11. Nothing is published yet; the repository is still private.
-- **CI.** Linux builds and tests on every push; Windows artefacts are still
-  built by hand (VIV-121).
+- **CI.** Linux and Windows both build and test on every push. The Linux
+  AppImage and the server tarball are built on tag; the Windows zip and MSI
+  are still made by hand and attached to the draft.
 
 ### After 0.1
 

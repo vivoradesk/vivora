@@ -13,6 +13,7 @@
 #endif
 #ifdef VIVORA_LINUX
 #include "app/linux_host_platform.h"
+#include "host/capture/pipewire_capture.h"
 #endif
 
 namespace vivora::gui {
@@ -91,6 +92,14 @@ void HostWorker::runOnWorkerThread() {
     platform_.reset(p);
 #endif
 #ifdef VIVORA_LINUX
+    // libpipewire is resolved at runtime (VIV-126), so a machine without it
+    // still runs -- it just cannot capture a screen.  Say which package to
+    // install rather than letting the portal flow fail generically below.
+    if (const std::string why = vivora::host::PipeWireCapture::unavailable_reason();
+        !why.empty()) {
+        emit initFailed(QString::fromStdString(why));
+        return;
+    }
     auto* p = new LinuxHostPlatform();
     if (!p->init(cfg_.manual_bitrate_bps, cfg_.codec, cfg_.encoder_kind,
                  cfg_.host_fps)) {

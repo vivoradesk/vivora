@@ -46,10 +46,9 @@ try {
     Copy-Item (Join-Path $root "packaging\windows\README-portable.txt") $stage
     Copy-Item (Join-Path $root "packaging\THIRD-PARTY-NOTICES.md")      $stage
 
-    # The app hangs at startup without these -- Qt's TLS plugin resolves them
-    # before anything of ours runs, so a missing DLL is not a degraded mode, it
-    # is a silent no-window hang. Fail here rather than ship it.
-    foreach ($required in @("vivora.exe", "libcrypto-1_1-x64.dll", "libssl-1_1-x64.dll")) {
+    # Vivora is one self-contained exe since VIV-122; a stray DLL beside it
+    # would mean the OpenSSL TLS plugin crept back into the link.
+    foreach ($required in @("vivora.exe")) {
         if (-not (Test-Path (Join-Path $stage $required))) {
             throw "staging is missing $required"
         }
