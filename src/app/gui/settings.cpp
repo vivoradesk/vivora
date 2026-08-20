@@ -164,7 +164,15 @@ bool Settings::startAtLogin() const           { return q_.value(K_START_AT_LOGIN
 void Settings::setStartAtLogin(bool v)        { if (v != startAtLogin()) { q_.setValue(K_START_AT_LOGIN, v); Autostart::setEnabled(v); emit changed(); } }
 bool Settings::startAtLoginSupported() const  { return Autostart::supported(); }
 
-int Settings::approvalMode() const            { return q_.value(K_APPROVAL_MODE, DEF_APPROVAL_MODE).toInt(); }
+int Settings::approvalMode() const {
+    // Stored 2 used to mean "auto-accept".  It never behaved differently from
+    // 1: both accepted a recognised key and prompted for an unknown one,
+    // because a leaked peer code must not grant silent access.  The option is
+    // gone; anyone who had picked it keeps the behaviour they already had,
+    // now under the name that describes it.
+    const int v = q_.value(K_APPROVAL_MODE, DEF_APPROVAL_MODE).toInt();
+    return v >= 2 ? 1 : (v < 0 ? 0 : v);
+}
 void Settings::setApprovalMode(int v)         { if (v != approvalMode()) { q_.setValue(K_APPROVAL_MODE, v); emit changed(); } }
 
 bool Settings::singleSessionLock() const      { return q_.value(K_SINGLE_SESSION, DEF_SINGLE_SESSION).toBool(); }

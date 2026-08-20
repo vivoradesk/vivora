@@ -114,10 +114,12 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             // stays dumb — it just reports Pending, we decide.
             //   0 = always_prompt        → show dialog
             //   1 = prompt_unknown_only  → auto-accept recognised pubkeys
-            //   2 = auto_accept          → accept without a dialog, EXCEPT
-            //                              a brand-new pubkey still prompts
-            //                              (TOFU: a leaked code alone must
-            //                              not grant silent access).
+            //
+            // There used to be a third, "auto-accept", and it was the same
+            // branch: it also prompted for an unknown key, because a leaked
+            // peer code must never grant silent access.  So it promised
+            // something the product would not do, on a security setting.
+            // Removed; a stored 2 now reads as 1.
             // A per-peer "trusted" flag (don't-ask-again) auto-accepts in
             // any mode.  recognised/seen drive the dialog's trust card.
             const auto* peer = (!pubkey.isEmpty() && peers_)
@@ -141,7 +143,6 @@ AppController::AppController(QObject* parent) : QObject(parent) {
 
             const bool autoAccept = accountDevice
                 || trusted
-                || (mode == 2 && recognized)
                 || (mode == 1 && recognized);
             if (autoAccept) {
                 // An account device with no address-book row gets FULL

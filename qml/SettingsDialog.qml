@@ -455,14 +455,26 @@ Window {
 
         // ── Panel ────────────────────────────────────────────────────
         Flickable {
+            id: panelFlick
             Layout.fillWidth: true
             Layout.fillHeight: true
-            contentHeight: panelStack.implicitHeight + 56
+            // Follow the page being shown, not the tallest one.  A StackLayout
+            // is as tall as its largest child, so binding to it let a short
+            // page inherit a long page's scroll range: switch from Network to
+            // Shortcuts and the two rows sat below the top of a viewport that
+            // was still scrolled, with the section heading above it.
+            contentHeight: (panelStack.children[panelStack.currentIndex]
+                                ? panelStack.children[panelStack.currentIndex].implicitHeight
+                                : panelStack.implicitHeight) + 56
             clip: true
             ScrollBar.vertical: ScrollBar {}
 
             StackLayout {
                 id: panelStack
+                // Every section starts at its own beginning.  Carrying the
+                // previous page's scroll position over is what hid the
+                // heading.
+                onCurrentIndexChanged: panelFlick.contentY = 0
                 width: parent.width - 56
                 x: 28
                 y: 28
@@ -829,8 +841,7 @@ Window {
                         CreamCombo {
                             Layout.preferredWidth: 250
                             entries: [ { text: "Always ask" },
-                                       { text: "Ask for unknown only" },
-                                       { text: "Auto-accept", sub: "advanced" } ]
+                                       { text: "Ask for unknown only" } ]
                             currentIndex: App.settings.approvalMode
                             onActivated: App.settings.approvalMode = currentIndex
                         }
@@ -910,48 +921,18 @@ Window {
                             onEditingFinished: App.settings.relay = text
                         }
                     }
-                    Field {
-                        title: "License token"
-                        help: "Required by the managed relay; not by self-hosted."
-                        RowLayout {
-                            Layout.preferredWidth: 260
-                            spacing: 6
-                            CreamField {
-                                Layout.fillWidth: true
-                                text: App.settings.licenseFile
-                                onEditingFinished: App.settings.licenseFile = text
-                            }
-                            // Cream-styled browse button to match the rest
-                            // of the panel (default Qt Button is a grey
-                            // pill that clashes).
-                            Rectangle {
-                                Layout.preferredWidth: 40
-                                Layout.preferredHeight: 38
-                                radius: 8
-                                color: browseHover.hovered ? theme.hoverBg : theme.ctrlBg
-                                border.color: theme.border
-                                border.width: 1
-                                HoverHandler { id: browseHover }
-                                Label {
-                                    anchors.centerIn: parent
-                                    text: "…"
-                                    color: theme.text
-                                    font.pixelSize: 16
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: licenseDlg.open()
-                                }
-                            }
-                        }
-                    }
-                    FileDialog {
-                        id: licenseDlg
-                        title: "Select license token"
-                        onAccepted: App.settings.licenseFile =
-                            selectedFile.toString().replace("file:///", "")
-                    }
+                    // The license token used to be editable here, with a
+                    // file picker.  It never needed to be: signing in fetches
+                    // the token and writes it to license.bin, About's
+                    // "Import..." does the same for a file, and both then point
+                    // the setting at that one path -- which is also where an
+                    // empty setting looks.  So the field could only ever show
+                    // the path already chosen for you, and typing a different
+                    // one stored it unverified, where Import checks the token
+                    // and says so when it is invalid or expired.  It also sat
+                    // on this page while its own help said self-hosted relays
+                    // do not need it.
+
                     // VIV-29: the managed relay is Pro-gated.  Warn when it's
                     // configured (the default) but no Pro license is loaded —
                     // connections then fall back to direct + rendezvous only.

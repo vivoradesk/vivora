@@ -40,9 +40,10 @@ class Settings : public QObject {
     // current OS (Windows today; macOS/Linux are a separate future issue).
     // The QML toggle stays disabled when unsupported.
     Q_PROPERTY(bool    startAtLoginSupported READ startAtLoginSupported CONSTANT)
-    // VIV-53/59 Security.  approvalMode: 0=always_prompt, 1=prompt_unknown_only,
-    // 2=auto_accept.  singleSessionLock: reject new clients while a session
-    // is live.
+    // VIV-53/59 Security.  approvalMode: 0=always_prompt,
+    // 1=prompt_unknown_only.  There is no silent-accept mode: an unknown key
+    // always prompts, so a leaked peer code cannot grant access on its own.
+    // singleSessionLock: reject new clients while a session is live.
     Q_PROPERTY(int     approvalMode    READ approvalMode    WRITE setApprovalMode    NOTIFY changed)
     Q_PROPERTY(bool    singleSessionLock READ singleSessionLock WRITE setSingleSessionLock NOTIFY changed)
     // VIV-65: initial value of the approval dialog's Audio grant toggle.
