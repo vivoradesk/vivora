@@ -21,11 +21,15 @@
 #include <QQuickStyle>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
+#include <QTimer>
 #include <QUrl>
 #include <QtPlugin>
 
 #ifdef VIVORA_WINDOWS
 #include "common/net/winsock_socket.h"
+#endif
+#ifdef VIVORA_MACOS
+#include "app/gui/mac_activation.h"
 #endif
 
 // Static Qt: a plugin is a static library, and the ones the linker cannot
@@ -280,6 +284,20 @@ int run_gui(int argc, char** argv) {
         log::error("GUI", "Failed to load Vivora/Main.qml");
         return 1;
     }
+
+#ifdef VIVORA_MACOS
+    // Come to the front, unless this is the login-item launch.
+    //
+    // Vivora sets LSUIElement so it has no Dock icon, and macOS does not
+    // raise a background launch on its own -- so the window opened behind
+    // everything with nothing to click. That is how granting Screen Recording
+    // looked from the outside: macOS quits and reopens the app itself, and
+    // the app appeared to vanish.
+    // Deferred to the first turn of the event loop: AppKit drops an
+    // activation asked for before the loop is running.
+    if (!launched_as_login_item())
+        QTimer::singleShot(0, &app, [] { activate_app(); });
+#endif
 
     log::info("GUI", "Vivora GUI ready");
     const int rc = app.exec();

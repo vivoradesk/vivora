@@ -160,6 +160,10 @@ if(WIN32 OR APPLE OR (UNIX AND NOT APPLE))
     elseif(UNIX AND NOT APPLE)
         target_sources(vivora PRIVATE gui/autostart_linux.cpp)
     endif()
+    if(APPLE)
+        # Raising an LSUIElement app that something else launched.
+        target_sources(vivora PRIVATE gui/mac_activation.mm)
+    endif()
 endif()
 
 target_link_libraries(vivora PRIVATE
