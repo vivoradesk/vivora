@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // PulseAudio loopback capture for Linux hosts.  Records from the default
 // sink's monitor source ("@DEFAULT_MONITOR@" — a server-side alias both
 // real PulseAudio and PipeWire's pulse-shim resolve to whatever the

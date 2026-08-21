@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // macOS wake observer for NetworkChangeWatcher (VIV-57).
 //
 // Wake-from-sleep often re-associates WiFi to the same SSID without a

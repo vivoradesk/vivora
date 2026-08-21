@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 add_library(vivora_common STATIC
     utils/log.cpp
     utils/metrics.cpp

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "app/gui/gui_main.h"
 
 #include "app/gui/address_book.h"

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // scancode_test.cpp — the VIV-6 canonical scancode space.
 //
 // The whole point of sending a physical key instead of a character is that

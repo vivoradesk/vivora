@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Minimal smoke test for the vivora-relay binary.  Spins up two virtual
 // peers (A, B) on loopback, BINDs each, sends a DATA packet from A, and
 // verifies B receives the forwarded payload.  No external dependencies,

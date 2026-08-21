@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 if(UNIX AND NOT APPLE)
     # Linux GUI (VIV-5): the Qt Quick stack is now required here too.  Ubuntu's
     # apt Qt (6.2 base) lacks qt6-declarative-dev, so point CMAKE_PREFIX_PATH at

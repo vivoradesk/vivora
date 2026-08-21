@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // stun_test.cpp — unit test for StunClient::parse_binding_response.
 // Covers: valid XOR-MAPPED-ADDRESS, legacy MAPPED-ADDRESS, XOR preference
 // when both are present, TID mismatch, magic cookie mismatch, truncated

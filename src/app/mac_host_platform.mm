@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #ifdef VIVORA_MACOS
 
 #include "app/mac_host_platform.h"
@@ -235,7 +238,7 @@ bool MacHostPlatform::set_codec(vivora::VideoCodec codec) {
                            codec == vivora::VideoCodec::H264 ? "h264" : "hevc");
         return false;
     }
-    vivora::log::info("HOST", "Encoder switched to %s (VIV-112 negotiation)",
+    vivora::log::info("HOST", "Encoder switched to %s (codec negotiation)",
                       codec == vivora::VideoCodec::H264 ? "h264" : "hevc");
     return true;
 }

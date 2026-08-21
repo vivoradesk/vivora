@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "host/session/video_sender.h"
 #include "host/session/paced_sender.h"
 #include "common/net/relay_protocol.h"

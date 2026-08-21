@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Sign Vivora.app, and do not leave a half-signed bundle behind if that fails.
 #
 #   codesign-app.sh <identity> <path/to/Vivora.app>

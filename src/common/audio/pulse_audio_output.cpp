@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // PulseAudio sink for Linux clients.  Uses the synchronous `pa_simple` API
 // because AudioReceiver already runs on its own thread and pushes PCM in
 // 10ms chunks — a blocking write that drains into the daemon's buffer is

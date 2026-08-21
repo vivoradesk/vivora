@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Standalone smoke test for the Linux NVENC encoder (VIV-8).  Not wired into
 // ctest (needs an NVIDIA GPU + driver); compiled and run ad hoc on the box.
 #include "host/encode/nvenc_linux_encoder.h"

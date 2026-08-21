@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "host/session/host_session.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
@@ -83,13 +86,13 @@ bool HostSession::start(uint16_t port) {
     if (const char* p = std::getenv("VIVORA_FEC_PERFRAME")) {
         if (std::atoi(p) != 0) {
             sender_->set_per_frame_fec(true);
-            log::info("HostSession", "Per-frame pooled FEC enabled (VIV-82)");
+            log::info("HostSession", "Per-frame pooled FEC enabled");
         }
     }
     if (const char* p = std::getenv("VIVORA_KF_PACE")) {
         if (std::atoi(p) != 0) {
             kf_pace_enabled_ = true;
-            log::info("HostSession", "Keyframe send-pacing enabled (VIV-82)");
+            log::info("HostSession", "Keyframe send-pacing enabled");
         }
     }
     // VIV-82: enlarge the legacy FEC group.  At a fixed overhead %, a bigger
@@ -104,7 +107,7 @@ bool HostSession::start(uint16_t port) {
             if (k < 4) k = 4; else if (k > 64) k = 64;
         }
         sender_->set_fec_group_size(static_cast<uint8_t>(k));
-        log::info("HostSession", "Legacy FEC group size K=%d (VIV-82)", k);
+        log::info("HostSession", "Legacy FEC group size K=%d", k);
     }
 
     // VIV-82 burst-resilient FEC interleaving: split each frame into D groups and
@@ -118,7 +121,7 @@ bool HostSession::start(uint16_t port) {
         if (interleave < 1) interleave = 1; else if (interleave > 16) interleave = 16;
     }
     sender_->set_fec_interleave(static_cast<uint8_t>(interleave));
-    log::info("HostSession", "FEC interleave depth D=%d (VIV-82)", interleave);
+    log::info("HostSession", "FEC interleave depth D=%d", interleave);
 
     // Audio socket on port + 1.
     audio_socket_ = net::IUdpSocket::create();

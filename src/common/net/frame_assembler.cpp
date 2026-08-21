@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "common/net/frame_assembler.h"
 #include "common/net/frame_fragmenter.h"
 #include <cstring>

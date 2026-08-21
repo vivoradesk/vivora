@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // monitor_info_test.cpp — unit test for the VIV-50 monitor-selection wire
 // messages (MonitorListMessage / SelectMonitorMessage): round-trip,
 // flag packing, truncation rejection, and the empty list.

@@ -1,0 +1,19 @@
+Vivora
+Copyright (C) 2026 Andrii Myronov
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE for the full text.
+
+Every file Vivora itself owns carries an SPDX header naming the copyright and
+the licence. Files under third_party/ are not ours and carry their own; what
+they are and under what terms is listed in packaging/THIRD-PARTY-NOTICES.md.
+
+Vivora Pro is a separate, paid commercial licence, offered by the copyright
+holder as an exemption from the AGPL for anyone who cannot meet its terms. It
+grants no rights over this source, and nothing here depends on it: the program
+builds and runs in full from this repository under the AGPL alone.
+
+Contact: hello@vivora.dev
+Security: security@vivora.dev — please read SECURITY.md first.

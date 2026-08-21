@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Build icons/win/vivora.ico from the per-size PNGs next to it.
 #
 # Run once and commit the result; it is NOT a build step. Generating it at

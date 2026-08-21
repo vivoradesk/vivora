@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "common/crypto/peer_pin.h"
 #include "common/crypto/host_identity.h"   // hex_encode
 

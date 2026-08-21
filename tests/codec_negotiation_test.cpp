@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // codec_negotiation_test.cpp — unit test for the VIV-112 client-capability-
 // driven codec negotiation: the capability bitmask helpers and the host's
 // choose_codec() preference/ceiling logic (host encodes the best codec the

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "client/render/qt_gl_video_view.h"
 
 #include "common/protocol/scancode.h"

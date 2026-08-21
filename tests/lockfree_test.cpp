@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Unit tests for the lock-free pipeline primitives (VIV-81):
 //   - SpscRing  : FIFO order, full/empty edges, the "render penultimate"
 //                 consume policy used by Q2 (decode->render).

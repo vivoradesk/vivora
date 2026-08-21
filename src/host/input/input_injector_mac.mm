@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #ifdef VIVORA_MACOS
 
 #include "host/input/input_injector.h"

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Fail if anything that must never be published has made it into git.
 #
 # The signing key for Pro license tokens (license.sk) lives in the working

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Run the AppImage on a distribution it was not built on.
 #
 #   scripts/smoke-appimage.sh dist/Vivora-0.1.0-linux-x64.AppImage [image]

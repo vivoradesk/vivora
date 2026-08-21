@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Tests are split into two groups:
 #   1. Cross-platform unit tests — exercise only `vivora_common` (protocol,
 #      codec, FEC, crypto, jitter, STUN client).  Build and run on every

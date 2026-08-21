@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Build the Linux AppImage.
 #
 #   scripts/package-linux-appimage.sh [build-dir] [dist-dir]

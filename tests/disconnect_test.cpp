@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // disconnect_test.cpp — unit test for the Disconnect control packet (VIV-52).
 // Verifies the single reason-byte payload round-trips through Packet
 // serialize/deserialize and that the reason enum maps to the expected wire

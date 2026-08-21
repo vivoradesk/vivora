@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Install the repository's git hooks into .git/hooks.
 #
 # Hooks are not versioned by git itself, so this has to be run once per

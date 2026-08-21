@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 cmake_minimum_required(VERSION 3.20)
 project(Vivora VERSION 0.1.0 LANGUAGES C CXX)
 

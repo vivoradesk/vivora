@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Deploy the vivora-relay binary to a Linux VPS (typically the same
 # host already running vivora-rendezvous).
 #

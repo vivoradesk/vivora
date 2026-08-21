@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Audio roundtrip test: sine wave -> resample to transport rate -> Opus encode
 // -> Opus decode -> resample to device rate -> compare energy.
 // Not bit-exact (lossy codec), but checks the pipeline runs and preserves tone.

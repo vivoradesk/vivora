@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // vivora-relay: standalone UDP forwarder for peers that can't punch
 // through their NATs directly (symmetric NAT, CGNAT, blocking firewalls).
 // Both peers BIND with their pubkey + the peer's pubkey; once both halves

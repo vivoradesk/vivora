@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // fragment_test.cpp — unit test for FrameFragmenter + FrameAssembler
 // Tests: small frame passthrough, large frame fragment/reassemble,
 //        reverse order, gaps, duplicate fragments.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #if defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
 
 #include "common/net/posix_socket.h"

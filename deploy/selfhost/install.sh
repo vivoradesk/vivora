@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Andrii Myronov
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Install the Vivora servers on the machine you are running this on.
 #
 #   sudo ./install.sh                  # both servers

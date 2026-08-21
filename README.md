@@ -235,3 +235,18 @@ code is shaped the way it is, which is most of what a first patch needs.
 
 The one rule worth stating up front: **latency is the primary metric**. A change
 that makes the code cleaner and the pipeline slower will be turned down.
+
+---
+
+## Copyright and contact
+
+Copyright (C) 2026 Andrii Myronov. Licensed under the GNU Affero General Public
+License v3 or later — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Every
+file Vivora owns carries an SPDX header; anything under `third_party/` keeps
+its own, listed in
+[`packaging/THIRD-PARTY-NOTICES.md`](packaging/THIRD-PARTY-NOTICES.md).
+
+- Bugs and features: [GitHub issues](https://github.com/vivoradesk/vivora/issues)
+- Security: **security@vivora.dev** — read [`SECURITY.md`](SECURITY.md) first,
+  and please do not use the issue tracker for these
+- Anything else: **hello@vivora.dev**

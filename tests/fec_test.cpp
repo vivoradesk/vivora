@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // fec_test.cpp — unit tests for Reed-Solomon FEC encoder/decoder.
 // Covers: single-erasure recovery, multi-erasure recovery up to M,
 // variable-length shards, partial-group flush, no-loss fast path,

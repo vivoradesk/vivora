@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Standalone smoke test for X11Cursor (VIV-66).  Needs an X session; run on
 // the box with DISPLAY set.  Not wired into ctest.
 #include "host/capture/x11_cursor.h"

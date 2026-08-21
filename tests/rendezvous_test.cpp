@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // rendezvous_test.cpp — unit test for the VIV-92 anti-spoofing nonce added
 // to the rendezvous Lookup / LookupByCode / LookupResponse wire messages.
 // Covers: nonce round-trip, backward-compatible legacy (nonce-less) decode,

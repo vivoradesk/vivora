@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Audio platform stubs for environments without a native implementation.
 // Linux now provides `create_default_audio_output()` from
 // `pulse_audio_output.cpp`, so this file only defines the loopback capture

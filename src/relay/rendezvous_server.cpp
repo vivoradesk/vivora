@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // vivora-rendezvous: standalone UDP signalling server.
 //
 // Maintains a per-process in-memory map from host long-term public key to

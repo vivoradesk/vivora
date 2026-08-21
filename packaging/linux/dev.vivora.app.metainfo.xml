@@ -31,6 +31,7 @@
          appstreamcli >= 0.16, and this file has to validate on the oldest
          distribution we build against. -->
     <url type="help">https://github.com/vivoradesk/vivora#readme</url>
+    <url type="contact">mailto:hello@vivora.dev</url>
 
     <developer_name>Vivora Contributors</developer_name>
 

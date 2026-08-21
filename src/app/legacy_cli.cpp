@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "app/legacy_cli.h"
 #include "app/host_loop.h"
 #include "app/view_loop.h"

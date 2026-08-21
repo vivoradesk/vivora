@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <algorithm>
 #include <cstdlib>
 #include "app/gui/app_controller.h"
@@ -345,7 +348,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             emit connectionApprovalRequested(
                 "424242", "civic-panda-4644",
                 "6d2e0c4a7f3b9e1182a4c5d6e7f8091a2b3c4d5e6f70812233445566778899aa",
-                "192.168.3.243:62378", /*recognized=*/false, /*seenCount=*/0,
+                "198.51.100.24:62378", /*recognized=*/false, /*seenCount=*/0,
                 "John's MacBook Pro");
         });
     }

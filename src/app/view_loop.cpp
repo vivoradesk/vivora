@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "app/view_loop.h"
 #include "common/crypto/host_identity.h"
 #include "common/net/socket.h"

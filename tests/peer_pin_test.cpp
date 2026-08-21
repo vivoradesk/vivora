@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // peer_pin_test.cpp — unit tests for TOFU peer pinning (VIV-23).
 // Tests: legacy check_or_pin_peer auto-TOFU, read-only query_peer_pin,
 //        pin_peer insert + replace, forget_peer_pin by code / pubkey,

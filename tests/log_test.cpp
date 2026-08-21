@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Andrii Myronov
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Log sink tests: size rotation and the previous-session backup.
 //
 // The logger is the one module every other module calls, including from
