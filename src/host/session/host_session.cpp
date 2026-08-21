@@ -40,10 +40,38 @@ bool HostSession::start(uint16_t port) {
     socket_ = net::IUdpSocket::create();
     if (!socket_) return false;
 
-    if (!socket_->bind(port)) {
-        log::error("HostSession", "Failed to bind port %u", port);
+    // Try a few ports before giving up (VIV-19).  The usual reason the first
+    // one is taken is another copy of Vivora already sharing, or a previous
+    // session's socket the OS has not released yet -- neither of which the
+    // user can do anything about except wait and retry, and nothing outside
+    // depends on the number: peers learn the real port from the rendezvous
+    // registration, which reports the socket we actually bound.
+    //
+    // In steps of two, because audio takes port + 1: stepping by one would
+    // land the next attempt on our own audio port.
+    constexpr int PORT_ATTEMPTS = 10;
+    uint16_t bound = 0;
+    for (int i = 0; i < PORT_ATTEMPTS; ++i) {
+        const uint32_t candidate = static_cast<uint32_t>(port) + i * 2u;
+        if (candidate > 65534u) break;          // no room left for port + 1
+        if (socket_->bind(static_cast<uint16_t>(candidate))) {
+            bound = static_cast<uint16_t>(candidate);
+            break;
+        }
+        log::info("HostSession", "Port %u is busy, trying %u",
+                  candidate, candidate + 2);
+    }
+    if (!bound) {
+        log::error("HostSession", "Failed to bind port %u (and the %d after it)",
+                   port, PORT_ATTEMPTS - 1);
         return false;
     }
+    if (bound != port) {
+        log::warn("HostSession", "Port %u was busy — listening on %u instead",
+                  port, bound);
+    }
+    port_ = bound;
+    port = bound;   // everything below (audio, logs) follows the real port
 
     socket_->set_nonblocking(true);
     socket_->set_sendbuf(512 * 1024);

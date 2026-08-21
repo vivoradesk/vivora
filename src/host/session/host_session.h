@@ -122,6 +122,10 @@ public:
     static constexpr int64_t REHANDSHAKE_COOLDOWN_MS = 400;
 
     bool start(uint16_t port = DEFAULT_PORT);
+
+    // The port actually bound, which is not always the one asked for: a busy
+    // port is stepped over rather than being fatal (VIV-19).  0 before start().
+    uint16_t port() const { return port_; }
     void stop();
 
     // Override the host-identity file location. Empty string (default) picks
@@ -414,6 +418,10 @@ private:
     void send_bw_probe(ClientInfo& client);
 
     ClientInfo* find_client(const net::SocketAddr& addr);
+
+    // Real listening port; see port().
+
+    uint16_t port_ = 0;
 
     std::unique_ptr<net::IUdpSocket> socket_;
     std::unique_ptr<net::IUdpSocket> audio_socket_;

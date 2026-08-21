@@ -172,12 +172,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             // simply stopped accepting connections.
             *cfg.error_out =
                 "Could not listen on port " + std::to_string(cfg.port) +
-                ". Another copy of Vivora is probably already sharing on this "
-                "machine — quit it, or choose a different port in Settings.";
+                ", or on any of the nine after it. Another copy of Vivora is "
+                "probably already sharing on this machine — quit it, or "
+                "choose a different port in Settings.";
         }
         return 1;
     }
-    log::info("HOST", "Waiting for client on port %u... (Ctrl+C to stop)", cfg.port);
+    // session.port(), not cfg.port: a busy port is stepped over rather than
+    // being fatal (VIV-19), so the two are not always the same number.
+    log::info("HOST", "Waiting for client on port %u... (Ctrl+C to stop)",
+              session.port());
 
     // Diagnostic env-var: freeze FEC M at a fixed value, disabling
     // loss-adaptive and RTT-lock behavior. For probing the real channel
