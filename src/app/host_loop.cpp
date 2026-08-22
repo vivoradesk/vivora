@@ -225,6 +225,11 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // encoder kernel because that's the wall-clock cost the host_loop
     // sees, which is what really constrains capture cadence.
     double   enc_min_ms = 1e9, enc_max_ms = 0.0, enc_sum_ms = 0.0;
+    // Capture is timed apart from encode (the platform reports its share of
+    // capture_and_encode), because they are separate stages of the pipeline
+    // and a latency budget is argued about per stage.
+    double   cap_max_ms = 0.0, cap_sum_ms = 0.0;
+    uint64_t cap_count = 0;
     uint64_t enc_count  = 0;
     // No periodic IDR. Encoders run with continuous intra refresh
     // (NVENC intraRefresh* / QSV IntRefType=HORIZONTAL), so the picture
@@ -820,8 +825,19 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         bool got_frame = platform.capture_and_encode(pts_us, content_changed, force_encode);
         if (got_frame) {
             last_capture_time = Clock::now();
-            const double enc_ms = std::chrono::duration<double, std::milli>(
+            const double total_ms = std::chrono::duration<double, std::milli>(
                 last_capture_time - enc_start).count();
+            // What the platform spent getting the frame, and what is left --
+            // which is the encode.  Platforms that do not measure capture
+            // report 0, and then this reads exactly as it did before.
+            const double cap_ms = platform.last_capture_ms();
+            const double enc_ms = cap_ms > 0.0 && cap_ms <= total_ms
+                                ? total_ms - cap_ms : total_ms;
+            if (cap_ms > 0.0) {
+                if (cap_ms > cap_max_ms) cap_max_ms = cap_ms;
+                cap_sum_ms += cap_ms;
+                cap_count++;
+            }
             if (enc_ms < enc_min_ms) enc_min_ms = enc_ms;
             if (enc_ms > enc_max_ms) enc_max_ms = enc_ms;
             enc_sum_ms += enc_ms;
@@ -961,17 +977,22 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 const uint8_t  fec_k = session.sender() ? session.sender()->fec_group_size() : 0;
                 const double avg_ms = enc_count > 0 ? enc_sum_ms / static_cast<double>(enc_count) : 0.0;
                 const double min_ms = enc_count > 0 ? enc_min_ms : 0.0;
+                const double cap_avg = cap_count > 0
+                                     ? cap_sum_ms / static_cast<double>(cap_count) : 0.0;
                 log::info("HOST",
-                    "Frames: %llu, FPS: %.1f, encode: %.2f/%.2f/%.2f ms (min/avg/max), "
+                    "Frames: %llu, FPS: %.1f, capture: %.2f/%.2f ms (avg/max), "
+                    "encode: %.2f/%.2f/%.2f ms (min/avg/max), "
                     "RTT: %.1fms, retx: %llu, fec_k: %d, clients: %zu",
                     (unsigned long long)total_frames,
                     inst_fps,
+                    cap_avg, cap_max_ms,
                     min_ms, avg_ms, enc_max_ms,
                     session.rtt_ms(),
                     (unsigned long long)retx,
                     (int)fec_k,
                     session.client_count());
                 enc_min_ms = 1e9; enc_max_ms = 0.0; enc_sum_ms = 0.0; enc_count = 0;
+                cap_max_ms = 0.0; cap_sum_ms = 0.0; cap_count = 0;
             }
         }
     }

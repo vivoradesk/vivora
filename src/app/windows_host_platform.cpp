@@ -243,8 +243,12 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
     // timeout here halved the loop's effective rate on a static screen
     // (every iteration blocked the full frame interval), starving the
     // heartbeat down to ~25fps.
+    const auto cap_start = std::chrono::steady_clock::now();
     if (!capture_->capture_frame(frame, 0))
         return false;
+    // Capture on its own, so the host loop can report it apart from encode.
+    last_capture_ms_ = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - cap_start).count();
 
     // Stash cursor state before any early-return so get_cursor_state()
     // can report it even on content-unchanged ticks.

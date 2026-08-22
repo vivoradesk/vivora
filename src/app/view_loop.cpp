@@ -181,6 +181,7 @@ void ViewLoopState::decode_thread_proc() {
         }
         ++d_sub;
         if (ftrace()) log::info("FTRACE", "submit seq=%u kf=%d", cf.seq, cf.keyframe ? 1 : 0);
+        const auto dec_start = std::chrono::steady_clock::now();
         SubmitStatus st = pipeline_->submit(cf.data.data(), cf.data.size(),
                                             cf.timestamp, cf.keyframe, cf.seq);
         if (st == SubmitStatus::Rejected) {
@@ -217,6 +218,14 @@ void ViewLoopState::decode_thread_proc() {
                 if (ftrace()) log::info("FTRACE", "Q2FULL drop decoded seq=%u", h.seq);
                 pipeline_->unreserve(h);
             }
+        }
+        {
+            const double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - dec_start).count();
+            std::lock_guard<std::mutex> lk(stage_mu_);
+            decode_sum_ms_ += ms;
+            if (ms > decode_max_ms_) decode_max_ms_ = ms;
+            ++decode_count_;
         }
     }
     pipeline_->on_decode_thread_stop();
@@ -454,7 +463,16 @@ bool ViewLoopState::iter_threaded() {
         FrameHandle h;
         if (q2_->try_pop(h)) {
             if (ftrace()) log::info("FTRACE", "render seq=%u", h.seq);
+            const auto pres_start = std::chrono::steady_clock::now();
             pipeline_->present(h);   // copies into the view + schedules paint
+            {
+                const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - pres_start).count();
+                std::lock_guard<std::mutex> lk(stage_mu_);
+                render_sum_ms_ += ms;
+                if (ms > render_max_ms_) render_max_ms_ = ms;
+                ++render_count_;
+            }
             pipeline_->recycle(h);
             rendered = 1;
         }
@@ -478,9 +496,21 @@ bool ViewLoopState::iter_threaded() {
             ? static_cast<float>((arrived_now - last_arrived_count_) / window_sec)
             : 0.0f;
         last_arrived_count_ = arrived_now;
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps (threaded)",
+        double dec_avg = 0.0, dec_max = 0.0, ren_avg = 0.0, ren_max = 0.0;
+        {
+            std::lock_guard<std::mutex> lk(stage_mu_);
+            if (decode_count_) dec_avg = decode_sum_ms_ / double(decode_count_);
+            if (render_count_) ren_avg = render_sum_ms_ / double(render_count_);
+            dec_max = decode_max_ms_;
+            ren_max = render_max_ms_;
+            decode_sum_ms_ = decode_max_ms_ = 0.0; decode_count_ = 0;
+            render_sum_ms_ = render_max_ms_ = 0.0; render_count_ = 0;
+        }
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps, "
+                  "decode: %.2f/%.2f ms, render: %.2f/%.2f ms (avg/max) (threaded)",
                   (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
-                  session.last_bitrate_bps() / 1000);
+                  session.last_bitrate_bps() / 1000,
+                  dec_avg, dec_max, ren_avg, ren_max);
 
         StatsView v{};
         v.fps          = static_cast<float>(inst_fps);
@@ -934,9 +964,19 @@ bool ViewLoopState::iter() {
                 continue;
             }
         }
-        if (platform.decode(net_frame.data.data(), net_frame.data.size(),
-                           net_frame.timestamp, net_frame.keyframe,
-                           net_frame.seq_no)) {
+        const auto dec_start = Clock::now();
+        const bool decoded_ok = platform.decode(
+            net_frame.data.data(), net_frame.data.size(),
+            net_frame.timestamp, net_frame.keyframe, net_frame.seq_no);
+        {
+            const double ms = std::chrono::duration<double, std::milli>(
+                Clock::now() - dec_start).count();
+            std::lock_guard<std::mutex> lk(stage_mu_);
+            decode_sum_ms_ += ms;
+            if (ms > decode_max_ms_) decode_max_ms_ = ms;
+            ++decode_count_;
+        }
+        if (decoded_ok) {
             frames_fed++;
             session.note_decoder_accepted();
         } else if (net_frame.heartbeat) {
@@ -995,7 +1035,16 @@ bool ViewLoopState::iter() {
         }
     }
 
+    const auto ren_start = Clock::now();
     int rendered = platform.render();
+    if (rendered > 0) {
+        const double ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - ren_start).count();
+        std::lock_guard<std::mutex> lk(stage_mu_);
+        render_sum_ms_ += ms;
+        if (ms > render_max_ms_) render_max_ms_ = ms;
+        ++render_count_;
+    }
     frames_decoded_ += rendered > 0 ? rendered : frames_fed;
 
     // FPS logging + HUD stats update.  Runs once per second by wall clock.
@@ -1009,9 +1058,21 @@ bool ViewLoopState::iter() {
             : 0.0;
         last_log_time_ = now;
         last_log_frames_ = frames_decoded_;
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps",
+        double dec_avg = 0.0, dec_max = 0.0, ren_avg = 0.0, ren_max = 0.0;
+        {
+            std::lock_guard<std::mutex> lk(stage_mu_);
+            if (decode_count_) dec_avg = decode_sum_ms_ / double(decode_count_);
+            if (render_count_) ren_avg = render_sum_ms_ / double(render_count_);
+            dec_max = decode_max_ms_;
+            ren_max = render_max_ms_;
+            decode_sum_ms_ = decode_max_ms_ = 0.0; decode_count_ = 0;
+            render_sum_ms_ = render_max_ms_ = 0.0; render_count_ = 0;
+        }
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps, "
+            "decode: %.2f/%.2f ms, render: %.2f/%.2f ms (avg/max)",
             (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
-            session.last_bitrate_bps() / 1000);
+            session.last_bitrate_bps() / 1000,
+            dec_avg, dec_max, ren_avg, ren_max);
 
         uint64_t arrived_now = session.receiver()
                                ? session.receiver()->frames_completed()

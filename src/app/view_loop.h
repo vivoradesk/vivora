@@ -10,6 +10,7 @@
 #include "common/utils/spsc_ring.h"
 #include "common/utils/types.h"
 #include <atomic>
+#include <mutex>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -215,6 +216,14 @@ private:
     std::unique_ptr<util::SpscRing<FrameHandle, 4>>     q2_;  // decode → main
     std::thread          decode_thread_;
     std::atomic<bool>    decode_running_{false};
+    // Per-stage timings, so the client can say what decode and render cost
+    // rather than only what the round trip cost.  Written on the decode and
+    // main threads, so they take a lock rather than being eight atomics.
+    std::mutex stage_mu_;
+    double     decode_sum_ms_ = 0.0, decode_max_ms_ = 0.0;
+    double     render_sum_ms_ = 0.0, render_max_ms_ = 0.0;
+    uint64_t   decode_count_ = 0, render_count_ = 0;
+
     std::atomic<bool>    decode_needs_idr_{false};  // decode → main: reject
     bool                 iter_threaded();
     void                 decode_thread_proc();

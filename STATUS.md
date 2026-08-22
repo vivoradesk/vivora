@@ -84,6 +84,33 @@ Listed so we know what to say when someone reports "doesn't work on my X."
    layout the way Windows and Linux have.
 6. **Linux host cannot switch monitors.** It enumerates displays and advertises them, but `select_monitor` is unimplemented, so the client's picker cannot actually change the captured display.
 
+### Measured pipeline latency
+
+Every stage Vivora owns is timed and logged, so these are readings rather than
+targets. Taken 2026-08-22, Windows host and Windows viewer on one machine —
+3440×1440, hardware encode, D3D11VA decode, ~57 fps, both ends sharing one GPU:
+
+| Stage | Average | Worst seen |
+| --- | --- | --- |
+| Capture (DXGI) | 0.08 ms | 0.26 ms |
+| Encode | 0.53 ms | 1.14 ms |
+| Decode (D3D11VA) | 0.34 ms | 0.89 ms |
+| Render (D3D11) | 0.53 ms | 1.70 ms |
+| **Everything but the network** | **~1.5 ms** | |
+
+Read them with three caveats. Both ends shared one GPU, so a two-machine setup
+should do no worse. The network is deliberately absent: it is the one stage
+Vivora does not own, and any number here would describe the test LAN. And these
+are per-frame processing costs, not glass-to-glass — display and compositor
+latency sit outside what the code can see.
+
+To reproduce: run host and viewer, and read the `capture:` / `encode:` fields
+in the host log and `decode:` / `render:` in the viewer's.
+
+The Linux host reports its encode differently: capture and encode happen on the
+PipeWire thread, so the host loop's figure there is queue wait, not encoder
+time. Worth fixing before quoting a Linux number.
+
 ### Network / protocol stack (cross-platform)
 
 | Component                                | Status |

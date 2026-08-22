@@ -42,6 +42,7 @@ public:
     bool capture_and_encode(uint64_t& pts_us,
                             bool& content_changed,
                             bool force) override;
+    double last_capture_ms() const override { return last_capture_ms_; }
     bool re_encode_last(uint64_t pts_us) override;
     bool get_encoded_packet(EncodedPacketView& out) override;
 
@@ -56,6 +57,9 @@ public:
     void stop_encoder() override;
 
 private:
+    // Capture-only wall time of the last frame; see HostPlatform.
+    double last_capture_ms_ = 0.0;
+
     std::unique_ptr<vivora::IScreenCapture> capture_;
     vivora::DxgiCapture* dxgi_ = nullptr;
     std::unique_ptr<vivora::IVideoEncoder> encoder_;

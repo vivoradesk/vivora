@@ -76,6 +76,13 @@ struct HostPlatform {
     // content_changed is set to false when the screen image didn't change
     // (e.g. cursor-only DXGI update).  The caller may skip encoding when
     // !content_changed && !force, but the platform decides the semantics.
+    // Wall time the last capture_and_encode() spent inside capture alone, in
+    // milliseconds; whatever else that call took was encoding.  The two are
+    // one call because the frame never leaves the GPU between them, but they
+    // are separate stages of the pipeline and the budget is argued about
+    // separately, so they are measured separately.  0 if unmeasured.
+    virtual double last_capture_ms() const { return 0.0; }
+
     virtual bool capture_and_encode(uint64_t& pts_us,
                                     bool& content_changed,
                                     bool force) = 0;
