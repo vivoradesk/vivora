@@ -11,7 +11,7 @@ name: build image
 # nothing else in the repository affects the image.
 on:
   push:
-    branches: [master, main]
+    branches: [main]
     paths: ['packaging/linux/Containerfile', '.github/workflows/build-image.yml']
   workflow_dispatch:
 
