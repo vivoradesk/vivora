@@ -244,7 +244,12 @@ qt_import_qml_plugins(vivora)
 # With that plugin excluded (VIV-122) there is one definition of everything and
 # the link is clean -- which also retires the LNK4088 "image may not run"
 # warning the forced link was producing on every build.
-if(WIN32)
+#
+# Only when Qt itself is static.  A stock, shared Qt ships Qt6Network as a DLL
+# that resolves those symbols itself, so demanding OpenSSL there turned a
+# clean-machine build into a hunt for a library it does not need -- which is
+# exactly what the README promises it is not.
+if(WIN32 AND NOT QT6_IS_SHARED_LIBS_BUILD)
     set(VIVORA_OPENSSL3_STATIC_DIR "C:/OpenSSL-WinUniversal/lib/VC/x64/MT" CACHE PATH
         "Directory holding libssl_static.lib / libcrypto_static.lib (OpenSSL 3, /MT)")
     if(EXISTS "${VIVORA_OPENSSL3_STATIC_DIR}/libcrypto_static.lib")

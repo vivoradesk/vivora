@@ -96,10 +96,15 @@ vivora --view --peer swift-tiger-4271        # connect through rendezvous
 
 ## Build from source
 
+The build is three commands. Assembling the dependencies is the part that takes
+a few minutes, and **Qt 6.5 or newer is the one that catches people out** --
+most distributions still ship something older. Read your platform's section
+below first; these commands assume it is done.
+
 ```sh
 git clone --recursive https://github.com/vivoradesk/vivora.git
 cd vivora
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<your Qt>
 cmake --build build
 ctest --test-dir build
 ```
@@ -109,20 +114,27 @@ If you forgot `--recursive`: `git submodule update --init --recursive`.
 ### Linux
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config \
+sudo apt install build-essential cmake ninja-build pkg-config git \
     libavcodec-dev libavutil-dev libswscale-dev \
     libpipewire-0.3-dev libdbus-1-dev libpulse-dev libwayland-dev \
-    libgl-dev libegl-dev
+    libgl-dev libegl-dev libglx-dev libopengl-dev \
+    libxkbcommon-dev libxkbcommon-x11-dev \
+    libx11-dev libx11-xcb-dev libxcb1-dev libfontconfig1-dev
 ```
 
-Plus Qt 6 — `Core Widgets Qml Quick QuickControls2 Network OpenGL
-OpenGLWidgets`. Vivora is built against **Qt 6.8**; distribution packages older
-than 6.5 are not supported, and Ubuntu 24.04 still ships 6.4, so either build Qt
-from source or install it with [aqtinstall](https://github.com/miurahr/aqtinstall)
-and point CMake at it:
+That is the list CI installs, so it is known to be sufficient.
+
+Then Qt 6, with `Core Widgets Qml Quick QuickControls2 Network OpenGL
+OpenGLWidgets`. Vivora is built against **Qt 6.8**, and anything older than 6.5
+will not do -- Ubuntu 24.04 still ships 6.4, so the distribution package is
+usually not an option. The quickest route is
+[aqtinstall](https://github.com/miurahr/aqtinstall):
 
 ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HOME/qt6
+python3 -m venv ~/venv && ~/venv/bin/pip install aqtinstall
+~/venv/bin/aqt install-qt linux desktop 6.8.2 linux_gcc_64 \
+    -m qtdeclarative qtshadertools --outputdir ~/qt6
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=~/qt6/6.8.2/gcc_64
 ```
 
 Hosting on Linux needs a working `xdg-desktop-portal` with the ScreenCast
@@ -143,19 +155,34 @@ The **released** binaries are built against a statically linked Qt so that
 is the only difference; point `CMAKE_PREFIX_PATH` at a static Qt and the same
 commands produce it.
 
-One variable is Windows-specific. Qt's network module implements PBKDF2 with
-the OpenSSL 3 key-derivation API, so those symbols have to resolve even though
-no Vivora traffic goes through OpenSSL - TLS is Schannel:
-
-| Variable | Default |
-| --- | --- |
-| `VIVORA_OPENSSL3_STATIC_DIR` | `C:/OpenSSL-WinUniversal/lib/VC/x64/MT` |
+A static Qt needs one extra thing, and only a static one. Qt's network module
+implements PBKDF2 with the OpenSSL 3 key-derivation API; in a shared build
+`Qt6Network.dll` carries that itself, but linked statically the symbols have to
+come from somewhere. Point `VIVORA_OPENSSL3_STATIC_DIR` at a directory holding
+`libcrypto_static.lib` from an OpenSSL 3 `/MT` build (the default is
+`C:/OpenSSL-WinUniversal/lib/VC/x64/MT`). No Vivora traffic goes through
+OpenSSL either way — TLS is Schannel — and a shared-Qt build never asks for it.
 
 ### macOS
 
-Builds with Homebrew's Qt 6. Screen Recording and Accessibility permissions
-have to be granted to the built app before capture and input injection work.
-See [`docs/macos-codesign.md`](docs/macos-codesign.md).
+```sh
+brew install qt cmake ninja
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
+cmake --build build
+```
+
+The result is `build/bin/Vivora.app`. Two permissions have to be granted before
+it does anything useful, and neither is optional: **Screen Recording** for
+capture, and **Accessibility** for remote keyboard and mouse. macOS asks for
+each the first time it is needed; without Accessibility, input is dropped
+silently.
+
+The build signs the bundle ad-hoc, which is enough to run it. That signature
+changes on every rebuild, so macOS treats each build as a new application and
+asks for both permissions again — see
+[`docs/macos-codesign.md`](docs/macos-codesign.md) for a self-signed
+certificate that makes the grants stick.
 
 ---
 
