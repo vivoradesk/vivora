@@ -9,7 +9,7 @@ import QtQuick
 //  Selects between the REAL account device list (App.myDevices, a C++
 //  DeviceMeshModel populated from /devices/me) and the isolated MOCK data
 //  below, then exposes ONE uniform surface the "My Devices" UI binds to:
-//    · variant      "pro" | "trial" | "free" | "empty" | "cached"
+//    · variant      "pro" | "trial" | "free" | "empty" | "cached" | "expired"
 //    · tier         "pro" | "trial" | "free"
 //    · model        main-window list (roles: devId, devName, os, online,
 //                   current, warned, seen, peerCode, host)
@@ -37,7 +37,8 @@ Item {
     readonly property string _envVariant: {
         var v = (typeof VivoraDevicesVariant !== "undefined") ? String(VivoraDevicesVariant) : ""
         v = v.toLowerCase()
-        return (v === "pro" || v === "trial" || v === "free" || v === "empty" || v === "cached")
+        return (v === "pro" || v === "trial" || v === "free" || v === "empty"
+                || v === "cached" || v === "expired")
                ? v : ""
     }
     readonly property bool _preview: _envVariant.length > 0
@@ -54,10 +55,14 @@ Item {
         return n
     }
 
-    // variant: "pro" | "trial" | "free" | "empty" | "cached"
+    // variant: "pro" | "trial" | "free" | "empty" | "cached" | "expired"
     property string variant: {
         if (_preview) return _envVariant
         if (typeof App === "undefined" || !App.accountLoggedIn) return "free"
+        // VIV-138: the cloud stopped accepting our session.  Ahead of the tier
+        // check, because the cached licence still says "pro" — showing the
+        // upgrade gate (or a blank list) would both be lies.
+        if (App.accountSessionExpired) return "expired"
         if (App.deviceMeshTier !== "pro") return "free"
         // Reading .count here binds the variant to model changes.
         var total = App.myDevices ? App.myDevices.count : 0
@@ -102,7 +107,7 @@ Item {
     function _rebuildMock() {
         mockList.clear()
         mockSettings.clear()
-        if (_preview && _envVariant === "empty")
+        if (_preview && (_envVariant === "empty" || _envVariant === "expired"))
             return
 
         // pubkey is empty in the mock so a preview Connect tap falls through

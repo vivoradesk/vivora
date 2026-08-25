@@ -68,6 +68,7 @@ ApplicationWindow {
             window.requestActivate()
         }
         function onSettingsRequested() {
+            settingsLoader.section = -1
             settingsLoader.active = true
         }
         function onConnectionApprovalRequested(key, peerCode, pubkeyHex, ipPort,
@@ -110,8 +111,15 @@ ApplicationWindow {
     Loader {
         id: settingsLoader
         active: false
+        // Section to open on; -1 keeps the dialog's own default (Network).
+        property int section: -1
         sourceComponent: SettingsDialog {
             visible: true
+            // Set once rather than bound: binding currentIndex to the loader
+            // would both fight the sidebar and, at -1, bind the property to
+            // itself.  Untouched, the dialog keeps its own default section.
+            Component.onCompleted: if (settingsLoader.section >= 0)
+                                       currentIndex = settingsLoader.section
             onClosed: settingsLoader.active = false
         }
     }
@@ -858,6 +866,11 @@ ApplicationWindow {
                         window.showToast("Peer code copied")
                     }
                     onNotify: (message) => window.showToast(message)
+                    // VIV-138: expired session — jump straight to Account.
+                    onSignInRequested: {
+                        settingsLoader.section = 0
+                        settingsLoader.active = true
+                    }
                 }
 
                 // Subtle divider below My Devices

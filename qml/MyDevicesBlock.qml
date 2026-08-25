@@ -24,6 +24,7 @@ ColumnLayout {
     signal copyPeerCode(string code, string devName)
     signal notify(string message)
     signal upgradeRequested()
+    signal signInRequested()
 
     spacing: 0
 
@@ -31,11 +32,14 @@ ColumnLayout {
     readonly property bool isCached: mock.variant === "cached"
     readonly property bool isFree: mock.variant === "free"
     readonly property bool isEmpty: mock.variant === "empty"
+    // VIV-138: signed in, but the cloud rejected the session — the list we could
+    // show is stale, so show what actually needs doing instead.
+    readonly property bool isExpired: mock.variant === "expired"
     readonly property bool scroll: deviceCount > 5
     // True when the device list (not the ProGate / empty state) is showing —
     // main.qml binds the block's fillHeight to this so the list can flex and
     // scroll internally without leaving a gap under the free/empty cards.
-    readonly property bool showsList: !isFree && !isEmpty
+    readonly property bool showsList: !isFree && !isEmpty && !isExpired
 
     function _onlineCount() {
         var n = 0
@@ -62,7 +66,7 @@ ColumnLayout {
         }
         // Count pill
         Rectangle {
-            visible: !block.isFree && !block.isEmpty
+            visible: !block.isFree && !block.isEmpty && !block.isExpired
             Layout.preferredHeight: 16
             Layout.preferredWidth: countLbl.implicitWidth + 12
             radius: 8
@@ -111,7 +115,7 @@ ColumnLayout {
 
         // Tier badge (pro / trial / free)  — hidden while cached.
         TierBadge {
-            visible: !block.isCached && !block.isEmpty
+            visible: !block.isCached && !block.isEmpty && !block.isExpired
             pal: block.pal
             tier: block.mock.variant === "trial" ? "trial"
                   : block.mock.variant === "free" ? "locked" : "pro"
@@ -121,6 +125,68 @@ ColumnLayout {
     }
 
     // ── Body ────────────────────────────────────────────────────────────
+
+    // Session expired → sign in again (VIV-138).  Deliberately not the empty
+    // state: "no devices" and "we cannot see your devices" are different facts,
+    // and only one of them the user can act on.
+    Rectangle {
+        visible: block.isExpired
+        Layout.fillWidth: true
+        Layout.preferredHeight: expiredCol.implicitHeight + 40
+        radius: 10
+        color: block.pal.paperSoft
+        border.width: 1
+        border.color: block.pal.hairStrong
+        ColumnLayout {
+            id: expiredCol
+            anchors.centerIn: parent
+            width: parent.width - 36
+            spacing: 6
+            Label {
+                Layout.alignment: Qt.AlignHCenter
+                text: "Session expired"
+                color: block.pal.ink
+                font.family: block.pal.sans
+                font.pixelSize: 14
+                font.weight: Font.Medium
+            }
+            Label {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: "Sign in again to see your devices. Sharing and direct "
+                      + "connections keep working meanwhile."
+                color: block.pal.inkMid
+                font.family: block.pal.sans
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                lineHeight: 1.35
+            }
+            Rectangle {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 8
+                Layout.preferredHeight: 30
+                Layout.preferredWidth: signInLbl.implicitWidth + 28
+                radius: 8
+                color: block.pal.paper
+                border.width: 1
+                border.color: block.pal.hairStrong
+                Label {
+                    id: signInLbl
+                    anchors.centerIn: parent
+                    text: "Sign in"
+                    color: block.pal.ink
+                    font.family: block.pal.sans
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: block.signInRequested()
+                }
+            }
+        }
+    }
 
     // Free → Pro gate
     ProGate {
@@ -178,7 +244,7 @@ ColumnLayout {
     // List (pro / trial / cached)
     ListView {
         id: listView
-        visible: !block.isFree && !block.isEmpty
+        visible: block.showsList
         Layout.fillWidth: true
         // Sized to its rows, but capped at ~4 rows: beyond that the list scrolls
         // internally instead of pushing the rest of the window down.  Not

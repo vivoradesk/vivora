@@ -83,6 +83,9 @@ class AppController : public QObject {
     // is fetched from the cloud automatically once signed in.
     Q_PROPERTY(QString accountEmail    READ accountEmail    NOTIFY accountChanged)
     Q_PROPERTY(bool    accountLoggedIn READ accountLoggedIn NOTIFY accountChanged)
+    // VIV-138: still "logged in" (we keep the email and the offline license),
+    // but the cloud has stopped accepting us and only a fresh sign-in fixes it.
+    Q_PROPERTY(bool    accountSessionExpired READ accountSessionExpired NOTIFY accountChanged)
     // VIV-52 device mesh.  myDevices is the account's live device list; the
     // "My Devices" UI binds to it when signed in.  deviceMeshTier gates the
     // surface ("pro" when Pro-licensed, else "free"); meshRefreshing drives the
@@ -138,6 +141,7 @@ public:
 
     QString accountEmail()    const { return accountEmail_; }
     bool    accountLoggedIn() const { return !accountEmail_.isEmpty(); }
+    bool    accountSessionExpired() const { return sessionExpired_; }
 
     DeviceMeshModel* myDevices() const { return myDevices_.get(); }
     // "pro" when Pro-licensed (trial folded into pro until VIV-108), else "free".
@@ -371,6 +375,7 @@ private:
     // VIV-31 account/cloud.
     CloudClient cloud_;
     QString     accountEmail_;
+    bool        sessionExpired_ = false;   // VIV-138: cloud rejected our session
     QString     accountUserId_;
     void        wireCloud();
 
@@ -394,6 +399,9 @@ private:
     void    startDeviceMesh();     // register + heartbeat + stream + first fetch
     void    stopDeviceMesh();      // on sign-out
     void    refreshDevices();      // GET /devices/me (sets meshRefreshing_)
+    // VIV-138: the cloud session is gone for good — stop presence and the
+    // device stream, and flip the UI into an explicit "sign in again" state.
+    void    handleSessionExpired();
     QString meshDeviceName() const;
     QString meshDeviceOs() const;
 

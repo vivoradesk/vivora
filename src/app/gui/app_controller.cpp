@@ -888,13 +888,18 @@ void AppController::wireCloud() {
     accountUserId_ = settings_->accountUserId();
 
     connect(&cloud_, &CloudClient::authSucceeded, this,
-            [this](const QString& token, const QString& uid, const QString& email) {
+            [this](const QString& token, const QString& refreshToken,
+                   const QString& uid, const QString& email) {
         settings_->setAccountToken(token);
+        settings_->setAccountRefreshToken(refreshToken);
         settings_->setAccountEmail(email);
         settings_->setAccountUserId(uid);
         accountEmail_  = email;
         accountUserId_ = uid;
+        sessionExpired_ = false;          // VIV-138: a fresh sign-in clears it
         cloud_.setToken(token);
+        cloud_.setRefreshToken(refreshToken);
+        polls_.setToken(token);
         emit accountChanged();
         log::info("AppController", "Signed in as %s", email.toUtf8().constData());
         cloud_.fetchLicense();   // pull the license right after sign-in
@@ -902,6 +907,17 @@ void AppController::wireCloud() {
     });
     connect(&cloud_, &CloudClient::authFailed, this,
             [this](const QString& msg) { emit accountError(msg); });
+
+    // VIV-138: the access token was renewed behind the scenes — persist the
+    // pair and carry on.  No user-visible event; that is the whole point.
+    connect(&cloud_, &CloudClient::tokensRenewed, this,
+            [this](const QString& token, const QString& refreshToken) {
+        settings_->setAccountToken(token);
+        settings_->setAccountRefreshToken(refreshToken);
+        polls_.setToken(token);
+    });
+    connect(&cloud_, &CloudClient::sessionExpired, this,
+            &AppController::handleSessionExpired);
     connect(&cloud_, &CloudClient::licenseFetched, this,
             [this](const QByteArray& token) {
         const QString dir = QStandardPaths::writableLocation(
@@ -929,6 +945,7 @@ void AppController::wireCloud() {
     const QString token = settings_->accountToken();
     if (!token.isEmpty()) {
         cloud_.setToken(token);
+        cloud_.setRefreshToken(settings_->accountRefreshToken());
         emit accountChanged();
         cloud_.fetchLicense();
         startDeviceMesh();       // VIV-52: resume mesh presence + stream
@@ -962,11 +979,14 @@ void AppController::logOut() {
     }
 
     settings_->setAccountToken("");
+    settings_->setAccountRefreshToken("");
     settings_->setAccountEmail("");
     settings_->setAccountUserId("");
     cloud_.setToken("");
+    cloud_.setRefreshToken("");
     accountEmail_.clear();
     accountUserId_.clear();
+    sessionExpired_ = false;
 
     // Drop the cached license so Pro status clears immediately.
     const QString dir = QStandardPaths::writableLocation(
@@ -985,6 +1005,7 @@ void AppController::refreshLicenseFromCloud() {
         return;
     }
     cloud_.setToken(token);
+    cloud_.setRefreshToken(settings_->accountRefreshToken());
     cloud_.fetchLicense();
 }
 
@@ -1144,6 +1165,19 @@ void AppController::stopDeviceMesh() {
     meshRegistered_ = false;      // VIV-52: disarm removal-detection until re-register
     if (meshRefreshing_) { meshRefreshing_ = false; emit meshRefreshingChanged(); }
     emit meshChanged();
+}
+
+// VIV-138.  Reached when the cloud rejected our credentials and the refresh
+// token could not save us.  Everything cloud-backed stops here; the account
+// e-mail and the cached license stay, so the app keeps working offline and the
+// UI can say WHOSE session needs renewing instead of silently showing nothing.
+void AppController::handleSessionExpired() {
+    if (sessionExpired_) return;
+    sessionExpired_ = true;
+    log::warn("AppController",
+              "Cloud session expired - device mesh stopped, sign-in required");
+    stopDeviceMesh();
+    emit accountChanged();
 }
 
 void AppController::refreshDevices() {

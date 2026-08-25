@@ -10,6 +10,9 @@
 #include <QString>
 #include <QTimer>
 
+#include <functional>
+#include <vector>
+
 class QNetworkReply;
 
 namespace vivora::gui {
@@ -25,8 +28,12 @@ public:
     ~CloudClient() override;
 
     void setBaseUrl(const QString& url);     // e.g. https://cloud.vivora.dev
-    void setToken(const QString& token);     // bearer session token
+    void setToken(const QString& token);     // short-lived bearer access token
     bool hasToken() const { return !token_.isEmpty(); }
+    // VIV-138: the long-lived refresh token, traded for a fresh access token
+    // whenever one expires.  Persisted by the caller alongside the access token.
+    void setRefreshToken(const QString& token);
+    bool hasRefreshToken() const { return !refreshToken_.isEmpty(); }
 
     void signup(const QString& email, const QString& password);
     void login(const QString& email, const QString& password);
@@ -54,9 +61,20 @@ public:
     void stopDeviceStream();
 
 signals:
-    // token = bearer session; userId for the checkout link; email echoed back.
-    void authSucceeded(const QString& token, const QString& userId, const QString& email);
+    // token = bearer access token, refreshToken = its renewal credential (empty
+    // if the server is too old to issue one); userId for the checkout link;
+    // email echoed back.
+    void authSucceeded(const QString& token, const QString& refreshToken,
+                       const QString& userId, const QString& email);
     void authFailed(const QString& message);
+
+    // VIV-138.  tokensRenewed: a 401 was recovered by trading the refresh token
+    // for a new access token — persist both, nothing else changes.
+    // sessionExpired: authentication is gone for good (no refresh token, or the
+    // refresh token itself was rejected).  Emitted at most once per token, and
+    // never for a transport failure — an offline client is not a signed-out one.
+    void tokensRenewed(const QString& token, const QString& refreshToken);
+    void sessionExpired();
 
     void licenseFetched(const QByteArray& token);   // raw 95-byte license
     void licenseUnavailable();                       // 404 — account has no Pro
@@ -73,7 +91,22 @@ signals:
     void devicesChanged();                           // SSE "devices_changed"
 
 private:
-    void postAuth(const QString& path, const QString& email, const QString& password);
+    // wantRefresh=false is the retry for a server that predates VIV-138 and
+    // rejects the unknown "refresh" field outright (self-hosted deployments).
+    void postAuth(const QString& path, const QString& email,
+                  const QString& password, bool wantRefresh = true);
+
+    // Authenticated request plumbing (VIV-138).  `make` builds and sends the
+    // reply — it is called again on retry, so it must read token_ at call time
+    // rather than capturing it.  `done` receives the outcome exactly once.
+    using RequestFn = std::function<QNetworkReply*()>;
+    using DoneFn    = std::function<void(int status, const QByteArray& data,
+                                         const QString& netError)>;
+    void sendAuthorized(RequestFn make, DoneFn done, bool retried = false);
+    // Trades refreshToken_ for a fresh access token, then runs `then(ok)`.
+    // Concurrent callers coalesce onto the one in-flight POST /refresh.
+    void renewTokens(std::function<void(bool)> then);
+    void onAuthLost();                               // emit sessionExpired once
 
     // SSE (device stream) internals.
     void openDeviceStream();                         // (re)opens the streaming GET
@@ -83,6 +116,14 @@ private:
     QNetworkAccessManager nam_;
     QString baseUrl_;
     QString token_;
+    QString refreshToken_;
+
+    // Renewal state.  authLost_ latches once sessionExpired() has been emitted
+    // so a burst of 401s (license + devices + register + stream) reports it
+    // once; setToken() clears it.
+    bool renewInFlight_ = false;
+    bool authLost_      = false;
+    std::vector<std::function<void(bool)>> renewWaiters_;
 
     // Device-stream state.  sseWanted_ stays true between startDeviceStream()
     // and stopDeviceStream(), so an unexpected drop triggers a reconnect but a
@@ -91,6 +132,7 @@ private:
     QByteArray     sseBuffer_;
     QTimer         sseReconnect_;
     bool           sseWanted_    = false;
+    bool           sseRetried_   = false;            // one refresh+reopen per 401
     int            sseBackoffMs_ = 1000;             // grows to sseBackoffMaxMs_
     static constexpr int sseBackoffMaxMs_ = 30000;
 };

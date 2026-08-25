@@ -499,17 +499,31 @@ Window {
                         subtitle: "Sign in to sync your devices and unlock Pro features."
                     }
 
-                    // Signed OUT — login / create account.
+                    // Signed OUT — login / create account.  An expired session
+                    // (VIV-138) lands here too: the credentials we hold are no
+                    // longer accepted, so the only useful control is this form.
                     ColumnLayout {
-                        visible: !App.accountLoggedIn
+                        visible: !App.accountLoggedIn || App.accountSessionExpired
                         Layout.fillWidth: true
                         Layout.topMargin: 10
                         spacing: 10
+                        Label {
+                            visible: App.accountSessionExpired
+                            Layout.preferredWidth: 300
+                            text: "Your session expired. Sign in again to sync "
+                                  + "your devices — your Pro licence is unaffected."
+                            color: theme.textMuted
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
+                        }
                         CreamField {
                             id: emailField
                             Layout.preferredWidth: 300
                             placeholderText: "Email"
                             inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase
+                            // Re-signing in after an expiry: we know who they are.
+                            Component.onCompleted: if (App.accountSessionExpired)
+                                                       text = App.accountEmail
                         }
                         CreamField {
                             id: pwField
@@ -577,7 +591,7 @@ Window {
 
                     // Signed IN — account + license + actions.
                     ColumnLayout {
-                        visible: App.accountLoggedIn
+                        visible: App.accountLoggedIn && !App.accountSessionExpired
                         Layout.fillWidth: true
                         Layout.topMargin: 8
                         spacing: 10

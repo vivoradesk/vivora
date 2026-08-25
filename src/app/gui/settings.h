@@ -101,6 +101,8 @@ public:
     // fire changed() so they don't trigger a license re-verify loop.
     QString cloudUrl() const;            void setCloudUrl(const QString&);
     QString accountToken() const;        void setAccountToken(const QString&);
+    // VIV-138: renewal credential for the (now short-lived) access token above.
+    QString accountRefreshToken() const; void setAccountRefreshToken(const QString&);
     QString accountEmail() const;        void setAccountEmail(const QString&);
     QString accountUserId() const;       void setAccountUserId(const QString&);
 

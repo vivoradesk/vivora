@@ -36,6 +36,7 @@ constexpr const char* K_VIEW_FPS_CAP       = "viewing/fpsCap";
 constexpr const char* K_VIEW_MAX_KBPS      = "viewing/maxKbps";
 constexpr const char* K_CLOUD_URL          = "account/cloudUrl";
 constexpr const char* K_ACCOUNT_TOKEN      = "account/token";
+constexpr const char* K_ACCOUNT_REFRESH    = "account/refreshToken";
 constexpr const char* K_ACCOUNT_EMAIL      = "account/email";
 constexpr const char* K_ACCOUNT_USERID     = "account/userId";
 
@@ -118,6 +119,8 @@ QString Settings::cloudUrl() const             { return q_.value(K_CLOUD_URL, DE
 void Settings::setCloudUrl(const QString& v)   { q_.setValue(K_CLOUD_URL, v); }
 QString Settings::accountToken() const         { return q_.value(K_ACCOUNT_TOKEN).toString(); }
 void Settings::setAccountToken(const QString& v){ q_.setValue(K_ACCOUNT_TOKEN, v); }
+QString Settings::accountRefreshToken() const   { return q_.value(K_ACCOUNT_REFRESH).toString(); }
+void Settings::setAccountRefreshToken(const QString& v){ q_.setValue(K_ACCOUNT_REFRESH, v); }
 QString Settings::accountEmail() const         { return q_.value(K_ACCOUNT_EMAIL).toString(); }
 void Settings::setAccountEmail(const QString& v){ q_.setValue(K_ACCOUNT_EMAIL, v); }
 QString Settings::accountUserId() const        { return q_.value(K_ACCOUNT_USERID).toString(); }
