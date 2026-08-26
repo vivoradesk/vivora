@@ -87,6 +87,7 @@ jobs:
             build-essential ninja-build pkg-config git ca-certificates curl \
             python3 python3-pip python3-venv \
             libavcodec-dev libavutil-dev libswscale-dev \
+            libva-dev \
             libpipewire-0.3-dev libdbus-1-dev libpulse-dev libwayland-dev \
             libgl-dev libegl-dev libglx-dev libopengl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
