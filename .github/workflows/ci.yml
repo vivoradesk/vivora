@@ -23,12 +23,17 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git ca-certificates \
+            build-essential ninja-build pkg-config git ca-certificates curl \
             libpulse-dev
 
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Bullseye's own cmake is 3.18 and the tree asks for 3.20, so the apt
+      # package cannot configure this project at all.
+      - name: Install CMake
+        run: scripts/ci-install-cmake.sh
 
       # VIVORA_BUILD_APP=OFF drops Qt, ffmpeg and PipeWire from the configure
       # entirely, which is what makes this gate a couple of minutes instead of
@@ -77,7 +82,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git ca-certificates \
+            build-essential ninja-build pkg-config git ca-certificates curl \
             python3 python3-pip python3-venv \
             libavcodec-dev libavutil-dev libswscale-dev \
             libpipewire-0.3-dev libdbus-1-dev libpulse-dev libwayland-dev \
@@ -88,6 +93,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Install CMake
+        run: scripts/ci-install-cmake.sh
 
       - name: Install Qt
         run: |

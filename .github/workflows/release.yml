@@ -33,12 +33,17 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git ca-certificates \
+            build-essential ninja-build pkg-config git ca-certificates curl \
             libpulse-dev
 
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Same reason as the ci jobs: bullseye's cmake is older than the tree's
+      # minimum, so the packaging script cannot configure anything without this.
+      - name: Install CMake
+        run: scripts/ci-install-cmake.sh
 
       - name: Package
         run: scripts/package-servers.sh build-servers dist
