@@ -21,6 +21,11 @@ ARG JOBS=12
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# deb.debian.org drops connections often enough to matter: a cold build of this
+# image is hours of work that a single reset packet at minute one throws away,
+# and it happened twice in one day. Retry rather than restart.
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-retries
+
 # Toolchain, then the libraries Vivora links, then the ones Qt needs to
 # produce a usable xcb/wayland platform plugin. A missing xcb dev package
 # does not fail the Qt build -- it silently produces a Qt that cannot open a
