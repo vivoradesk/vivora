@@ -3,6 +3,12 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Escape hatch. Pushing v0.1.0 produced no run at all -- the tag reached the
+  # remote and the trigger above matches it, but Actions never saw the event.
+  # With this, the same job can be started by hand against a tag from the
+  # Actions tab, and GITHUB_REF_NAME is still the tag name, so nothing below
+  # behaves differently.
+  workflow_dispatch:
 
 permissions:
   contents: write
