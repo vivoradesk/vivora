@@ -15,10 +15,10 @@
 #include "common/net/socket.h"
 #include "common/net/frame_assembler.h"
 #include "common/utils/log.h"
-#include <cassert>
 #include <cstdio>
 #include <chrono>
 #include <thread>
+#include "check.h"
 
 using namespace vivora;
 
@@ -35,7 +35,7 @@ int main() {
     // --- Set up capture + encoder (host side) ---
     auto capture = IScreenCapture::create();
     auto* dxgi = dynamic_cast<DxgiCapture*>(capture.get());
-    assert(dxgi);
+    CHECK(dxgi);
     if (!capture->init(0)) {
         log::error("TEST", "Failed to init capture");
         return 1;
@@ -59,7 +59,7 @@ int main() {
     // --- Set up UDP sockets (loopback) ---
     auto send_sock = net::IUdpSocket::create();
     auto recv_sock = net::IUdpSocket::create();
-    assert(send_sock && recv_sock);
+    CHECK(send_sock && recv_sock);
 
     const uint16_t TEST_PORT = 19876;
     if (!recv_sock->bind(TEST_PORT)) {
@@ -201,7 +201,7 @@ int main() {
         return 1;
     }
 
-    return 0;
+    return check_report(nullptr);
 }
 
 #else

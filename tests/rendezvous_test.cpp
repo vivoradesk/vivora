@@ -8,9 +8,9 @@
 // lengths so the offset math for the relay+nonce tails can't silently rot.
 
 #include "common/net/rendezvous_protocol.h"
-#include <cassert>
 #include <cstdio>
 #include <cstring>
+#include "check.h"
 
 using namespace vivora::net;
 
@@ -25,17 +25,17 @@ static void test_lookup_nonce_roundtrip() {
     uint8_t buf[rdv::MAX_PACKET];
     const size_t n = rdv::encode_lookup(buf, sizeof(buf), q);
     // 8-byte header + 32 pubkey + 8 nonce.
-    assert(n == rdv::HEADER_SIZE + 32 + rdv::LOOKUP_NONCE_LEN);
+    CHECK(n == rdv::HEADER_SIZE + 32 + rdv::LOOKUP_NONCE_LEN);
 
     rdv::MsgType type; size_t poff = 0, plen = 0;
-    assert(rdv::parse_header(buf, n, type, poff, plen));
-    assert(type == rdv::MsgType::Lookup);
+    CHECK(rdv::parse_header(buf, n, type, poff, plen));
+    CHECK(type == rdv::MsgType::Lookup);
 
     rdv::LookupPayload out{};
-    assert(rdv::decode_lookup(buf + poff, plen, out));
-    assert(out.has_nonce);
-    assert(std::memcmp(out.pubkey, q.pubkey, 32) == 0);
-    assert(std::memcmp(out.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
+    CHECK(rdv::decode_lookup(buf + poff, plen, out));
+    CHECK(out.has_nonce);
+    CHECK(std::memcmp(out.pubkey, q.pubkey, 32) == 0);
+    CHECK(std::memcmp(out.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
 }
 
 static void test_lookup_legacy_decode() {
@@ -48,15 +48,15 @@ static void test_lookup_legacy_decode() {
 
     uint8_t buf[rdv::MAX_PACKET];
     const size_t n = rdv::encode_lookup(buf, sizeof(buf), q);
-    assert(n == rdv::HEADER_SIZE + 32);
+    CHECK(n == rdv::HEADER_SIZE + 32);
 
     rdv::MsgType type; size_t poff = 0, plen = 0;
-    assert(rdv::parse_header(buf, n, type, poff, plen));
+    CHECK(rdv::parse_header(buf, n, type, poff, plen));
     rdv::LookupPayload out{};
-    assert(rdv::decode_lookup(buf + poff, plen, out));
-    assert(!out.has_nonce);
+    CHECK(rdv::decode_lookup(buf + poff, plen, out));
+    CHECK(!out.has_nonce);
     uint8_t zero[rdv::LOOKUP_NONCE_LEN] = {};
-    assert(std::memcmp(out.nonce, zero, rdv::LOOKUP_NONCE_LEN) == 0);
+    CHECK(std::memcmp(out.nonce, zero, rdv::LOOKUP_NONCE_LEN) == 0);
 }
 
 static void test_lookup_code_nonce_roundtrip() {
@@ -69,26 +69,26 @@ static void test_lookup_code_nonce_roundtrip() {
 
     uint8_t buf[rdv::MAX_PACKET];
     size_t n = rdv::encode_lookup_code(buf, sizeof(buf), q);
-    assert(n == rdv::HEADER_SIZE + sizeof(q.code) + rdv::LOOKUP_NONCE_LEN);
+    CHECK(n == rdv::HEADER_SIZE + sizeof(q.code) + rdv::LOOKUP_NONCE_LEN);
 
     rdv::MsgType type; size_t poff = 0, plen = 0;
-    assert(rdv::parse_header(buf, n, type, poff, plen));
+    CHECK(rdv::parse_header(buf, n, type, poff, plen));
     rdv::LookupByCodePayload out{};
-    assert(rdv::decode_lookup_code(buf + poff, plen, out));
-    assert(out.has_nonce);
-    assert(std::strcmp(out.code, q.code) == 0);
-    assert(std::memcmp(out.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
+    CHECK(rdv::decode_lookup_code(buf + poff, plen, out));
+    CHECK(out.has_nonce);
+    CHECK(std::strcmp(out.code, q.code) == 0);
+    CHECK(std::memcmp(out.nonce, q.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
 
     // Legacy 24-byte form.
     rdv::LookupByCodePayload ql{};
     std::strncpy(ql.code, "brave-otter-4271", sizeof(ql.code) - 1);
     ql.has_nonce = false;
     n = rdv::encode_lookup_code(buf, sizeof(buf), ql);
-    assert(n == rdv::HEADER_SIZE + sizeof(ql.code));
-    assert(rdv::parse_header(buf, n, type, poff, plen));
+    CHECK(n == rdv::HEADER_SIZE + sizeof(ql.code));
+    CHECK(rdv::parse_header(buf, n, type, poff, plen));
     rdv::LookupByCodePayload outl{};
-    assert(rdv::decode_lookup_code(buf + poff, plen, outl));
-    assert(!outl.has_nonce);
+    CHECK(rdv::decode_lookup_code(buf + poff, plen, outl));
+    CHECK(!outl.has_nonce);
 }
 
 static void roundtrip_resp(bool relay, bool nonce, size_t expect_plen) {
@@ -113,30 +113,30 @@ static void roundtrip_resp(bool relay, bool nonce, size_t expect_plen) {
 
     uint8_t buf[rdv::MAX_PACKET];
     const size_t n = rdv::encode_lookup_resp(buf, sizeof(buf), r);
-    assert(n == rdv::HEADER_SIZE + expect_plen);
+    CHECK(n == rdv::HEADER_SIZE + expect_plen);
 
     rdv::MsgType type; size_t poff = 0, plen = 0;
-    assert(rdv::parse_header(buf, n, type, poff, plen));
-    assert(type == rdv::MsgType::LookupResponse);
-    assert(plen == expect_plen);
+    CHECK(rdv::parse_header(buf, n, type, poff, plen));
+    CHECK(type == rdv::MsgType::LookupResponse);
+    CHECK(plen == expect_plen);
 
     rdv::LookupResponsePayload out{};
-    assert(rdv::decode_lookup_resp(buf + poff, plen, out));
-    assert(std::memcmp(out.pubkey, r.pubkey, 32) == 0);
-    assert(out.host_ip == r.host_ip);
-    assert(out.host_port == r.host_port);
-    assert(out.found == 1);
-    assert(out.lan_count == 2);
-    assert(out.lan[0].ip == r.lan[0].ip && out.lan[0].port == r.lan[0].port);
-    assert(out.lan[1].ip == r.lan[1].ip && out.lan[1].port == r.lan[1].port);
-    assert((out.relay_ip != 0) == relay);
+    CHECK(rdv::decode_lookup_resp(buf + poff, plen, out));
+    CHECK(std::memcmp(out.pubkey, r.pubkey, 32) == 0);
+    CHECK(out.host_ip == r.host_ip);
+    CHECK(out.host_port == r.host_port);
+    CHECK(out.found == 1);
+    CHECK(out.lan_count == 2);
+    CHECK(out.lan[0].ip == r.lan[0].ip && out.lan[0].port == r.lan[0].port);
+    CHECK(out.lan[1].ip == r.lan[1].ip && out.lan[1].port == r.lan[1].port);
+    CHECK((out.relay_ip != 0) == relay);
     if (relay) {
-        assert(out.relay_ip == r.relay_ip && out.relay_port == r.relay_port);
-        assert(std::memcmp(out.session_id, r.session_id, 32) == 0);
+        CHECK(out.relay_ip == r.relay_ip && out.relay_port == r.relay_port);
+        CHECK(std::memcmp(out.session_id, r.session_id, 32) == 0);
     }
-    assert(out.has_nonce == nonce);
+    CHECK(out.has_nonce == nonce);
     if (nonce)
-        assert(std::memcmp(out.nonce, r.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
+        CHECK(std::memcmp(out.nonce, r.nonce, rdv::LOOKUP_NONCE_LEN) == 0);
 }
 
 static void test_response_all_forms() {
@@ -154,8 +154,8 @@ static void test_response_bad_length_rejected() {
     uint8_t buf[rdv::MAX_PACKET] = {};
     rdv::LookupResponsePayload out{};
     // A length between valid forms (e.g. 100) must be rejected.
-    assert(!rdv::decode_lookup_resp(buf, 100, out));
-    assert(!rdv::decode_lookup_resp(buf, 0, out));
+    CHECK(!rdv::decode_lookup_resp(buf, 100, out));
+    CHECK(!rdv::decode_lookup_resp(buf, 0, out));
 }
 
 int main() {
@@ -165,6 +165,5 @@ int main() {
     test_lookup_code_nonce_roundtrip();
     test_response_all_forms();
     test_response_bad_length_rejected();
-    printf("All rendezvous tests passed.\n");
-    return 0;
+    return check_report("All rendezvous tests passed.");
 }

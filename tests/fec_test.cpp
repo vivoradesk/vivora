@@ -9,7 +9,6 @@
 #include "common/net/fec_codec.h"
 #include "common/protocol/packet.h"
 #include <algorithm>
-#include <cassert>
 #include <cstdio>
 #include <cstdint>
 #include <chrono>
@@ -17,6 +16,7 @@
 #include <cstring>
 #include <random>
 #include <vector>
+#include "check.h"
 
 #ifdef _MSC_VER
 #include <crtdbg.h>
@@ -166,7 +166,7 @@ static void test_single_erasure() {
         wires.push_back(make_data_wire(100 + i, 1000, 200, static_cast<uint8_t>(i)));
 
     auto fec = encode_group(enc, wires, 100, 1000, false);
-    assert(fec.size() == 1);
+    CHECK(fec.size() == 1);
 
     FecDecoder dec;
     // Deliver data packets 0, 1, 3 (drop 2), then FEC.
@@ -174,17 +174,17 @@ static void test_single_erasure() {
     dec.feed(wires[0].data(), wires[0].size(), recovered);
     dec.feed(wires[1].data(), wires[1].size(), recovered);
     dec.feed(wires[3].data(), wires[3].size(), recovered);
-    assert(recovered.empty());
+    CHECK(recovered.empty());
     dec.feed(fec[0].data(), fec[0].size(), recovered);
 
     // In-line recovery (VIV-82): the decoder recovers the instant it holds
     // K shards — on the parity feed itself, not deferred to the next tick().
-    assert(recovered.size() == 1);
-    assert(recovered[0] == wires[2]);
+    CHECK(recovered.size() == 1);
+    CHECK(recovered[0] == wires[2]);
 
     // A resolved group must not re-emit on tick.
     dec.tick(recovered);
-    assert(recovered.size() == 1);
+    CHECK(recovered.size() == 1);
     printf("    PASS\n");
 }
 
@@ -200,7 +200,7 @@ static void test_triple_erasure() {
         wires.push_back(make_data_wire(200 + i, 2000, 500, static_cast<uint8_t>(i * 7)));
 
     auto fec = encode_group(enc, wires, 200, 2000, false);
-    assert(fec.size() == 3);
+    CHECK(fec.size() == 3);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -215,7 +215,7 @@ static void test_triple_erasure() {
 
     dec.tick(recovered);
 
-    assert(recovered.size() == 3);
+    CHECK(recovered.size() == 3);
     // Each recovered packet must match exactly one dropped original.
     int matched = 0;
     for (int idx : drop) {
@@ -223,7 +223,7 @@ static void test_triple_erasure() {
             if (r == wires[idx]) { ++matched; break; }
         }
     }
-    assert(matched == 3);
+    CHECK(matched == 3);
     printf("    PASS\n");
 }
 
@@ -240,7 +240,7 @@ static void test_variable_length() {
         wires.push_back(make_data_wire(300 + i, 3000, sizes[i], static_cast<uint8_t>(i + 11)));
 
     auto fec = encode_group(enc, wires, 300, 3000, false);
-    assert(fec.size() == 2);
+    CHECK(fec.size() == 2);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -253,14 +253,14 @@ static void test_variable_length() {
 
     dec.tick(recovered);
 
-    assert(recovered.size() == 2);
+    CHECK(recovered.size() == 2);
     // Recovered bytes must equal originals *truncated back to original length*.
     bool got0 = false, got3 = false;
     for (const auto& r : recovered) {
         if (r == wires[0]) got0 = true;
         else if (r == wires[3]) got3 = true;
     }
-    assert(got0 && got3);
+    CHECK(got0 && got3);
     printf("    PASS\n");
 }
 
@@ -277,7 +277,7 @@ static void test_partial_flush() {
 
     // Feed 3 packets (less than K) then flush.
     auto fec = encode_group(enc, wires, 400, 4000, true);
-    assert(fec.size() == 2);  // M parity packets
+    CHECK(fec.size() == 2);  // M parity packets
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -287,13 +287,13 @@ static void test_partial_flush() {
     dec.feed(fec[1].data(), fec[1].size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.size() == 2);
+    CHECK(recovered.size() == 2);
     bool got0 = false, got2 = false;
     for (const auto& r : recovered) {
         if (r == wires[0]) got0 = true;
         else if (r == wires[2]) got2 = true;
     }
-    assert(got0 && got2);
+    CHECK(got0 && got2);
     printf("    PASS\n");
 }
 
@@ -316,7 +316,7 @@ static void test_no_loss() {
     for (auto& f : fec)   dec.feed(f.data(), f.size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.empty());
+    CHECK(recovered.empty());
     printf("    PASS\n");
 }
 
@@ -332,7 +332,7 @@ static void test_mixed_loss() {
         wires.push_back(make_data_wire(600 + i, 6000, 400, static_cast<uint8_t>(i * 13)));
 
     auto fec = encode_group(enc, wires, 600, 6000, false);
-    assert(fec.size() == 2);
+    CHECK(fec.size() == 2);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -344,8 +344,8 @@ static void test_mixed_loss() {
     dec.feed(fec[1].data(), fec[1].size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.size() == 1);
-    assert(recovered[0] == wires[2]);
+    CHECK(recovered.size() == 1);
+    CHECK(recovered[0] == wires[2]);
     printf("    PASS\n");
 }
 
@@ -362,7 +362,7 @@ static void test_too_many_losses() {
         wires.push_back(make_data_wire(700 + i, 7000, 350, static_cast<uint8_t>(i + 100)));
 
     auto fec = encode_group(enc, wires, 700, 7000, false);
-    assert(fec.size() == 2);
+    CHECK(fec.size() == 2);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -373,7 +373,7 @@ static void test_too_many_losses() {
     dec.feed(fec[1].data(), fec[1].size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.empty());
+    CHECK(recovered.empty());
     printf("    PASS\n");
 }
 
@@ -400,13 +400,13 @@ static void test_fec_first() {
     dec.feed(wires[2].data(), wires[2].size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.size() == 2);
+    CHECK(recovered.size() == 2);
     bool got0 = false, got3 = false;
     for (const auto& r : recovered) {
         if (r == wires[0]) got0 = true;
         else if (r == wires[3]) got3 = true;
     }
-    assert(got0 && got3);
+    CHECK(got0 && got3);
     printf("    PASS\n");
 }
 
@@ -422,7 +422,7 @@ static void test_two_groups_adaptive_m() {
     for (int i = 0; i < 4; ++i)
         g1.push_back(make_data_wire(900 + i, 9000, 200, static_cast<uint8_t>(i)));
     auto fec1 = encode_group(enc, g1, 900, 9000, false);
-    assert(fec1.size() == 1);
+    CHECK(fec1.size() == 1);
 
     // Change M to 3 (simulating adaptive raise).
     enc.set_parity_count(3);
@@ -432,7 +432,7 @@ static void test_two_groups_adaptive_m() {
     for (int i = 0; i < 4; ++i)
         g2.push_back(make_data_wire(1000 + i, 10000, 200, static_cast<uint8_t>(i + 99)));
     auto fec2 = encode_group(enc, g2, 1000, 10000, false);
-    assert(fec2.size() == 3);
+    CHECK(fec2.size() == 3);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -447,15 +447,15 @@ static void test_two_groups_adaptive_m() {
 
     dec.tick(recovered);
 
-    assert(recovered.size() == 4);
+    CHECK(recovered.size() == 4);
     // One recovery from group 1, three from group 2.
     int c1 = 0, c2 = 0;
     for (const auto& r : recovered) {
         if (r == g1[2]) ++c1;
         for (int i : {0, 1, 3}) if (r == g2[i]) ++c2;
     }
-    assert(c1 == 1);
-    assert(c2 == 3);
+    CHECK(c1 == 1);
+    CHECK(c2 == 3);
     printf("    PASS\n");
 }
 
@@ -493,7 +493,7 @@ static void test_fuzz_within_budget() {
 
         auto fec = encode_group(enc, wires, static_cast<uint16_t>(2000 + iter * 100),
                                 static_cast<uint32_t>(1000 * iter), false);
-        assert(static_cast<int>(fec.size()) == m);
+        CHECK(static_cast<int>(fec.size()) == m);
 
         // Pick `losses` distinct data indices to drop.
         std::vector<int> idx(k);
@@ -517,7 +517,7 @@ static void test_fuzz_within_budget() {
         std::vector<std::vector<uint8_t>> survivors;
         for (int i = 0; i < k; ++i) if (!dropped[i]) survivors.push_back(wires[i]);
         present = verify_all_present(wires, survivors, recovered);
-        assert(present == k);
+        CHECK(present == k);
     }
     printf("    PASS (%d iterations)\n", iterations);
 }
@@ -547,7 +547,7 @@ static void test_group_id_km_mismatch_no_oob() {
     dec.feed(bad_k.data(), bad_k.size(), recovered);
 
     dec.tick(recovered);
-    assert(recovered.empty());   // nothing spuriously recovered, no crash
+    CHECK(recovered.empty());   // nothing spuriously recovered, no crash
     printf("    PASS\n");
 }
 
@@ -622,10 +622,10 @@ static void test_ranged_recovery() {
                                        40 + (i % 7) * 17, static_cast<uint8_t>(i * 3)));
 
     auto fec = encode_group(enc, wires, 500, 2000, false);
-    assert(fec.size() == 10);
+    CHECK(fec.size() == 10);
     // The whole point: ranged parity carries no per-K key list, so it stays
     // well under an MTU even at large K.
-    for (const auto& f : fec) assert(f.size() < 1400);
+    for (const auto& f : fec) CHECK(f.size() < 1400);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -639,9 +639,9 @@ static void test_ranged_recovery() {
     for (auto& f : fec) dec.feed(f.data(), f.size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.size() == 10);
+    CHECK(recovered.size() == 10);
     int hits = verify_all_present(wires, delivered, recovered);
-    assert(hits == 40);   // all originals present (delivered ∪ recovered), exact bytes
+    CHECK(hits == 40);   // all originals present (delivered ∪ recovered), exact bytes
     printf("    PASS\n");
 }
 
@@ -654,27 +654,27 @@ static void test_km_clamp_255() {
     // K itself is capped at 200 (pooled ranged groups, VIV-82).
     FecEncoder enc;
     enc.set_group_size(250);
-    assert(enc.group_size() == 200);
+    CHECK(enc.group_size() == 200);
 
     // Oversized M set first, then K raised: K wins, M shrinks: 200+200 → M=55.
     FecEncoder enc2;
     enc2.set_group_size(2);
     enc2.set_parity_count(200);
     enc2.set_group_size(200);
-    assert(enc2.group_size() == 200);
-    assert(enc2.parity_count() == 55);
+    CHECK(enc2.group_size() == 200);
+    CHECK(enc2.parity_count() == 55);
 
     // K set first, then an oversized M request is clamped on set: 200+60 → M=55.
     FecEncoder enc3;
     enc3.set_group_size(200);
     enc3.set_parity_count(60);
-    assert(enc3.parity_count() == 55);
+    CHECK(enc3.parity_count() == 55);
 
     // Boundary: exactly K + M = 255 passes untouched.
     FecEncoder encB;
     encB.set_group_size(200);
     encB.set_parity_count(55);
-    assert(encB.parity_count() == 55);
+    CHECK(encB.parity_count() == 55);
 
     // Round-trip on a clamped geometry.  The decoder rejects K > 200
     // (fec_codec.cpp sanity bounds), so use K=200: requested M=60 clamps
@@ -682,14 +682,14 @@ static void test_km_clamp_255() {
     FecEncoder enc4;
     enc4.set_group_size(200);
     enc4.set_parity_count(60);
-    assert(enc4.parity_count() == 55);
+    CHECK(enc4.parity_count() == 55);
 
     std::vector<std::vector<uint8_t>> wires;
     for (int i = 0; i < 200; ++i)
         wires.push_back(make_data_wire(static_cast<uint16_t>(700 + i), 3000, 40,
                                        static_cast<uint8_t>(i)));
     auto fec = encode_group(enc4, wires, 700, 3000, false);
-    assert(fec.size() == 55);
+    CHECK(fec.size() == 55);
 
     FecDecoder dec;
     std::vector<std::vector<uint8_t>> recovered;
@@ -702,8 +702,8 @@ static void test_km_clamp_255() {
     for (auto& f : fec) dec.feed(f.data(), f.size(), recovered);
     dec.tick(recovered);
 
-    assert(recovered.size() == 5);
-    assert(verify_all_present(wires, delivered, recovered) == 200);
+    CHECK(recovered.size() == 5);
+    CHECK(verify_all_present(wires, delivered, recovered) == 200);
     printf("    PASS\n");
 }
 
@@ -874,7 +874,7 @@ static bool build_variants(std::vector<Frame>& out, const Variant* vs, int nv,
         build_groups(out[v], N, vs[v].interleave, pct, /*frame_seq=*/700);
         if (vs[v].mixed) order_parity_mixed(out[v]);
         else             order_parity_tail(out[v]);
-        assert(out[v].all_data.size() == static_cast<size_t>(N));
+        CHECK(out[v].all_data.size() == static_cast<size_t>(N));
         if (out[v].order.size() != out[0].order.size()) comparable = false;
     }
     return comparable;
@@ -908,7 +908,7 @@ static void test_fec_geometry_under_loss() {
     const int UNIFS[]  = { 0, 500, 1000 };   // basis points: 0 / 5 / 10 %
 
     int totals[8] = {0};
-    assert(NV <= 8);
+    CHECK(NV <= 8);
 
     for (int pct : PCTS) {
         std::vector<viv88::Frame> fv;
@@ -974,8 +974,8 @@ static void test_fec_geometry_under_loss() {
     //  2. At equal overhead, pooling the frame into FEWER, LARGER groups
     //     dominates: parity can cover losses wherever they fall instead of
     //     needing <=M in every small group.
-    assert(totals[1] >= totals[0] && "parity-mixed must not beat parity-tail");
-    assert(totals[3] <= totals[0] && "pooled (D1) must not be worse than D6");
+    CHECK(totals[1] >= totals[0] && "parity-mixed must not beat parity-tail");
+    CHECK(totals[3] <= totals[0] && "pooled (D1) must not be worse than D6");
     printf("    PASS\n");
 }
 
@@ -1127,7 +1127,7 @@ static void test_nack_rescue_headroom() {
            savable2, lost_frames ? 100.0 * savable2 / lost_frames : 0.0);
     // The premise of direction #1: a large share of failures are within one or
     // two shards of recovery, so a targeted retransmit is worth its complexity.
-    assert(need1 + need2 > 0);
+    CHECK(need1 + need2 > 0);
     printf("    PASS\n");
 }
 
@@ -1176,10 +1176,10 @@ static void test_fec_rescue_nack() {
         std::vector<std::vector<uint8_t>> recovered;
         feed_short_by_one(dec, wires, parity, recovered);
         dec.tick(recovered);
-        assert(dec.total_failed() == 1);     // declared lost immediately
+        CHECK(dec.total_failed() == 1);     // declared lost immediately
         std::vector<uint32_t> keys;
         dec.collect_rescue_keys(keys, 0, 0, 8);
-        assert(keys.empty());                // nothing left to rescue
+        CHECK(keys.empty());                // nothing left to rescue
     }
 
     // ---- with the window, the group survives, is named, and is closed ------
@@ -1191,17 +1191,17 @@ static void test_fec_rescue_nack() {
         std::vector<std::vector<uint8_t>> recovered;
         feed_short_by_one(dec, wires, parity, recovered);
         dec.tick(recovered);
-        assert(dec.total_failed() == 0);     // held open, not buried
+        CHECK(dec.total_failed() == 0);     // held open, not buried
 
         std::vector<uint32_t> keys;
         dec.collect_rescue_keys(keys, /*grace_ms=*/0, /*rl_ms=*/0, /*max_keys=*/8);
-        assert(keys.size() == 1);            // short by one -> ask for one
+        CHECK(keys.size() == 1);            // short by one -> ask for one
         const uint32_t want = keys[0];
         // It must name one of the two lost DATA packets — never a parity or an
         // already-arrived packet, since only data lives in the host's retx ring.
         const uint32_t key2 = wire_pkt_key(wires[2].data(), wires[2].size());
         const uint32_t key5 = wire_pkt_key(wires[5].data(), wires[5].size());
-        assert(want == key2 || want == key5);
+        CHECK(want == key2 || want == key5);
 
         // The promise: hand back that one shard and the group closes, with the
         // other lost packet reconstructed by RS.
@@ -1212,8 +1212,8 @@ static void test_fec_rescue_nack() {
         for (int i = 0; i < K; ++i)
             if (i != 2 && i != 5) delivered.push_back(wires[i]);
         delivered.push_back(answer);
-        assert(verify_all_present(wires, delivered, recovered) == K);
-        assert(dec.total_failed() == 0);     // rescued, never counted as a loss
+        CHECK(verify_all_present(wires, delivered, recovered) == K);
+        CHECK(dec.total_failed() == 0);     // rescued, never counted as a loss
     }
 
     // ---- grace window: nothing is chased while packets may be in flight ----
@@ -1227,9 +1227,9 @@ static void test_fec_rescue_nack() {
 
         std::vector<uint32_t> keys;
         dec.collect_rescue_keys(keys, /*grace_ms=*/60000, /*rl_ms=*/0, 8);
-        assert(keys.empty());   // group is younger than the grace window
+        CHECK(keys.empty());   // group is younger than the grace window
         dec.collect_rescue_keys(keys, /*grace_ms=*/0, /*rl_ms=*/0, 8);
-        assert(keys.size() == 1);  // same group, grace satisfied
+        CHECK(keys.size() == 1);  // same group, grace satisfied
     }
 
     // ---- rate limit: one request per group per period ----------------------
@@ -1243,9 +1243,9 @@ static void test_fec_rescue_nack() {
 
         std::vector<uint32_t> first, second;
         dec.collect_rescue_keys(first, 0, /*rl_ms=*/60000, 8);
-        assert(first.size() == 1);
+        CHECK(first.size() == 1);
         dec.collect_rescue_keys(second, 0, /*rl_ms=*/60000, 8);
-        assert(second.empty());   // still inside the per-group rate limit
+        CHECK(second.empty());   // still inside the per-group rate limit
     }
 
     // ---- hopeless groups are neither held nor chased -----------------------
@@ -1260,10 +1260,10 @@ static void test_fec_rescue_nack() {
             dec.feed(wires[i].data(), wires[i].size(), recovered);
         dec.feed(parity[0].data(), parity[0].size(), recovered);
         dec.tick(recovered);
-        assert(dec.total_failed() == 1);   // fails at once; no pointless delay
+        CHECK(dec.total_failed() == 1);   // fails at once; no pointless delay
         std::vector<uint32_t> keys;
         dec.collect_rescue_keys(keys, 0, 0, 8);
-        assert(keys.empty());
+        CHECK(keys.empty());
     }
 
     // ---- budget cap is honoured across many groups ------------------------
@@ -1285,15 +1285,15 @@ static void test_fec_rescue_nack() {
                                                static_cast<uint8_t>(i * 5)));
             auto parity = encode_group(enc, wires, static_cast<uint16_t>(1000 + g),
                                        3000, false);
-            assert(!parity.empty());
+            CHECK(!parity.empty());
             for (int i = 0; i < K; ++i)
                 if (i != 1 && i != 6) dec.feed(wires[i].data(), wires[i].size(), recovered);
             dec.feed(parity[0].data(), parity[0].size(), recovered);
         }
         std::vector<uint32_t> keys;
         dec.collect_rescue_keys(keys, 0, 0, /*max_keys=*/3);
-        assert(keys.size() <= 3);   // never exceeds the caller's budget
-        assert(!keys.empty());      // but does find work to do
+        CHECK(keys.size() <= 3);   // never exceeds the caller's budget
+        CHECK(!keys.empty());      // but does find work to do
     }
 
     printf("    PASS\n");
@@ -1329,6 +1329,5 @@ int main() {
     bench_fec_geometry_cost();
     test_nack_rescue_headroom();
     test_fec_rescue_nack();
-    printf("=== ALL TESTS PASSED ===\n");
-    return 0;
+    return check_report("=== ALL TESTS PASSED ===");
 }

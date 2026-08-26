@@ -10,10 +10,10 @@
 
 #include "common/net/stun_client.h"
 
-#include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include "check.h"
 
 using namespace vivora::net;
 
@@ -79,8 +79,8 @@ void test_xor_mapped_address() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.port == 40000);
-    assert(out.ip == ip_be);
+    CHECK(out.port == 40000);
+    CHECK(out.ip == ip_be);
 }
 
 void test_legacy_mapped_address() {
@@ -98,8 +98,8 @@ void test_legacy_mapped_address() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.port == 54321);
-    assert(out.ip == ip_be);
+    CHECK(out.port == 54321);
+    CHECK(out.ip == ip_be);
 }
 
 void test_prefers_xor_over_plain() {
@@ -121,8 +121,8 @@ void test_prefers_xor_over_plain() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.port == 2222);
-    assert(out.ip == xor_ip_be);
+    CHECK(out.port == 2222);
+    CHECK(out.ip == xor_ip_be);
 }
 
 void test_tid_mismatch_returns_zero() {
@@ -141,7 +141,7 @@ void test_tid_mismatch_returns_zero() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), wrong_tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 }
 
 void test_cookie_mismatch_returns_zero() {
@@ -159,7 +159,7 @@ void test_cookie_mismatch_returns_zero() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 }
 
 void test_truncated_buffer_returns_zero() {
@@ -167,11 +167,11 @@ void test_truncated_buffer_returns_zero() {
     uint8_t tid[12] = {0};
     uint8_t buf[10] = {};
     SocketAddr out = StunClient::parse_binding_response(buf, sizeof(buf), tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 
     // Null pointer safe.
     out = StunClient::parse_binding_response(nullptr, 0, tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 }
 
 void test_wrong_message_type_returns_zero() {
@@ -187,7 +187,7 @@ void test_wrong_message_type_returns_zero() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 }
 
 void test_ipv6_family_ignored() {
@@ -207,7 +207,7 @@ void test_ipv6_family_ignored() {
     pkt.insert(pkt.end(), body.begin(), body.end());
 
     SocketAddr out = StunClient::parse_binding_response(pkt.data(), pkt.size(), tid);
-    assert(out.ip == 0 && out.port == 0);
+    CHECK(out.ip == 0 && out.port == 0);
 }
 
 } // namespace
@@ -222,6 +222,5 @@ int main() {
     test_truncated_buffer_returns_zero();
     test_wrong_message_type_returns_zero();
     test_ipv6_family_ignored();
-    printf("stun_test: OK\n");
-    return 0;
+    return check_report("stun_test: OK");
 }

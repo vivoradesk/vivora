@@ -7,8 +7,8 @@
 // values, including forward-compat handling of an unknown reason.
 
 #include "common/protocol/packet.h"
-#include <cassert>
 #include <cstdio>
+#include "check.h"
 
 using namespace vivora::protocol;
 
@@ -25,13 +25,13 @@ static void test_reason_roundtrip(DisconnectReason reason) {
     pkt.header.payload_len = 1;
 
     auto wire = pkt.serialize();
-    assert(wire.size() == PacketHeader::WIRE_SIZE + 1);
+    CHECK(wire.size() == PacketHeader::WIRE_SIZE + 1);
 
     Packet back = Packet::deserialize(wire.data(), wire.size());
-    assert(back.header.type == PacketType::Disconnect);
-    assert(back.header.payload_len == 1);
-    assert(back.payload.size() == 1);
-    assert(static_cast<DisconnectReason>(back.payload[0]) == reason);
+    CHECK(back.header.type == PacketType::Disconnect);
+    CHECK(back.header.payload_len == 1);
+    CHECK(back.payload.size() == 1);
+    CHECK(static_cast<DisconnectReason>(back.payload[0]) == reason);
 }
 
 int main() {
@@ -39,10 +39,10 @@ int main() {
 
     // Stable wire values — clients and hosts on different builds must agree.
     printf("  reason enum wire values...\n");
-    assert(static_cast<uint8_t>(DisconnectReason::Rejected)     == 1);
-    assert(static_cast<uint8_t>(DisconnectReason::Kicked)       == 2);
-    assert(static_cast<uint8_t>(DisconnectReason::HostShutdown) == 3);
-    assert(static_cast<uint8_t>(PacketType::Disconnect)         == 0x1B);
+    CHECK(static_cast<uint8_t>(DisconnectReason::Rejected)     == 1);
+    CHECK(static_cast<uint8_t>(DisconnectReason::Kicked)       == 2);
+    CHECK(static_cast<uint8_t>(DisconnectReason::HostShutdown) == 3);
+    CHECK(static_cast<uint8_t>(PacketType::Disconnect)         == 0x1B);
 
     printf("  reason round-trip...\n");
     test_reason_roundtrip(DisconnectReason::Rejected);
@@ -60,10 +60,9 @@ int main() {
         pkt.header.payload_len = 1;
         auto wire = pkt.serialize();
         Packet back = Packet::deserialize(wire.data(), wire.size());
-        assert(back.header.type == PacketType::Disconnect);
-        assert(back.payload.size() == 1 && back.payload[0] == 0x7F);
+        CHECK(back.header.type == PacketType::Disconnect);
+        CHECK(back.payload.size() == 1 && back.payload[0] == 0x7F);
     }
 
-    printf("PASS\n");
-    return 0;
+    return check_report("PASS");
 }

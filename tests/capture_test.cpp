@@ -7,7 +7,6 @@
 #include "host/capture/screen_capture.h"
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
-#include <cassert>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -15,6 +14,7 @@
 #include <dxgiformat.h>
 #include <dxgi1_6.h>
 #include <windows.h>
+#include "check.h"
 
 // Query SDR brightness boost factor via QueryDisplayConfig.
 // Returns 1.0 if HDR is off or query fails.
@@ -164,12 +164,12 @@ int main() {
 
     // Test 1: Factory creates DxgiCapture on Windows
     auto capture = vivora::IScreenCapture::create();
-    assert(capture != nullptr);
+    CHECK(capture != nullptr);
     vivora::log::info("TEST", "PASS: Factory created capture instance");
 
     // Test 2: Monitor enumeration (needs D3D11 init first)
     auto* dxgi = dynamic_cast<vivora::DxgiCapture*>(capture.get());
-    assert(dxgi != nullptr);
+    CHECK(dxgi != nullptr);
 
     bool ok = capture->init(0);
     if (!ok) {
@@ -180,12 +180,12 @@ int main() {
 
     // Test 3: Resolution is valid
     auto res = capture->get_resolution();
-    assert(res.width > 0 && res.height > 0);
+    CHECK(res.width > 0 && res.height > 0);
     vivora::log::info("TEST", "PASS: Resolution %ux%u", res.width, res.height);
 
     // Test 4: Monitor enumeration
     auto monitors = capture->enumerate_monitors();
-    assert(!monitors.empty());
+    CHECK(!monitors.empty());
     vivora::log::info("TEST", "PASS: Found %zu monitor(s)", monitors.size());
 
     // Test 5: Capture frames until we get one with actual content
@@ -225,8 +225,8 @@ int main() {
         input.mi.dx = 1;
         SendInput(1, &input, sizeof(INPUT));
     }
-    assert(got_content);
-    assert(frame.texture);
+    CHECK(got_content);
+    CHECK(frame.texture);
     vivora::log::info("TEST", "PASS: Captured frame with content, dirty_rects=%zu",
                         frame.dirty_rects.size());
 
@@ -242,7 +242,7 @@ int main() {
 
         ID3D11Texture2D* copy = nullptr;
         HRESULT hr = dxgi->get_device()->CreateTexture2D(&desc, nullptr, &copy);
-        assert(SUCCEEDED(hr));
+        CHECK(SUCCEEDED(hr));
         dxgi->get_context()->CopyResource(copy, frame.texture.Get());
 
         capture->release_frame(frame);
@@ -268,8 +268,7 @@ int main() {
     double fps = captured / elapsed;
     vivora::log::info("TEST", "PASS: Captured %d frames in %.2fs (%.1f FPS)", captured, elapsed, fps);
 
-    vivora::log::info("TEST", "=== All tests passed ===");
-    return 0;
+    return check_report("=== All tests passed ===");
 }
 
 #else

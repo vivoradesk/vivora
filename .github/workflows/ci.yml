@@ -52,10 +52,12 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       # assert() compiles out under NDEBUG, and the shipped configuration is
-      # Release -- so a suite that only ran there would pass vacuously. The
-      # test suites use an explicit CHECK macro for this reason; running Debug
-      # as well also catches out-of-bounds access in the [size, capacity)
-      # window that Release and ASan both miss.
+      # Release -- so a suite that only ran there would pass vacuously. Every
+      # suite checks through tests/check.h for that reason (VIV-140), which
+      # makes the Release run above a real gate; this Debug run is for what
+      # Release cannot see: the standard library's own assertions, and
+      # out-of-bounds access in the [size, capacity) window that Release and
+      # ASan both miss.
       - name: Configure (Debug)
         run: |
           cmake -S . -B build-debug -G Ninja \

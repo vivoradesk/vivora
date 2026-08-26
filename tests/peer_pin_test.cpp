@@ -10,7 +10,6 @@
 #include "common/crypto/host_identity.h"
 #include "common/crypto/peer_pin.h"
 
-#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +17,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "check.h"
 
 using namespace vivora::crypto;
 
@@ -48,11 +48,11 @@ static void test_legacy_check_or_pin() {
     fill_key(k1, 1);
     fill_key(k2, 100);
 
-    assert(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::NewlyPinned);
-    assert(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::Match);
-    assert(check_or_pin_peer("civic-panda-4644", k2, PIN_FILE) == PinResult::Mismatch);
+    CHECK(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::NewlyPinned);
+    CHECK(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::Match);
+    CHECK(check_or_pin_peer("civic-panda-4644", k2, PIN_FILE) == PinResult::Mismatch);
     // Mismatch must NOT modify the file.
-    assert(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::Match);
+    CHECK(check_or_pin_peer("civic-panda-4644", k1, PIN_FILE) == PinResult::Match);
 }
 
 static void test_query() {
@@ -63,18 +63,18 @@ static void test_query() {
     fill_key(k2, 200);
 
     // Missing file → Unknown, and the query must not create the file.
-    assert(query_peer_pin("brave-otter-1234", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
-    assert(!std::ifstream(PIN_FILE));
+    CHECK(query_peer_pin("brave-otter-1234", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
+    CHECK(!std::ifstream(PIN_FILE));
 
-    assert(pin_peer("brave-otter-1234", k1, PIN_FILE));
-    assert(query_peer_pin("brave-otter-1234", k1, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(pin_peer("brave-otter-1234", k1, PIN_FILE));
+    CHECK(query_peer_pin("brave-otter-1234", k1, nullptr, PIN_FILE) == PinQuery::Match);
 
     std::string stored;
-    assert(query_peer_pin("brave-otter-1234", k2, &stored, PIN_FILE) == PinQuery::Mismatch);
-    assert(stored == hex_encode(k1, 32));
+    CHECK(query_peer_pin("brave-otter-1234", k2, &stored, PIN_FILE) == PinQuery::Mismatch);
+    CHECK(stored == hex_encode(k1, 32));
 
     // Unknown code in an existing file.
-    assert(query_peer_pin("other-code-0000", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
+    CHECK(query_peer_pin("other-code-0000", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
 }
 
 static void test_pin_replace() {
@@ -84,9 +84,9 @@ static void test_pin_replace() {
     fill_key(k1, 3);
     fill_key(k2, 30);
 
-    assert(pin_peer("calm-heron-9999", k1, PIN_FILE));
-    assert(pin_peer("calm-heron-9999", k2, PIN_FILE));   // user trusted the new key
-    assert(query_peer_pin("calm-heron-9999", k2, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(pin_peer("calm-heron-9999", k1, PIN_FILE));
+    CHECK(pin_peer("calm-heron-9999", k2, PIN_FILE));   // user trusted the new key
+    CHECK(query_peer_pin("calm-heron-9999", k2, nullptr, PIN_FILE) == PinQuery::Match);
 
     // Exactly one entry for the code remains.
     const std::string body = read_file();
@@ -95,7 +95,7 @@ static void test_pin_replace() {
         ++count;
         pos += 1;
     }
-    assert(count == 1);
+    CHECK(count == 1);
 }
 
 static void test_forget() {
@@ -106,26 +106,26 @@ static void test_forget() {
     fill_key(k2, 40);
     fill_key(k3, 44);
 
-    assert(pin_peer("alpha-fox-1111", k1, PIN_FILE));
-    assert(pin_peer("beta-owl-2222",  k2, PIN_FILE));
-    assert(pin_peer("gamma-elk-3333", k3, PIN_FILE));
+    CHECK(pin_peer("alpha-fox-1111", k1, PIN_FILE));
+    CHECK(pin_peer("beta-owl-2222",  k2, PIN_FILE));
+    CHECK(pin_peer("gamma-elk-3333", k3, PIN_FILE));
 
     // By code.
-    assert(forget_peer_pin("alpha-fox-1111", "", PIN_FILE));
-    assert(query_peer_pin("alpha-fox-1111", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
+    CHECK(forget_peer_pin("alpha-fox-1111", "", PIN_FILE));
+    CHECK(query_peer_pin("alpha-fox-1111", k1, nullptr, PIN_FILE) == PinQuery::Unknown);
 
     // By pubkey (covers a peer whose code changed on reinstall).
-    assert(forget_peer_pin("", hex_encode(k2, 32), PIN_FILE));
-    assert(query_peer_pin("beta-owl-2222", k2, nullptr, PIN_FILE) == PinQuery::Unknown);
+    CHECK(forget_peer_pin("", hex_encode(k2, 32), PIN_FILE));
+    CHECK(query_peer_pin("beta-owl-2222", k2, nullptr, PIN_FILE) == PinQuery::Unknown);
 
     // Unrelated entry untouched.
-    assert(query_peer_pin("gamma-elk-3333", k3, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(query_peer_pin("gamma-elk-3333", k3, nullptr, PIN_FILE) == PinQuery::Match);
 
     // Forgetting a non-existent peer or with a missing file is success.
-    assert(forget_peer_pin("nobody-here-0000", "", PIN_FILE));
+    CHECK(forget_peer_pin("nobody-here-0000", "", PIN_FILE));
     reset_file();
-    assert(forget_peer_pin("nobody-here-0000", "", PIN_FILE));
-    assert(!std::ifstream(PIN_FILE));   // must not create the file
+    CHECK(forget_peer_pin("nobody-here-0000", "", PIN_FILE));
+    CHECK(!std::ifstream(PIN_FILE));   // must not create the file
 }
 
 static void test_format_back_compat() {
@@ -137,19 +137,19 @@ static void test_format_back_compat() {
 
     // Hand-written file: comment, blank line, single-space separator.
     write_file("# trusted peers\n\nold-peer-7777 " + hex_encode(k1, 32) + "\n");
-    assert(query_peer_pin("old-peer-7777", k1, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(query_peer_pin("old-peer-7777", k1, nullptr, PIN_FILE) == PinQuery::Match);
 
     // A rewrite (pin of another code) must keep the comment and the
     // hand-written entry.
-    assert(pin_peer("new-peer-8888", k2, PIN_FILE));
+    CHECK(pin_peer("new-peer-8888", k2, PIN_FILE));
     const std::string body = read_file();
-    assert(body.find("# trusted peers") != std::string::npos);
-    assert(body.find("old-peer-7777") != std::string::npos);
-    assert(query_peer_pin("old-peer-7777", k1, nullptr, PIN_FILE) == PinQuery::Match);
-    assert(query_peer_pin("new-peer-8888", k2, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(body.find("# trusted peers") != std::string::npos);
+    CHECK(body.find("old-peer-7777") != std::string::npos);
+    CHECK(query_peer_pin("old-peer-7777", k1, nullptr, PIN_FILE) == PinQuery::Match);
+    CHECK(query_peer_pin("new-peer-8888", k2, nullptr, PIN_FILE) == PinQuery::Match);
 
     // Legacy reader still accepts what pin_peer wrote.
-    assert(check_or_pin_peer("new-peer-8888", k2, PIN_FILE) == PinResult::Match);
+    CHECK(check_or_pin_peer("new-peer-8888", k2, PIN_FILE) == PinResult::Match);
 }
 
 static void test_fingerprint() {
@@ -157,12 +157,12 @@ static void test_fingerprint() {
     uint8_t k[32] = {};
     k[0] = 0x6d; k[1] = 0x2e; k[2] = 0x0c; k[3] = 0x4a;
     k[4] = 0x7f; k[5] = 0x3b; k[6] = 0x9e; k[7] = 0x11;
-    assert(key_fingerprint(k) == "6D2E 0C4A 7F3B 9E11");
+    CHECK(key_fingerprint(k) == "6D2E 0C4A 7F3B 9E11");
     // Hex-string variant matches the byte variant.
-    assert(key_fingerprint_hex(hex_encode(k, 32)) == key_fingerprint(k));
+    CHECK(key_fingerprint_hex(hex_encode(k, 32)) == key_fingerprint(k));
     // Malformed / short input is grouped as-is, never crashes.
-    assert(key_fingerprint_hex("") == "");
-    assert(key_fingerprint_hex("abcd12") == "ABCD 12");
+    CHECK(key_fingerprint_hex("") == "");
+    CHECK(key_fingerprint_hex("abcd12") == "ABCD 12");
 }
 
 int main() {
@@ -174,6 +174,5 @@ int main() {
     test_format_back_compat();
     test_fingerprint();
     reset_file();
-    printf("peer_pin_test: ALL PASSED\n");
-    return 0;
+    return check_report("peer_pin_test: ALL PASSED");
 }

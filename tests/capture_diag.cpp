@@ -7,7 +7,6 @@
 #include "host/capture/screen_capture.h"
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
-#include <cassert>
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -15,6 +14,7 @@
 #include <dxgi1_6.h>
 #include <windows.h>
 #include <wrl/client.h>
+#include "check.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -23,7 +23,7 @@ int main() {
 
     auto capture = vivora::IScreenCapture::create();
     auto* dxgi = dynamic_cast<vivora::DxgiCapture*>(capture.get());
-    assert(capture->init(0));
+    CHECK(capture->init(0));
 
     auto* device = dxgi->get_device();
     auto* ctx = dxgi->get_context();
@@ -73,7 +73,7 @@ int main() {
         mi.mi.dx = 1;
         SendInput(1, &mi, sizeof(INPUT));
     }
-    assert(got);
+    CHECK(got);
 
     D3D11_TEXTURE2D_DESC td;
     frame.texture->GetDesc(&td);
@@ -135,7 +135,7 @@ int main() {
     capture->release_frame(frame);
 
     vivora::log::info("DIAG", "=== Done ===");
-    return 0;
+    return check_report(nullptr);
 }
 
 #else

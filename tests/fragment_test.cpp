@@ -7,12 +7,12 @@
 
 #include "common/net/frame_fragmenter.h"
 #include "common/net/frame_assembler.h"
-#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
 #include <numeric>
 #include <random>
+#include "check.h"
 
 using namespace vivora::net;
 using namespace vivora::protocol;
@@ -33,25 +33,25 @@ static void test_small_frame() {
     auto data = make_test_data(500);
     auto packets = frag.fragment(data.data(), data.size(), 1, 1000, true);
 
-    assert(packets.size() == 1);
-    assert(packets[0].header.type == PacketType::Video);
-    assert(packets[0].header.seq_no == 1);
-    assert(packets[0].header.timestamp == 1000);
-    assert((packets[0].header.flags & FLAG_KEYFRAME) != 0);
-    assert((packets[0].header.flags & FLAG_FRAGMENT) == 0);
-    assert(packets[0].payload == data);
+    CHECK(packets.size() == 1);
+    CHECK(packets[0].header.type == PacketType::Video);
+    CHECK(packets[0].header.seq_no == 1);
+    CHECK(packets[0].header.timestamp == 1000);
+    CHECK((packets[0].header.flags & FLAG_KEYFRAME) != 0);
+    CHECK((packets[0].header.flags & FLAG_FRAGMENT) == 0);
+    CHECK(packets[0].payload == data);
 
     // Feed to assembler — should complete immediately
     bool complete = asm_.feed(packets[0]);
-    assert(complete);
+    CHECK(complete);
 
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
-    assert(frame.seq_no == 1);
-    assert(frame.timestamp == 1000);
-    assert(frame.keyframe);
-    assert(asm_.frames_completed() == 1);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
+    CHECK(frame.seq_no == 1);
+    CHECK(frame.timestamp == 1000);
+    CHECK(frame.keyframe);
+    CHECK(asm_.frames_completed() == 1);
     printf("    PASS\n");
 }
 
@@ -66,17 +66,17 @@ static void test_large_frame_in_order() {
 
     size_t expected_frags = (data.size() + FrameFragmenter::DATA_PER_FRAGMENT - 1)
                             / FrameFragmenter::DATA_PER_FRAGMENT;
-    assert(packets.size() == expected_frags);
+    CHECK(packets.size() == expected_frags);
     printf("    %zu fragments for %zuB\n", packets.size(), data.size());
 
     // All fragments should have FLAG_FRAGMENT and same seq_no
     for (size_t i = 0; i < packets.size(); ++i) {
-        assert(packets[i].header.seq_no == 42);
-        assert((packets[i].header.flags & FLAG_FRAGMENT) != 0);
+        CHECK(packets[i].header.seq_no == 42);
+        CHECK((packets[i].header.flags & FLAG_FRAGMENT) != 0);
         if (i == 0)
-            assert((packets[i].header.flags & FLAG_KEYFRAME) != 0);
+            CHECK((packets[i].header.flags & FLAG_KEYFRAME) != 0);
         if (i == packets.size() - 1)
-            assert((packets[i].header.flags & FLAG_LAST_FRAG) != 0);
+            CHECK((packets[i].header.flags & FLAG_LAST_FRAG) != 0);
     }
 
     // Feed all in order
@@ -85,14 +85,14 @@ static void test_large_frame_in_order() {
         if (asm_.feed(pkt))
             any_complete = true;
     }
-    assert(any_complete);
+    CHECK(any_complete);
 
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
-    assert(frame.seq_no == 42);
-    assert(frame.keyframe);
-    assert(asm_.frames_completed() == 1);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
+    CHECK(frame.seq_no == 42);
+    CHECK(frame.keyframe);
+    CHECK(asm_.frames_completed() == 1);
     printf("    PASS\n");
 }
 
@@ -112,13 +112,13 @@ static void test_reverse_order() {
         if (asm_.feed(pkt))
             any_complete = true;
     }
-    assert(any_complete);
+    CHECK(any_complete);
 
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
-    assert(frame.seq_no == 10);
-    assert(!frame.keyframe);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
+    CHECK(frame.seq_no == 10);
+    CHECK(!frame.keyframe);
     printf("    PASS\n");
 }
 
@@ -139,11 +139,11 @@ static void test_random_order() {
         if (asm_.feed(pkt))
             any_complete = true;
     }
-    assert(any_complete);
+    CHECK(any_complete);
 
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
     printf("    PASS\n");
 }
 
@@ -165,11 +165,11 @@ static void test_duplicate_fragments() {
         if (asm_.feed(packets[i]))
             any_complete = true;
     }
-    assert(any_complete);
+    CHECK(any_complete);
 
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
     printf("    PASS\n");
 }
 
@@ -181,16 +181,16 @@ static void test_missing_fragments() {
 
     auto data = make_test_data(20 * 1024);
     auto packets = frag.fragment(data.data(), data.size(), 30, 5000, false);
-    assert(packets.size() > 3);
+    CHECK(packets.size() > 3);
 
     // Feed only first half
     for (size_t i = 0; i < packets.size() / 2; ++i) {
         bool complete = asm_.feed(packets[i]);
-        assert(!complete); // should never complete
+        CHECK(!complete); // should never complete
     }
 
     AssembledFrame frame;
-    assert(!asm_.pop_frame(frame)); // nothing available
+    CHECK(!asm_.pop_frame(frame)); // nothing available
     printf("    PASS\n");
 }
 
@@ -221,16 +221,16 @@ static void test_multiple_frames() {
         if (asm_.feed(pkt))
             completed++;
     }
-    assert(completed == 2);
+    CHECK(completed == 2);
 
     AssembledFrame f1, f2;
-    assert(asm_.pop_frame(f1));
-    assert(asm_.pop_frame(f2));
+    CHECK(asm_.pop_frame(f1));
+    CHECK(asm_.pop_frame(f2));
     // Frames should come out in completion order
-    assert(f1.data == data1 || f1.data == data2);
-    assert(f2.data == data1 || f2.data == data2);
-    assert(f1.data != f2.data);
-    assert(asm_.frames_completed() == 2);
+    CHECK(f1.data == data1 || f1.data == data2);
+    CHECK(f2.data == data1 || f2.data == data2);
+    CHECK(f1.data != f2.data);
+    CHECK(asm_.frames_completed() == 2);
     printf("    PASS\n");
 }
 
@@ -241,8 +241,8 @@ static void test_boundary_exact() {
 
     auto data = make_test_data(FrameFragmenter::MAX_PAYLOAD);
     auto packets = frag.fragment(data.data(), data.size(), 1, 100, false);
-    assert(packets.size() == 1);
-    assert((packets[0].header.flags & FLAG_FRAGMENT) == 0);
+    CHECK(packets.size() == 1);
+    CHECK((packets[0].header.flags & FLAG_FRAGMENT) == 0);
     printf("    PASS\n");
 }
 
@@ -254,13 +254,13 @@ static void test_boundary_plus_one() {
 
     auto data = make_test_data(FrameFragmenter::MAX_PAYLOAD + 1);
     auto packets = frag.fragment(data.data(), data.size(), 2, 200, false);
-    assert(packets.size() == 2);
-    assert((packets[0].header.flags & FLAG_FRAGMENT) != 0);
+    CHECK(packets.size() == 2);
+    CHECK((packets[0].header.flags & FLAG_FRAGMENT) != 0);
 
     for (auto& pkt : packets) asm_.feed(pkt);
     AssembledFrame frame;
-    assert(asm_.pop_frame(frame));
-    assert(frame.data == data);
+    CHECK(asm_.pop_frame(frame));
+    CHECK(frame.data == data);
     printf("    PASS\n");
 }
 
@@ -275,6 +275,5 @@ int main() {
     test_multiple_frames();
     test_boundary_exact();
     test_boundary_plus_one();
-    printf("=== ALL TESTS PASSED ===\n");
-    return 0;
+    return check_report("=== ALL TESTS PASSED ===");
 }

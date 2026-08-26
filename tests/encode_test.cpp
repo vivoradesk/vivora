@@ -9,9 +9,9 @@
 #include "host/encode/video_encoder.h"
 #include "common/utils/log.h"
 #include "common/utils/metrics.h"
-#include <cassert>
 #include <cstdio>
 #include <windows.h>
+#include "check.h"
 
 int main() {
     vivora::log::info("TEST", "=== Encode Test: DXGI Capture -> AMF HEVC 10-bit HDR ===");
@@ -19,7 +19,7 @@ int main() {
     // Initialize capture
     auto capture = vivora::IScreenCapture::create();
     auto* dxgi = dynamic_cast<vivora::DxgiCapture*>(capture.get());
-    assert(dxgi);
+    CHECK(dxgi);
 
     bool ok = capture->init(0);
     if (!ok) {
@@ -134,7 +134,7 @@ int main() {
         return 1;
     }
 
-    return 0;
+    return check_report(nullptr);
 }
 
 #else
