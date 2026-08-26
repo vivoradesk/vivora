@@ -31,7 +31,10 @@
          appstreamcli >= 0.16, and this file has to validate on the oldest
          distribution we build against. -->
     <url type="help">https://github.com/vivoradesk/vivora#readme</url>
-    <url type="contact">mailto:hello@vivora.dev</url>
+    <!-- No <url type="contact">: AppStream expects a web address there, and
+         appstreamcli rejects a mailto: with "web-url-expected", which fails
+         validation outright. The contact address is stated in NOTICE and in
+         the README instead. -->
 
     <developer_name>Vivora Contributors</developer_name>
 
