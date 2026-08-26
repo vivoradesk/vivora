@@ -124,6 +124,20 @@ jobs:
           name: appimage
           path: dist
 
+      # Each packaging script appends to a SHA256SUMS.txt inside its own dist/,
+      # and the two jobs run on different runners -- so downloading both
+      # artefacts into one directory collapses two files of the same name into
+      # whichever landed last. v0.1.0's first draft went out listing only the
+      # AppImage, with the server tarball's line silently gone. A checksum file
+      # that covers part of the release is worse than none: it looks
+      # authoritative. Regenerate it over everything actually being uploaded.
+      - name: Checksums over every artefact
+        working-directory: dist
+        run: |
+          rm -f SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,4 +154,5 @@ jobs:
             --notes-file "$notes" \
             dist/*
           echo "Draft created with the server tarball and the AppImage."
-          echo "Attach the Windows zip and msi, then publish."
+          echo "Attach the Windows zip and msi, add their lines to"
+          echo "SHA256SUMS.txt so it still covers the whole release, then publish."
