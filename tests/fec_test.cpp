@@ -853,19 +853,31 @@ struct Variant {
     bool        mixed;
 };
 
-// Build every variant for one (N, pct) and assert they really are the same
-// wire cost, so the comparison is honest.
-static void build_variants(std::vector<Frame>& out, const Variant* vs, int nv,
+// Build every variant for one (N, pct).  Returns false when they do not come
+// out at the same wire cost, in which case the caller must not compare them:
+// every variant is dropped through ONE mask sized to fv[0], so a variant with
+// more packets would carry an undroppable tail and win on overhead rather than
+// on geometry.
+//
+// Equal cost is not a given.  Parity per group is ceil(K*pct/100), so a frame
+// split into G groups rounds up G times against once at D=1: at N=48, pct=25
+// both come to 12 (6*2 == 12), but at pct=46 D=6 pays 6*ceil(3.68) = 24 while
+// D=1 pays ceil(22.08) = 23.  This used to be an assert, which meant Release
+// compiled the check away and ran the comparison anyway while Debug aborted
+// the whole suite -- the CI job that runs both is what surfaced it.
+static bool build_variants(std::vector<Frame>& out, const Variant* vs, int nv,
                            int N, int pct) {
     out.clear();
     out.resize(static_cast<size_t>(nv));
+    bool comparable = true;
     for (int v = 0; v < nv; ++v) {
         build_groups(out[v], N, vs[v].interleave, pct, /*frame_seq=*/700);
         if (vs[v].mixed) order_parity_mixed(out[v]);
         else             order_parity_tail(out[v]);
         assert(out[v].all_data.size() == static_cast<size_t>(N));
-        assert(out[v].order.size() == out[0].order.size());   // equal overhead
+        if (out[v].order.size() != out[0].order.size()) comparable = false;
     }
+    return comparable;
 }
 
 } // namespace viv88
@@ -887,8 +899,11 @@ static void test_fec_geometry_under_loss() {
     const int NV = static_cast<int>(sizeof(VARIANTS) / sizeof(VARIANTS[0]));
 
     // 48 packets/frame, the shape the rig produced at D=6 (MIN_GROUP_K floor).
-    // pct 25 = the steady ladder rung, 46 ~= where WiFi settles in practice.
-    const int PCTS[]   = { 25, 46 };
+    // pct 25 = the steady ladder rung; 48 stands in for where WiFi settles in
+    // practice (~46) because it is the nearby value whose per-group ceilings
+    // agree across all four variants -- 6*ceil(8*0.48) == ceil(48*0.48) == 24 --
+    // so the comparison is like-for-like.  See build_variants().
+    const int PCTS[]   = { 25, 48 };
     const int BURSTS[] = { 0, 4, 12 };
     const int UNIFS[]  = { 0, 500, 1000 };   // basis points: 0 / 5 / 10 %
 
@@ -897,7 +912,13 @@ static void test_fec_geometry_under_loss() {
 
     for (int pct : PCTS) {
         std::vector<viv88::Frame> fv;
-        viv88::build_variants(fv, VARIANTS, NV, /*N=*/48, pct);
+        if (!viv88::build_variants(fv, VARIANTS, NV, /*N=*/48, pct)) {
+            printf("    pct=%d  SKIPPED: variants differ in wire cost, "
+                   "so a shared drop mask would not compare them fairly\n", pct);
+            for (int v = 0; v < NV; ++v)
+                printf("      %s %zu pkts\n", VARIANTS[v].name, fv[v].order.size());
+            continue;
+        }
         printf("    pct=%d  wire=%zu pkts (48 data + %zu parity)\n",
                pct, fv[0].order.size(), fv[0].order.size() - 48);
         printf("      burst unif%%");
