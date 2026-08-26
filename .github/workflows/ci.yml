@@ -103,8 +103,13 @@ jobs:
         run: |
           python3 -m venv /opt/venv
           /opt/venv/bin/pip install --quiet aqtinstall
+          # qtdeclarative ships in the base desktop package in Qt 6, so asking
+          # for it as a module makes aqt fail outright: "The packages
+          # ['qtdeclarative'] were not found while parsing XML of package
+          # information". qtshadertools is a real add-on, and it is all the
+          # windows-app job asks for too.
           /opt/venv/bin/aqt install-qt linux desktop 6.8.2 linux_gcc_64 \
-            -m qtdeclarative qtshadertools --outputdir /opt/qt
+            -m qtshadertools --outputdir /opt/qt
 
       - name: Configure
         run: |
