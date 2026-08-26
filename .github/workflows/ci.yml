@@ -100,6 +100,23 @@ jobs:
       - name: Install CMake
         run: scripts/ci-install-cmake.sh
 
+      # Bullseye's PipeWire is 0.3.19, which predates SPA_PTROFF and the
+      # `command` callback in pw_stream_events, so pipewire_capture.cpp does not
+      # compile against it. Vendor newer headers over the top and keep linking
+      # the system library, exactly as the release image does -- see
+      # packaging/linux/Containerfile, and keep the version in step with its
+      # PIPEWIRE_HEADERS.
+      - name: Vendor PipeWire 0.3.48 headers
+        run: |
+          git clone -q --depth 1 --branch 0.3.48 \
+              https://github.com/PipeWire/pipewire.git /tmp/pw
+          (cd /tmp/pw/src/pipewire && \
+           find . -name '*.h' -exec cp --parents {} /usr/include/pipewire-0.3/pipewire/ \;)
+          (cd /tmp/pw/spa/include/spa && \
+           find . -name '*.h' -exec cp --parents {} /usr/include/spa-0.2/spa/ \;)
+          rm -rf /tmp/pw
+          grep -q SPA_PTROFF /usr/include/spa-0.2/spa/utils/defs.h
+
       - name: Install Qt
         run: |
           python3 -m venv /opt/venv
