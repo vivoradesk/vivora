@@ -41,6 +41,16 @@ enum class PacketType : uint8_t {
                                 // byte: the codecs the client can still decode.
                                 // The host re-picks from the intersection and
                                 // switches its live encoder.
+                                // Host → client: the codec the live encoder now
+                                // produces (VIV-147).  Payload is a single
+                                // VideoCodec byte, same encoding as the
+                                // HELLO_ACK codec byte.  Sent to every client
+                                // whenever the wire codec changes mid-session
+                                // (negotiation, or a monitor switch promoting
+                                // H.264 to HEVC on an HDR display), and again
+                                // in answer to each IdrRequest so a lost
+                                // announcement heals.  Clients older than this
+                                // ignore the unknown direction.
 };
 
 // Reason carried in a Disconnect packet's single-byte payload.  Lets the

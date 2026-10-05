@@ -89,7 +89,8 @@ struct ViewPlatform {
 
     // Lazily initialize the decoder for the negotiated codec (known only
     // after the handshake). Idempotent — subsequent calls with the same
-    // codec are no-ops.  Returns true if decoder is ready.
+    // codec are no-ops; a different codec rebuilds the decoder (host switched
+    // codec mid-session, VIV-147).  Returns true if decoder is ready.
     virtual bool init_decoder(VideoCodec codec) = 0;
 
     // Decode an assembled frame.  Called only after keyframe gating passes.

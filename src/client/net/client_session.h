@@ -213,8 +213,11 @@ public:
     uint64_t total_rejected()   const { return total_rejected_; }
     uint64_t total_dropped()    const { return total_dropped_; }
 
-    // Codec advertised by the host in HELLO_ACK.  Defaults to HEVC for
-    // legacy hosts that don't carry the codec byte.
+    // Codec advertised by the host in HELLO_ACK, and updated mid-session by
+    // the host's CodecRenegotiate announcement (VIV-147).  Defaults to HEVC
+    // for legacy hosts that don't carry the codec byte.  The view layer
+    // compares it with the codec its decoder was built for and rebuilds on a
+    // mismatch.
     VideoCodec host_codec() const { return host_codec_; }
 
     // VIV-112: advertise which codecs this client can decode (VideoCodecCaps

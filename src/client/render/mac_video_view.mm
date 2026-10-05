@@ -845,7 +845,12 @@ void MacVideoView::set_input_callback(InputCallback cb) {
 
 void MacVideoView::set_codec(VideoCodec codec) {
     auto* impl = static_cast<MacVideoViewImpl*>(impl_);
+    if (impl->codec == codec) return;
     impl->codec = codec;
+    // Mid-session codec switch (VIV-147): the parameter sets and format
+    // description belong to the old codec — drop them so the next keyframe
+    // rebuilds for the new one.  The decode thread is stopped while this runs.
+    if (impl->have_params || impl->format_desc) flush_decoder();
 }
 
 void MacVideoView::set_keep_aspect(bool keep) {

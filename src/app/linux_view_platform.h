@@ -41,6 +41,7 @@ private:
     std::unique_ptr<QMainWindow>            window_;
     vivora::client::QtGlVideoView*        view_ = nullptr;  // owned by window_
     std::unique_ptr<vivora::client::FfmpegDecoder> decoder_;
+    vivora::VideoCodec                             codec_ = vivora::VideoCodec::HEVC;
     // Threaded pipeline (VIV-81) — created only when VIVORA_PIPELINE=threaded;
     // shares the view_ for present().  Null on the legacy path.
     std::unique_ptr<vivora::LinuxVideoPipeline> pipeline_;

@@ -37,7 +37,9 @@ bool WindowsViewPlatform::init(int argc, char* argv[],
 }
 
 bool WindowsViewPlatform::init_decoder(vivora::VideoCodec codec) {
-    if (decoder_) return true;
+    if (decoder_ && codec == codec_) return true;
+    decoder_.reset();   // mid-session codec switch (VIV-147): rebuild for the new one
+    codec_ = codec;
     decoder_ = vivora::IVideoDecoder::create();
     if (!decoder_->init(codec)) {
         vivora::log::error("VIEW", "Failed to init decoder");

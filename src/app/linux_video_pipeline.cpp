@@ -19,7 +19,9 @@ LinuxVideoPipeline::LinuxVideoPipeline(client::QtGlVideoView* view) : view_(view
 LinuxVideoPipeline::~LinuxVideoPipeline() = default;
 
 bool LinuxVideoPipeline::init_decoder(VideoCodec codec) {
-    if (dec_) return true;
+    if (dec_ && codec == codec_) return true;
+    dec_.reset();   // mid-session codec switch (VIV-147): rebuild for the new one
+    codec_ = codec;
     dec_ = std::make_unique<client::FfmpegDecoder>();
     if (!dec_->init(codec)) {
         vivora::log::error("VIEW", "LinuxVideoPipeline: decoder init failed");

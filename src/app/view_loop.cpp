@@ -264,6 +264,26 @@ bool ViewLoopState::iter_threaded() {
         return true;
     }
 
+    // VIV-147: the host now encodes a different codec than our decoder was
+    // built for.  Stop the decode thread (the pipeline's decoder belongs to
+    // it), drop the compressed frames still queued in the old codec, and let
+    // the lazy init below rebuild the decoder and restart the thread.  The
+    // host forces a keyframe with every codec switch, and the restarted
+    // thread gates on it.
+    if (decoder_ready_ && session.host_codec() != decoder_codec_) {
+        log::info("VIEW", "Host codec changed %s -> %s — rebuilding decoder",
+                  decoder_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264",
+                  session.host_codec() == VideoCodec::HEVC ? "HEVC" : "H.264");
+        if (decode_running_.exchange(false) && decode_thread_.joinable())
+            decode_thread_.join();
+        CompressedFrame stale;
+        while (q1_->try_pop(stale)) {}
+        decoder_ready_ = false;
+        decode_needs_idr_.store(false, std::memory_order_release);
+        session.request_idr();
+        last_idr_request_ = Clock::now();
+    }
+
     // Lazy init once Connected: pipeline decoder + decode thread, audio, clock.
     if (!decoder_ready_ && session.state() == client::SessionState::Connected) {
         // Test hook (VIV-112): VIVORA_FORCE_DECODE_FAIL fails the first
@@ -285,6 +305,7 @@ bool ViewLoopState::iter_threaded() {
         }
         if (ok) {
             decoder_ready_ = true;
+            decoder_codec_ = session.host_codec();
             decode_running_.store(true, std::memory_order_release);
             decode_thread_ = std::thread(&ViewLoopState::decode_thread_proc, this);
             log::info("VIEW", "Decode thread started");
@@ -863,6 +884,19 @@ bool ViewLoopState::iter() {
         return true;
     }
 
+    // VIV-147: the host switched codec mid-session — see iter_threaded().
+    // init_decoder() below rebuilds for the new codec; until its first
+    // keyframe, the keyframe gate drops what arrives.
+    if (decoder_ready_ && session.host_codec() != decoder_codec_) {
+        log::info("VIEW", "Host codec changed %s -> %s — rebuilding decoder",
+                  decoder_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264",
+                  session.host_codec() == VideoCodec::HEVC ? "HEVC" : "H.264");
+        decoder_ready_ = false;
+        got_keyframe_  = false;
+        session.request_idr();
+        last_idr_request_ = Clock::now();
+    }
+
     // Once the handshake completes we know the host codec — spin up
     // the decoder now, and also open the audio output device.  Both
     // idempotent after first success.
@@ -883,6 +917,7 @@ bool ViewLoopState::iter() {
         }
         if (ok) {
             decoder_ready_ = true;
+            decoder_codec_ = session.host_codec();
         }
     }
     if (!audio_started_ && session.state() == client::SessionState::Connected) {

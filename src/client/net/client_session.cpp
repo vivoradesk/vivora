@@ -1015,6 +1015,22 @@ void ClientSession::handle_packet(const uint8_t* data, size_t len) {
                       static_cast<unsigned>(payload_len >= 1 ? payload[0] : 0));
             break;
         }
+        case protocol::PacketType::CodecRenegotiate:
+            // VIV-147: the host's live encoder now produces this codec (a
+            // negotiation switch, or a monitor switch onto an HDR display).
+            // Repeated on every IdrRequest, so this is idempotent.
+            if (payload_len >= 1) {
+                const VideoCodec c = (payload[0] == static_cast<uint8_t>(VideoCodec::H264))
+                                         ? VideoCodec::H264
+                                         : VideoCodec::HEVC;
+                if (c != host_codec_) {
+                    log::info("ClientSession", "Host switched codec %s -> %s",
+                              host_codec_ == VideoCodec::HEVC ? "HEVC" : "H.264",
+                              c == VideoCodec::HEVC ? "HEVC" : "H.264");
+                    host_codec_ = c;
+                }
+            }
+            break;
         case protocol::PacketType::HostStats:
             // Host's current encoder target bitrate (kbps, u32 LE) — for the
             // "encoding (actual)" HUD readout (VIV-82).

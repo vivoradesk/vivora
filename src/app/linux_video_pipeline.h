@@ -62,6 +62,7 @@ private:
 
     client::QtGlVideoView*                  view_;
     std::unique_ptr<client::FfmpegDecoder>  dec_;
+    VideoCodec                              codec_ = VideoCodec::HEVC;
     Slot                                    slots_[kSlots];
     // Free slot indices.  Strict SPSC: the ONLY producer is the main thread
     // (recycle), the ONLY consumer is the decode thread (poll_frame).

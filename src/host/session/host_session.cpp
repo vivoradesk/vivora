@@ -704,6 +704,12 @@ void HostSession::handle_packet(const uint8_t* data, size_t len, const net::Sock
         case protocol::PacketType::IdrRequest:
             client->idr_needed = true;
             log::info("HostSession", "Client requested IDR (frame loss recovery)");
+            // A viewer that missed a codec announcement feeds the new bitstream
+            // to the wrong decoder, which fails and lands here — so repeating
+            // the live codec on every IDR request is what heals a lost one.
+            // Skipped while a negotiated switch is still pending: codec_ is
+            // about to change, and announcing it would bounce the viewer.
+            if (!codec_change_pending_) send_codec(*client);
             break;
         case protocol::PacketType::MonitorListRequest:
             // host_loop owns the capture platform — flag the request and let
@@ -1135,6 +1141,28 @@ void HostSession::send_disconnect(ClientInfo& client,
     pkt.header.payload_len = 1;
     auto wire = pkt.serialize();
     send_sealed(client, wire);
+}
+
+void HostSession::send_codec(ClientInfo& client) {
+    protocol::Packet pkt;
+    pkt.header.type        = protocol::PacketType::CodecRenegotiate;
+    pkt.header.seq_no      = 0;
+    pkt.header.timestamp   = 0;
+    pkt.header.flags       = 0;
+    pkt.payload.assign(1, static_cast<uint8_t>(codec_));
+    pkt.header.payload_len = 1;
+    auto wire = pkt.serialize();
+    send_sealed(client, wire);
+}
+
+void HostSession::announce_codec() {
+    if (!socket_ || clients_.empty()) return;
+    for (auto& [addr, client] : clients_) {
+        if (!client.handshake_complete) continue;
+        send_codec(client);
+    }
+    log::info("HostSession", "Announced live codec %s to %zu client(s)",
+              codec_ == VideoCodec::HEVC ? "HEVC" : "H.264", clients_.size());
 }
 
 void HostSession::send_cursor_position(const protocol::CursorPositionMessage& msg) {

@@ -45,7 +45,8 @@ bool WindowsVideoPipeline::create_device() {
 }
 
 bool WindowsVideoPipeline::init_decoder(VideoCodec codec) {
-    if (dec_) return true;
+    if (dec_ && codec == codec_) return true;
+    dec_.reset();   // mid-session codec switch (VIV-147): rebuild for the new one
     codec_ = codec;
     if (!device_ && !create_device()) return false;
     auto dec = IVideoDecoder::create();

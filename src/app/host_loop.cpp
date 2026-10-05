@@ -761,11 +761,16 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                               ? "HEVC" : "H.264");
             } else {
                 log::warn("HOST", "Codec switch to %s not supported on this "
-                          "platform — staying on %s (client will fall back)",
+                          "platform — staying on %s",
                           want_codec == vivora::VideoCodec::HEVC ? "HEVC" : "H.264",
                           platform.actual_codec() == vivora::VideoCodec::HEVC
                               ? "HEVC" : "H.264");
             }
+            // Announce either way.  On success every connected viewer must
+            // follow the new codec, not only the one that drove the switch; on
+            // a refusal the newcomer's HELLO_ACK promised the codec we did not
+            // switch to, and this corrects it (VIV-147).
+            session.announce_codec();
         }
 
         uint32_t want_monitor = 0;
@@ -804,6 +809,19 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
                 // panel keeps claiming it switched.
                 session.send_monitor_list(advertised_monitors(platform));
             }
+        }
+
+        // VIV-147: a monitor switch, a hot-plug rebuild or the first encoder
+        // start can land on an HDR display, where the platform promotes H.264
+        // to HEVC Main10 on its own.  Nothing above asked for that change, so
+        // catch it here by comparing the live encoder with what the viewers
+        // were told, and tell them.
+        if (platform.actual_codec() != session.codec()) {
+            log::info("HOST", "Live codec is now %s (encoder rebuild) — announcing",
+                      platform.actual_codec() == vivora::VideoCodec::HEVC
+                          ? "HEVC" : "H.264");
+            session.set_codec(platform.actual_codec());
+            session.announce_codec();
         }
 
         // Adaptive framerate gate: skip this iteration's capture if it

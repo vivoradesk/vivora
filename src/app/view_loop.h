@@ -152,6 +152,10 @@ private:
     uint64_t  last_arrived_count_ = 0;
     float     last_arrived_fps_  = 0.0f;
     bool      decoder_ready_     = false;
+    // The codec the live decoder was built for.  When the host announces a
+    // different one mid-session (VIV-147), or a reconnect's HELLO_ACK carries
+    // one, the loop tears the decoder down and lets the lazy init rebuild it.
+    VideoCodec decoder_codec_    = VideoCodec::HEVC;
     // VIV-112 runtime fallback: set once we've asked the host to downgrade the
     // codec after a decoder-init failure, so we try the downgrade at most once
     // and don't loop if H.264 also fails to init.

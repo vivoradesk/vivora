@@ -39,6 +39,7 @@ private:
     std::unique_ptr<QApplication> app_;
     std::unique_ptr<vivora::StreamWindow> window_;
     std::unique_ptr<vivora::IVideoDecoder> decoder_;
+    vivora::VideoCodec                     codec_ = vivora::VideoCodec::HEVC;
     // Threaded pipeline (VIV-84) — created lazily by video_pipeline() when
     // VIVORA_PIPELINE=threaded; the serial decoder_ above stays unused then.
     std::unique_ptr<vivora::WindowsVideoPipeline> pipeline_;

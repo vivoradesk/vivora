@@ -178,6 +178,7 @@ public:
     // It intentionally does NOT touch configured_codec_ — a runtime downgrade
     // must not lower the negotiation ceiling for future clients.
     void set_codec(VideoCodec codec) { codec_ = codec; }
+    VideoCodec codec() const { return codec_; }
 
     // Seed the configured codec PREFERENCE/CEILING (host --codec / GUI setting)
     // once at startup.  choose_codec() is capped at this, never at the live
@@ -350,6 +351,12 @@ public:
     }
     // Broadcast the capturable-display list to all connected clients.
     void send_monitor_list(const std::vector<protocol::MonitorDesc>& monitors);
+    // Tell every connected client which codec the live encoder now produces
+    // (host -> client CodecRenegotiate, VIV-147).  A client only learns the
+    // codec from HELLO_ACK otherwise, so any mid-session change — negotiation
+    // or a monitor switch that promotes H.264 to HEVC — must be announced or
+    // the connected viewers keep feeding the new bitstream to the old decoder.
+    void announce_codec();
 
     // VIV-112 codec negotiation.  consume_codec_change(): true (and reset) if a
     // handshake or runtime renegotiation picked a codec different from the one
@@ -418,6 +425,7 @@ private:
     // tears down instantly and does NOT auto-reconnect (VIV-52).  Sent on the
     // reject and kick paths only; a plain idle timeout stays silent.
     void send_disconnect(ClientInfo& client, protocol::DisconnectReason reason);
+    void send_codec(ClientInfo& client);   // one client's share of announce_codec()
     void send_bw_probe(ClientInfo& client);
 
     ClientInfo* find_client(const net::SocketAddr& addr);

@@ -77,7 +77,8 @@ public:
     // ---- setup (main thread, before threads start) -----------------------
 
     // Lazily create the decoder for the negotiated codec (known only after
-    // the handshake).  Idempotent for the same codec.
+    // the handshake).  Idempotent for the same codec; a different codec
+    // rebuilds the decoder (host switched codec mid-session, VIV-147).
     virtual bool init_decoder(VideoCodec codec) = 0;
 
     // ---- decode thread ---------------------------------------------------

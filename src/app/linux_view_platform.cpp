@@ -77,7 +77,9 @@ bool LinuxViewPlatform::pump_events() {
 }
 
 bool LinuxViewPlatform::init_decoder(vivora::VideoCodec codec) {
-    if (decoder_) return true;
+    if (decoder_ && codec == codec_) return true;
+    decoder_.reset();   // mid-session codec switch (VIV-147): rebuild for the new one
+    codec_ = codec;
     decoder_ = std::make_unique<vivora::client::FfmpegDecoder>();
     if (!decoder_->init(codec)) {
         vivora::log::error("VIEW", "Failed to init FFmpeg decoder");
