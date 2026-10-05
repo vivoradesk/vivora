@@ -1752,6 +1752,15 @@ bool ClientSession::relay_bind_blocking() {
     const auto start = std::chrono::steady_clock::now();
     auto next_send = start;
     uint8_t rxbuf[rly::MAX_DATA_PACKET];
+    // Once the async receive thread runs (VIV-81) it owns the socket: reading
+    // it here as well races that thread, and whenever the thread wins it parks
+    // the BIND_ACK in recv_ring_, where handle_raw drops it as a stray — the
+    // mid-session relay fallback then times out every time.  So read the ring
+    // instead.  Anything else parked during the bind is pre-handshake traffic
+    // on a path we are abandoning, and is dropped.
+    const bool from_ring = recv_running_.load(std::memory_order_acquire) && recv_ring_;
+    std::unique_ptr<RawPacket> ring_pkt;
+    if (from_ring) ring_pkt = std::make_unique<RawPacket>();
     while (true) {
         const auto now = std::chrono::steady_clock::now();
         if (now - start > std::chrono::seconds(3)) break;
@@ -1759,8 +1768,17 @@ bool ClientSession::relay_bind_blocking() {
             socket_->send_to(txbuf, txlen, relay_addr_);
             next_send = now + std::chrono::milliseconds(200);
         }
-        net::SocketAddr sender;
-        const int n = socket_->recv_from(rxbuf, sizeof(rxbuf), sender);
+        int n = 0;
+        if (from_ring) {
+            if (recv_ring_->try_pop(*ring_pkt) && ring_pkt->len > 0
+                && static_cast<size_t>(ring_pkt->len) <= sizeof(rxbuf)) {
+                n = ring_pkt->len;
+                std::memcpy(rxbuf, ring_pkt->data, static_cast<size_t>(n));
+            }
+        } else {
+            net::SocketAddr sender;
+            n = socket_->recv_from(rxbuf, sizeof(rxbuf), sender);
+        }
         if (n > 0 && n >= 4 && rxbuf[0] == 'D' && rxbuf[1] == 'B'
             && rxbuf[2] == 'R' && rxbuf[3] == 'L') {
             rly::MsgType t; size_t poff = 0, plen = 0;
