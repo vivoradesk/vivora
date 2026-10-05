@@ -515,6 +515,10 @@ struct MacVideoViewImpl {
     std::vector<uint8_t> vps, sps, pps;
     bool have_params = false;
     uint64_t frames_submitted = 0;
+    // Last reported AVSampleBufferVideoRenderer state, so the log only speaks
+    // up on a change (decode thread only).
+    int  last_renderer_status = -1;
+    bool last_requires_flush  = false;
     // VIV-95: host_w/host_h are written by BOTH the decode thread (submit_frame
     // adopts the SPS dimensions when the stream size wasn't known yet) and the
     // main thread (set_stream_size from the StreamInfo message), and read on the
@@ -1117,6 +1121,10 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
         if (params_changed && impl->have_params) {
             log::info(TAG, "Parameter sets changed mid-session — rebuilding format description");
             AVSampleBufferVideoRenderer* r = impl->view.videoLayer.sampleBufferRenderer;
+            // Renderer-level flush only.  flushAndRemoveImage would also clear
+            // what is already painted, which is what a stale last frame of the
+            // old display needs — but it is a CALayer mutation and this runs on
+            // the decode thread, so it does not belong here.
             [r flush];  // drop old-geometry frames still queued in the layer
             if (impl->format_desc) {
                 CFRelease(impl->format_desc);
@@ -1174,6 +1182,44 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
             log::info(TAG, "%s format description ready: %dx%d%s",
                       is_hevc ? "HEVC" : "H264", dims.width, dims.height,
                       impl->is_hdr.load() ? " HDR" : "");
+
+            // Let the system present PQ/HLG as HDR instead of squeezing it
+            // into SDR range.  We put on the wire exactly what the host
+            // captured and leave the mapping to the display pipeline — but
+            // AVSampleBufferDisplayLayer only does that mapping once it has
+            // been told the content is allowed to exceed SDR.  Without this a
+            // 10-bit PQ stream renders through the SDR path and comes out
+            // visibly wrong, which is what a host switching onto an HDR
+            // display mid-session looked like on this client (VIV-147).
+            //
+            // Set on every format rebuild, so a switch back to an SDR display
+            // turns it off again.  The parameter sets are parsed on the decode
+            // thread, which is where the rest of this function already drives
+            // the layer; the transaction keeps it an atomic, unanimated change.
+            {
+                AVSampleBufferDisplayLayer* layer = impl->view.videoLayer;
+                const BOOL want = impl->is_hdr.load() ? YES : NO;
+                if ([layer respondsToSelector:
+                        @selector(setWantsExtendedDynamicRangeContent:)]) {
+                    // Layer PROPERTIES are main-thread work.  This function
+                    // runs on the decode thread, so hand the write over rather
+                    // than doing it here — arriving a frame late costs nothing,
+                    // and mutating a CALayer off the main thread is how the
+                    // video stopped appearing at all.  The block retains the
+                    // layer, so it cannot outlive its own target.
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        layer.wantsExtendedDynamicRangeContent = want;
+                    });
+                    log::info(TAG, "Extended dynamic range %s (%s content)",
+                              want ? "on" : "off", want ? "PQ/HLG" : "SDR");
+                } else if (want) {
+                    log::warn(TAG, "HDR stream but this macOS cannot enable EDR on the "
+                                   "video layer — colours will be flat");
+                }
+                log::info(TAG, "layer geometry: bounds %.0fx%.0f, video %dx%d",
+                          layer.bounds.size.width, layer.bounds.size.height,
+                          dims.width, dims.height);
+            }
             // Colour diagnostics (VIV-84): what CoreMedia extracted from the
             // SPS VUI.  The host encodes SDR as FULL-range (AMF
             // OUTPUT_FULL_RANGE_COLOR) — if the range flag doesn't survive to
@@ -1278,6 +1324,38 @@ bool MacVideoView::submit_frame(const uint8_t* data, size_t len, uint64_t pts_us
     if (renderer.status == AVQueuedSampleBufferRenderingStatusFailed) {
         log::warn(TAG, "Renderer in failed state, flushing");
         [renderer flush];
+    }
+    // The submission counter alone cannot tell a live picture from a frozen
+    // one: samples keep being accepted by a layer that has stopped displaying
+    // them.  Report the layer's own view of itself whenever it changes, plus
+    // a heartbeat, so a freeze names its own cause (VIV-147).
+    {
+        AVSampleBufferDisplayLayer* layer = impl->view.videoLayer;
+        const int st = (int)renderer.status;
+        const bool needs_flush =
+            [layer respondsToSelector:@selector(requiresFlushToResumeDecoding)]
+                ? layer.requiresFlushToResumeDecoding : false;
+        const bool ready = renderer.isReadyForMoreMediaData;
+        const bool rising = needs_flush && !impl->last_requires_flush;
+        if (st != impl->last_renderer_status
+            || needs_flush != impl->last_requires_flush
+            || (impl->frames_submitted % 600) == 0) {
+            NSError* err = renderer.error;
+            log::info(TAG, "layer: status=%d requiresFlush=%d readyForMore=%d%s%s",
+                      st, needs_flush ? 1 : 0, ready ? 1 : 0,
+                      err ? " error=" : "",
+                      err ? [[err localizedDescription] UTF8String] : "");
+        }
+        impl->last_renderer_status = st;
+        impl->last_requires_flush  = needs_flush;
+        // requiresFlushToResumeDecoding latches after the decode session is
+        // interrupted (app napped, display reconfigured).  Flush once when it
+        // goes up — never per frame: if the flag stays latched, flushing before
+        // every enqueue means nothing is ever displayed.
+        if (rising) {
+            log::warn(TAG, "Layer requires a flush to resume decoding — flushing once");
+            [renderer flush];
+        }
     }
     [renderer enqueueSampleBuffer:sample];
     CFRelease(sample);
