@@ -262,6 +262,8 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
     // small accumulating drift still eventually crosses the 5% threshold.
     uint32_t last_applied_br = bitrate_ctl.current();
     auto last_stats_send = std::chrono::steady_clock::now();
+    // VIV-147: ~1 Hz display hot-plug / mode-change poll.
+    auto last_display_poll = std::chrono::steady_clock::now();
     auto loss_grace_until = std::chrono::steady_clock::now();
     bool had_clients = false;
     // Phase B+: encoder lifecycle.  We track the previous tick's
@@ -703,6 +705,43 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
         // enumerating the platform, and apply a pending display switch.
         if (session.consume_monitor_list_request()) {
             session.send_monitor_list(advertised_monitors(platform));
+        }
+
+        // VIV-147 display hot-plug.  Nothing asks the host to re-enumerate on
+        // its own, so a monitor plugged in or unplugged mid-session left the
+        // viewer's panel showing the startup list forever — and if the change
+        // resized the display we are capturing, the encoder kept producing
+        // frames at the old geometry.  Poll ~1 Hz (cheap on every platform;
+        // see HostPlatform::poll_display_change) and push the truth out.
+        {
+            auto now_disp = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now_disp - last_display_poll).count() >= 1000) {
+                last_display_poll = now_disp;
+                if (platform.poll_display_change()) {
+                    log::info("HOST", "Display configuration changed — re-advertising monitors");
+                    if (platform.refresh_capture()) {
+                        // The captured display itself resized: everything
+                        // derived from its geometry has to be re-armed, exactly
+                        // as after an explicit monitor switch.
+                        cap_w = platform.capture_width();
+                        cap_h = platform.capture_height();
+                        session.set_screen_resolution(platform.input_width(),
+                                                      platform.input_height());
+                        session.set_screen_origin(platform.input_origin_x(),
+                                                  platform.input_origin_y());
+                        session.send_stream_info(static_cast<uint16_t>(cap_w),
+                                                 static_cast<uint16_t>(cap_h),
+                                                 applied_target_fps);
+                        platform.request_idr();
+                        force_encode = true;
+                        loss_grace_until = std::chrono::steady_clock::now()
+                                         + std::chrono::milliseconds(1500);
+                        log::info("HOST", "Capture geometry now %ux%u", cap_w, cap_h);
+                    }
+                    session.send_monitor_list(advertised_monitors(platform));
+                }
+            }
         }
         // VIV-112 codec negotiation: a client whose decoder can't handle the
         // configured codec (advertised in its HELLO caps, or a runtime decode

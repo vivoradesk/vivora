@@ -76,6 +76,32 @@ std::vector<vivora::protocol::MonitorDesc> LinuxHostPlatform::list_monitors() {
     return out;
 }
 
+bool LinuxHostPlatform::poll_display_change() {
+    // host_loop polls at 1 Hz, but each enumeration is a fresh wl_display
+    // connection plus two round-trips — cheap in absolute terms, still not
+    // something to put on a 60 fps capture loop every second.  Every 5s is
+    // fast enough for a human plugging a cable in.
+    auto now = std::chrono::steady_clock::now();
+    if (last_output_poll_.time_since_epoch().count() != 0
+        && std::chrono::duration_cast<std::chrono::seconds>(
+               now - last_output_poll_).count() < 5)
+        return false;
+    last_output_poll_ = now;
+
+    std::string sig;
+    for (const auto& o : vivora::host::enumerate_wayland_outputs()) {
+        sig += std::to_string(o.x) + ',' + std::to_string(o.y) + ','
+             + std::to_string(o.width) + ',' + std::to_string(o.height) + ','
+             + o.name + ';';
+    }
+    if (sig == last_outputs_) return false;
+    const bool first = last_outputs_.empty();
+    last_outputs_ = std::move(sig);
+    // The very first poll only establishes the baseline — the list the client
+    // already got on connect is current, so don't cry change on it.
+    return !first;
+}
+
 void LinuxHostPlatform::shutdown() {
     // Order matters: flag first so any on_pw_frame already past cap_.stop()
     // bails out before touching encoder state; then capture stop signals

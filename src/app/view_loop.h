@@ -174,6 +174,14 @@ private:
     // session first reaches Connected.
     TimePoint session_start_{};
     bool      session_started_ = false;
+    // Test hook (VIV-147): VIVORA_SELECT_MONITOR=<index>[,<delay_ms>] fires one
+    // SelectMonitor at the host after the stream has settled, so the monitor
+    // switch can be driven from a headless viewer.  -1 = disabled.
+    int       forced_monitor_      = -1;
+    int       forced_monitor_ms_   = 5000;
+    bool      forced_monitor_sent_ = false;
+    // Send the forced switch once the delay has elapsed.  No-op when unset.
+    void maybe_force_monitor(client::ClientSession& session);
 
     // Status-overlay driving (VIV-62): "Connecting…" / "Waiting for host to
     // accept…" before the first frame, and a brief close reason when a

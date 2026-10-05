@@ -6,6 +6,7 @@
 #include "host/capture/dxgi_capture.h"
 #include "common/utils/log.h"
 #include "common/utils/metrics.h"
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -28,6 +29,7 @@ bool DxgiCapture::init(uint32_t monitor_index) {
     monitor_index_ = monitor_index;
     if (!init_d3d11()) return false;
     if (!init_output_duplication(monitor_index)) return false;
+    wanted_name_ = output_name_;   // the display we were asked to capture
 
     log::info(TAG, "Initialized DXGI capture: %ux%u on monitor %u",
               resolution_.width, resolution_.height, monitor_index);
@@ -66,24 +68,105 @@ bool DxgiCapture::init_d3d11() {
     return true;
 }
 
-bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
-    // Get DXGI device -> adapter -> output
-    ComPtr<IDXGIDevice> dxgi_device;
-    HRESULT hr = device_.As(&dxgi_device);
+namespace {
+
+// Cheap, always-fresh signature of the desktop's monitor layout: count plus
+// each monitor's rectangle, straight from user32.  DXGI cannot be used for
+// this — IDXGIFactory1::IsCurrent() reports adapter-set changes and, measured
+// on Windows 11, does NOT flip when a display is merely attached or detached,
+// so a DXGI-only poll noticed a hot-plug tens of seconds late or not at all
+// (VIV-147).  EnumDisplayMonitors sees it immediately and costs microseconds.
+struct MonitorSig {
+    std::string s;
+};
+
+BOOL CALLBACK sig_proc(HMONITOR, HDC, LPRECT rc, LPARAM param) {
+    auto* sig = reinterpret_cast<MonitorSig*>(param);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%ld,%ld,%ld,%ld;",
+                  rc->left, rc->top, rc->right, rc->bottom);
+    sig->s += buf;
+    return TRUE;
+}
+
+std::string desktop_layout_signature() {
+    MonitorSig sig;
+    EnumDisplayMonitors(nullptr, nullptr, sig_proc, reinterpret_cast<LPARAM>(&sig));
+    return std::move(sig.s);
+}
+
+} // namespace
+
+bool DxgiCapture::ensure_factory() {
+    // A DXGI factory is a snapshot of the display topology: outputs attached
+    // or detached after it was created are invisible to it, and the adapters
+    // it hands out keep serving the stale list.  The only cure is a fresh
+    // factory (VIV-147).
+    //
+    // IsCurrent() is DXGI's own "your snapshot expired" flag, but measured on
+    // Windows 11 it does NOT flip when a display is merely attached or
+    // detached — a DXGI-only poll saw a hot-plug tens of seconds late, or
+    // never.  So the desktop layout is what we actually watch, and DXGI is
+    // made to catch up whenever it moves.
+    std::string layout = desktop_layout_signature();
+    const bool moved = !layout_sig_.empty() && layout != layout_sig_;
+    layout_sig_ = std::move(layout);
+
+    if (!moved && factory_ && factory_->IsCurrent() && adapter_) return true;
+
+    if (adapter_luid_.LowPart == 0 && adapter_luid_.HighPart == 0) {
+        // First call — learn which adapter our D3D11 device lives on.  The
+        // LUID is stable across factory re-creation; the adapter *object* is
+        // not, which is exactly why we re-resolve instead of caching it.
+        ComPtr<IDXGIDevice> dxgi_device;
+        if (FAILED(device_.As(&dxgi_device))) {
+            log::error(TAG, "ensure_factory: no IDXGIDevice");
+            return false;
+        }
+        ComPtr<IDXGIAdapter> dev_adapter;
+        if (FAILED(dxgi_device->GetAdapter(dev_adapter.GetAddressOf()))) {
+            log::error(TAG, "ensure_factory: GetAdapter failed");
+            return false;
+        }
+        DXGI_ADAPTER_DESC ad;
+        if (FAILED(dev_adapter->GetDesc(&ad))) {
+            log::error(TAG, "ensure_factory: adapter GetDesc failed");
+            return false;
+        }
+        adapter_luid_ = ad.AdapterLuid;
+    }
+
+    factory_.Reset();
+    adapter_.Reset();
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1),
+                                    reinterpret_cast<void**>(factory_.GetAddressOf()));
     if (FAILED(hr)) {
-        log::error(TAG, "Failed to get IDXGIDevice: 0x%08X", hr);
+        log::error(TAG, "CreateDXGIFactory1 failed: 0x%08X", hr);
         return false;
     }
 
-    ComPtr<IDXGIAdapter> adapter;
-    hr = dxgi_device->GetAdapter(adapter.GetAddressOf());
-    if (FAILED(hr)) {
-        log::error(TAG, "Failed to get adapter: 0x%08X", hr);
-        return false;
+    ComPtr<IDXGIAdapter1> a;
+    for (UINT i = 0; factory_->EnumAdapters1(i, a.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC1 ad;
+        if (SUCCEEDED(a->GetDesc1(&ad))
+            && ad.AdapterLuid.LowPart == adapter_luid_.LowPart
+            && ad.AdapterLuid.HighPart == adapter_luid_.HighPart) {
+            adapter_ = a;
+            return true;
+        }
+        a.Reset();
     }
+    log::error(TAG, "ensure_factory: our adapter is gone from the refreshed factory");
+    return false;
+}
+
+bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
+    if (!ensure_factory()) return false;
+
+    probe_next_frame_ = true;
 
     ComPtr<IDXGIOutput> output;
-    hr = adapter->EnumOutputs(monitor_index, output.GetAddressOf());
+    HRESULT hr = adapter_->EnumOutputs(monitor_index, output.GetAddressOf());
     if (FAILED(hr)) {
         log::error(TAG, "Failed to enumerate output %u: 0x%08X", monitor_index, hr);
         return false;
@@ -95,14 +178,19 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
     // offset must be added to the normalized client coordinates.
     DXGI_OUTPUT_DESC desc;
     output->GetDesc(&desc);
-    resolution_.width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
-    resolution_.height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+    note_resolution(desc.DesktopCoordinates.right - desc.DesktopCoordinates.left,
+                    desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top);
     origin_x_ = desc.DesktopCoordinates.left;
     origin_y_ = desc.DesktopCoordinates.top;
+    output_name_ = desc.DeviceName;
+    output_rect_ = desc.DesktopCoordinates;
 
     // Try IDXGIOutput5::DuplicateOutput1 for FP16 HDR capture
     hr = output.As(&output5_);
     if (SUCCEEDED(hr)) {
+        // Ask for the display's own depth and send that on: we never make DXGI
+        // convert for us.  The encoder is built for whatever comes back (see
+        // the first-frame probe below and codec_for_capture on the host side).
         DXGI_FORMAT formats[] = {
             DXGI_FORMAT_R16G16B16A16_FLOAT,  // HDR preferred
             DXGI_FORMAT_B8G8R8A8_UNORM,      // SDR fallback
@@ -114,7 +202,13 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
             DXGI_OUTDUPL_DESC dup_desc;
             duplication_->GetDesc(&dup_desc);
             capture_format_ = dup_desc.ModeDesc.Format;
-            log::info(TAG, "DuplicateOutput1: format=%u (%s)", capture_format_,
+            adopt_duplication_geometry(dup_desc);
+            // ModeDesc is the DISPLAY MODE, not necessarily what duplication
+            // hands us — on an HDR display it says FP16 even when DXGI is
+            // converting to BGRA for us.  The first frame settles it; say so
+            // here rather than logging a format we may be about to correct.
+            log::info(TAG, "DuplicateOutput1: display mode format=%u (%s) — "
+                      "confirming against the first frame", capture_format_,
                       capture_format_ == DXGI_FORMAT_R16G16B16A16_FLOAT ? "FP16 HDR" : "BGRA SDR");
         } else {
             log::warn(TAG, "DuplicateOutput1 failed: 0x%08X, falling back", hr);
@@ -138,10 +232,155 @@ bool DxgiCapture::init_output_duplication(uint32_t monitor_index) {
             return false;
         }
         capture_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
+        DXGI_OUTDUPL_DESC dup_desc;
+        duplication_->GetDesc(&dup_desc);
+        adopt_duplication_geometry(dup_desc);
         log::info(TAG, "DuplicateOutput fallback: BGRA SDR");
     }
 
     return true;
+}
+
+void DxgiCapture::note_resolution(uint32_t w, uint32_t h) {
+    // Single place that writes resolution_, so nothing can move the capture
+    // geometry without the encoder being told to rebuild for it.  The latch
+    // must happen here rather than at the end of a successful duplication:
+    // during a display reconfiguration DuplicateOutput returns E_ACCESSDENIED
+    // for a second or two, and an early return there used to leave the new
+    // resolution recorded but the encoder still built for the old one — the
+    // host then streamed the new display through a stale encoder (VIV-147).
+    if (w == 0 || h == 0) return;
+    if (w == resolution_.width && h == resolution_.height) return;
+    if (resolution_.width != 0 && resolution_.height != 0) {
+        log::info(TAG, "Capture geometry changed %ux%u -> %ux%u",
+                  resolution_.width, resolution_.height, w, h);
+        geometry_dirty_ = true;
+    }
+    resolution_.width  = w;
+    resolution_.height = h;
+}
+
+void DxgiCapture::adopt_duplication_geometry(const DXGI_OUTDUPL_DESC& dup_desc) {
+    // DXGI_OUTPUT_DESC::DesktopCoordinates is what the *desktop* thinks the
+    // display spans; DXGI_OUTDUPL_DESC::ModeDesc is the size of the texture
+    // duplication actually hands us.  They disagree after a mode change the
+    // factory hasn't caught up with, and it is the texture size the encoder
+    // must be built for — a mismatch is the diagonally-sheared picture.
+    // Rotated displays are the exception: there ModeDesc is the unrotated
+    // mode, so the desktop rectangle is the honest one.
+    if (dup_desc.Rotation != DXGI_MODE_ROTATION_IDENTITY
+        && dup_desc.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED) {
+        log::warn(TAG, "Captured display is rotated (%u) — using desktop rect %ux%u",
+                  (unsigned)dup_desc.Rotation, resolution_.width, resolution_.height);
+        return;
+    }
+    if (dup_desc.ModeDesc.Width == 0 || dup_desc.ModeDesc.Height == 0) return;
+    if (dup_desc.ModeDesc.Width != resolution_.width
+        || dup_desc.ModeDesc.Height != resolution_.height) {
+        log::warn(TAG, "Desktop rect says %ux%u but duplication is %ux%u — trusting duplication",
+                  resolution_.width, resolution_.height,
+                  dup_desc.ModeDesc.Width, dup_desc.ModeDesc.Height);
+        note_resolution(dup_desc.ModeDesc.Width, dup_desc.ModeDesc.Height);
+    }
+}
+
+bool DxgiCapture::poll_display_change() {
+    // Own signature, independent of the one ensure_factory() keeps: a client
+    // asking for the monitor list also refreshes the factory, and if that
+    // consumed the change we would never push the new list to the clients that
+    // did NOT ask.
+    std::string layout = desktop_layout_signature();
+    const bool layout_moved = !poll_sig_.empty() && layout != poll_sig_;
+    poll_sig_ = std::move(layout);
+
+    if (!ensure_factory()) return layout_moved || geometry_dirty_;
+
+    // Re-find the display we are capturing.  A monitor added or removed
+    // renumbers EnumOutputs, so trust the GDI device name over the index.
+    ComPtr<IDXGIOutput> output;
+    uint32_t found_index = monitor_index_;
+    bool found = false;
+    if (!output_name_.empty()) {
+        ComPtr<IDXGIOutput> o;
+        for (UINT i = 0; adapter_->EnumOutputs(i, o.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_OUTPUT_DESC d;
+            if (SUCCEEDED(o->GetDesc(&d)) && output_name_ == d.DeviceName) {
+                output = o;
+                found_index = i;
+                found = true;
+                break;
+            }
+            o.Reset();
+        }
+    }
+    // If we are on a fallback display because the chosen one was unplugged,
+    // go back to the chosen one the moment it reappears — otherwise the user
+    // has to re-pick it by hand after every cable wiggle.
+    if (found && !wanted_name_.empty() && wanted_name_ != output_name_) {
+        ComPtr<IDXGIOutput> o;
+        for (UINT i = 0; adapter_->EnumOutputs(i, o.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_OUTPUT_DESC d;
+            if (SUCCEEDED(o->GetDesc(&d)) && wanted_name_ == d.DeviceName) {
+                log::info(TAG, "Chosen display is back — returning to output %u", i);
+                output = o;
+                found_index = i;
+                break;
+            }
+            o.Reset();
+        }
+    }
+    if (!found) {
+        // Our display is gone (unplugged) — fall back to the first output the
+        // refreshed adapter offers so the session keeps streaming something.
+        // wanted_name_ is deliberately left pointing at the chosen display so
+        // the block above can return to it.
+        if (FAILED(adapter_->EnumOutputs(0, output.GetAddressOf()))) {
+            log::error(TAG, "poll_display_change: no outputs left");
+            return layout_moved || geometry_dirty_;
+        }
+        found_index = 0;
+        log::warn(TAG, "Captured display disappeared — falling back to output 0");
+    }
+
+    DXGI_OUTPUT_DESC desc;
+    if (FAILED(output->GetDesc(&desc))) return layout_moved || geometry_dirty_;
+
+    const bool moved = !found
+        || found_index != monitor_index_
+        || desc.DesktopCoordinates.left   != output_rect_.left
+        || desc.DesktopCoordinates.top    != output_rect_.top
+        || desc.DesktopCoordinates.right  != output_rect_.right
+        || desc.DesktopCoordinates.bottom != output_rect_.bottom;
+
+    if (moved) {
+        log::info(TAG, "Display configuration changed: capture output %u -> %u, %dx%d",
+                  monitor_index_, found_index,
+                  desc.DesktopCoordinates.right - desc.DesktopCoordinates.left,
+                  desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top);
+        monitor_index_ = found_index;
+        // Drop the duplication so it is re-created against the new geometry;
+        // init_output_duplication() refreshes resolution_/origin_ with it.
+        if (frame_acquired_ && duplication_) {
+            duplication_->ReleaseFrame();
+            frame_acquired_ = false;
+        }
+        duplication_.Reset();
+        output5_.Reset();
+        if (!init_output_duplication(monitor_index_)) {
+            // Next capture_frame() retries; report the change either way so
+            // the caller re-advertises the (now different) monitor list.
+            log::warn(TAG, "Re-duplication after display change failed — retrying on next tick");
+        }
+        // init_output_duplication() latched geometry_dirty_ if the size moved.
+    }
+
+    return layout_moved || moved || geometry_dirty_;
+}
+
+bool DxgiCapture::take_geometry_change() {
+    const bool v = geometry_dirty_;
+    geometry_dirty_ = false;
+    return v;
 }
 
 bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
@@ -150,6 +389,17 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
     // init_output_duplication logs on success, so we stay quiet here on the
     // failure path — next tick will retry.
     if (!duplication_) {
+        // Back off between attempts.  While the desktop is being reconfigured
+        // (monitor plugged, mode changed, secure desktop) DuplicateOutput
+        // returns E_ACCESSDENIED for a second or two, and retrying at the full
+        // capture rate floods the log and starves the loop that still has to
+        // send heartbeats — long enough for the client to time us out.
+        auto now = Clock::now();
+        if (last_dup_attempt_.time_since_epoch().count() != 0
+            && std::chrono::duration_cast<std::chrono::milliseconds>(
+                   now - last_dup_attempt_).count() < DUP_RETRY_MS)
+            return false;
+        last_dup_attempt_ = now;
         if (!init_output_duplication(monitor_index_)) return false;
     }
 
@@ -194,6 +444,30 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
         duplication_->ReleaseFrame();
         frame_acquired_ = false;
         return false;
+    }
+
+    // First frame off a fresh duplication: believe the texture, not the
+    // description.  DXGI_OUTDUPL_DESC::ModeDesc describes the DISPLAY MODE —
+    // on an HDR display it reads FP16 even when DuplicateOutput1 was asked
+    // for BGRA and is dutifully converting for us.  The encoder is configured
+    // from capture_format_, and feeding NVENC/AMF the wrong input format is a
+    // whole-frame corruption, so reconcile here and let the platform rebuild
+    // (VIV-147).  Same for the dimensions, which cost nothing to re-check.
+    if (probe_next_frame_) {
+        probe_next_frame_ = false;
+        D3D11_TEXTURE2D_DESC td = {};
+        texture->GetDesc(&td);
+        if (td.Format != capture_format_) {
+            log::warn(TAG, "Duplication described format %u but delivers %u — trusting the texture",
+                      (unsigned)capture_format_, (unsigned)td.Format);
+            capture_format_ = td.Format;
+            geometry_dirty_ = true;
+        }
+        if (td.Width != resolution_.width || td.Height != resolution_.height) {
+            log::warn(TAG, "Duplication described %ux%u but delivers %ux%u — trusting the texture",
+                      resolution_.width, resolution_.height, td.Width, td.Height);
+            note_resolution(td.Width, td.Height);
+        }
     }
 
     // ComPtr operator= AddRef's texture — safe to outlive the local
@@ -379,14 +653,12 @@ void DxgiCapture::release_frame(CapturedFrame& frame) {
 std::vector<MonitorInfo> DxgiCapture::enumerate_monitors() {
     std::vector<MonitorInfo> monitors;
 
-    ComPtr<IDXGIDevice> dxgi_device;
-    if (FAILED(device_.As(&dxgi_device))) return monitors;
-
-    ComPtr<IDXGIAdapter> adapter;
-    if (FAILED(dxgi_device->GetAdapter(adapter.GetAddressOf()))) return monitors;
+    // Through the refreshed factory, so a display plugged in after startup is
+    // actually listed (the device's own adapter never sees it — VIV-147).
+    if (!ensure_factory()) return monitors;
 
     ComPtr<IDXGIOutput> output;
-    for (UINT i = 0; adapter->EnumOutputs(i, output.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
+    for (UINT i = 0; adapter_->EnumOutputs(i, output.GetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
         DXGI_OUTPUT_DESC desc;
         output->GetDesc(&desc);
 
@@ -402,7 +674,11 @@ std::vector<MonitorInfo> DxgiCapture::enumerate_monitors() {
         info.bounds.height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
         info.resolution.width = info.bounds.width;
         info.resolution.height = info.bounds.height;
-        info.primary = (i == 0);
+        // The primary display is the one anchored at the virtual-desktop
+        // origin — not necessarily EnumOutputs index 0, and definitely not
+        // after a hot-plug renumbers the outputs.
+        info.primary = (desc.DesktopCoordinates.left == 0
+                     && desc.DesktopCoordinates.top == 0);
 
         monitors.push_back(std::move(info));
         output.Reset();
@@ -423,13 +699,25 @@ bool DxgiCapture::switch_monitor(uint32_t monitor_index) {
     }
     duplication_.Reset();
     output5_.Reset();
+    const uint32_t prev_index = monitor_index_;
     monitor_index_ = monitor_index;
     if (!init_output_duplication(monitor_index)) {
         log::error(TAG, "switch_monitor: failed to duplicate output %u", monitor_index);
+        // Put the index back before returning: capture_frame() re-duplicates
+        // monitor_index_ on the next tick, and leaving it on the display that
+        // just refused would freeze the stream for good rather than keeping
+        // the old one alive as the caller expects.
+        monitor_index_ = prev_index;
+        init_output_duplication(prev_index);
+        geometry_dirty_ = false;
         return false;
     }
+    wanted_name_ = output_name_;   // the user's new choice
     log::info(TAG, "Switched capture to monitor %u: %ux%u",
               monitor_index, resolution_.width, resolution_.height);
+    // The caller rebuilds the encoder for this switch itself — don't leave the
+    // flag set or the next hot-plug poll would rebuild it a second time.
+    geometry_dirty_ = false;
     return true;
 }
 

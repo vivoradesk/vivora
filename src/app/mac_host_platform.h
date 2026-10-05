@@ -55,6 +55,13 @@ public:
     bool select_monitor(uint32_t index, bool seed_cursor) override;
     bool supports_monitor_switch() const override { return true; }
 
+    // VIV-147 display hot-plug.  CoreGraphics tells us when the display
+    // configuration settles (CGDisplayRegisterReconfigurationCallback), so the
+    // poll is just an atomic flag read — no SCShareableContent round-trip on
+    // the capture loop.
+    bool poll_display_change() override;
+    bool refresh_capture() override;
+
     // Phase B+ lazy encoder (VIV-12).  start_encoder() (re)creates the
     // VideoToolbox session from the live capture geometry + remembered
     // bitrate when the first viewer attaches; stop_encoder() invalidates
@@ -120,6 +127,12 @@ private:
     // the requested stream fps (the only capture-side config that varies).
     bool adopt_keepalive_capture(uint32_t display_index);
     void stow_keepalive_capture();
+
+    // VIV-147.  Registered once by init(); the CoreGraphics callback sets the
+    // flag from an arbitrary thread and poll_display_change() clears it on the
+    // host_loop thread, hence the atomic.
+    void install_display_reconfigure_hook();
+    bool display_hook_installed_ = false;
 
     // Cursor tracking state.
     uint64_t  last_shape_hash_ = 0;

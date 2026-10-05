@@ -72,7 +72,7 @@ void HostWorker::runOnWorkerThread() {
 #ifdef VIVORA_WINDOWS
     auto* p = new WindowsHostPlatform();
     if (!p->init(cfg_.manual_bitrate_bps, cfg_.encoder_kind, cfg_.codec,
-                 cfg_.host_fps)) {
+                 cfg_.host_fps, cfg_.display_index)) {
         delete p;
         emit initFailed("Windows host platform init failed (DXGI/encoder unavailable)");
         return;

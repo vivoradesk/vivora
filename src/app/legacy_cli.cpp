@@ -163,7 +163,8 @@ int run_legacy_cli(int argc, char** argv) {
             return 1;
         }
         WindowsHostPlatform platform;
-        if (!platform.init(manual_bitrate_bps, encoder_kind, codec)) return 1;
+        if (!platform.init(manual_bitrate_bps, encoder_kind, codec,
+                           /*stream_fps=*/60, display_index)) return 1;
 #endif
 #ifdef VIVORA_MACOS
         MacHostPlatform platform;

@@ -9,6 +9,7 @@
 #include <d3d11.h>
 #include <dxgi1_5.h>
 #include <wrl/client.h>
+#include <string>
 
 namespace vivora {
 
@@ -45,6 +46,28 @@ public:
     bool switch_monitor(uint32_t monitor_index);
     uint32_t current_monitor_index() const { return monitor_index_; }
 
+    // Display hot-plug / mode change (VIV-147).  DXGI output enumeration is
+    // frozen at the factory that created the device: a monitor attached or
+    // detached after startup never shows up in EnumOutputs, and a mode change
+    // leaves DXGI_OUTPUT_DESC reporting the OLD desktop rectangle.  Polling
+    // this (cheap: IDXGIFactory1::IsCurrent plus one output desc read) both
+    // refreshes our factory/adapter so enumerate_monitors() sees the new
+    // topology, and reports whether anything actually moved.
+    //
+    // Returns true once per detected change.  When the *captured* display's
+    // geometry changed, the duplication is dropped as well so the next
+    // capture_frame() re-creates it at the new size — the caller must rebuild
+    // its encoder (get_resolution() has already been updated).
+    bool poll_display_change();
+
+    // True (once) when the captured display's own geometry changed since the
+    // last call — as opposed to some other display merely coming or going.
+    // Set by ANY re-duplication that lands on a different size, including the
+    // silent one capture_frame() runs after DXGI_ERROR_ACCESS_LOST, so a mode
+    // change between two polls is not lost.  The caller must rebuild its
+    // encoder when this returns true.
+    bool take_geometry_change();
+
     // Desktop origin of the captured display (top-left corner in virtual
     // desktop coordinates).  (0,0) for the primary; non-primary displays
     // sit at an offset that input injection must add (VIV-50).
@@ -69,8 +92,24 @@ private:
     bool init_output_duplication(uint32_t monitor_index);
     void update_cursor_shape(UINT buffer_size);
 
+    // Re-create the DXGI factory when it has gone stale (IsCurrent() == false)
+    // and re-resolve our device's adapter inside it by LUID.  Every output
+    // enumeration goes through here, so hot-plugged displays become visible
+    // without restarting the host.  Returns false if the adapter is gone.
+    bool ensure_factory();
+
+    // Reconcile resolution_ with the size duplication actually produces.
+    void adopt_duplication_geometry(const DXGI_OUTDUPL_DESC& dup_desc);
+
+    // The only writer of resolution_: records the new size and latches
+    // geometry_dirty_ so the encoder gets rebuilt for it.
+    void note_resolution(uint32_t w, uint32_t h);
+
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
+    ComPtr<IDXGIFactory1> factory_;
+    ComPtr<IDXGIAdapter1> adapter_;
+    LUID adapter_luid_ = {};
     ComPtr<IDXGIOutputDuplication> duplication_;
     ComPtr<IDXGIOutput5> output5_;
     DXGI_FORMAT capture_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -84,6 +123,32 @@ private:
     // after a DXGI_ERROR_ACCESS_LOST (exclusive-fullscreen enter/exit, UAC
     // prompt, secure-desktop switch, display-mode change, etc.).
     uint32_t monitor_index_ = 0;
+    // Captured output's GDI device name (\\.\DISPLAY2).  EnumOutputs indices
+    // shift when a display is added or removed, so after a topology change we
+    // re-find "our" display by name instead of trusting the stale index.
+    std::wstring output_name_;
+    // The display the session actually asked for (startup --display / a client
+    // SelectMonitor).  Differs from output_name_ only while we are on a
+    // fallback display because the chosen one was unplugged; poll_display_
+    // change() returns to it as soon as it comes back.
+    std::wstring wanted_name_;
+    // Desktop rectangle of the captured output as of the last duplication —
+    // poll_display_change() compares against it to notice a mode change.
+    RECT output_rect_ = {};
+    // Sticky "resolution_ moved since the caller last looked" flag; see
+    // take_geometry_change().
+    bool geometry_dirty_ = false;
+    // Desktop layout signatures.  layout_sig_ drives factory re-creation
+    // (ensure_factory); poll_sig_ is poll_display_change's own copy so the two
+    // callers never consume each other's change.
+    std::string layout_sig_;
+    std::string poll_sig_;
+    // Throttle for re-duplication attempts while the desktop is mid-change.
+    TimePoint last_dup_attempt_{};
+    static constexpr int64_t DUP_RETRY_MS = 100;
+    // Set by every (re)duplication: read the real format/size off the first
+    // texture DXGI delivers, because ModeDesc can disagree with it.
+    bool probe_next_frame_ = true;
 
     // Cursor shape state. DXGI only hands us pointer pixels on change,
     // so we cache the latest shape and hand it to the sender on demand.

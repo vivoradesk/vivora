@@ -11,11 +11,13 @@
 #include "host/encode/video_encoder.h"  // EncoderKind
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 
 class LinuxHostPlatform : public vivora::HostPlatform {
 public:
@@ -62,6 +64,15 @@ public:
     // the only way to change the source and is tracked as a follow-up.
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
 
+    // VIV-147 display hot-plug.  There is no cheap notification here: the only
+    // enumeration we have opens its own wl_display and round-trips it twice,
+    // which is far too heavy for the capture loop at 1 Hz.  So this throttles
+    // itself down to one enumeration every few seconds and compares the
+    // result.  refresh_capture() is deliberately NOT overridden — the portal
+    // owns the capture source, and PipeWire renegotiates the stream format on
+    // its own when the picked output changes mode.
+    bool poll_display_change() override;
+
     // PipeWire is event-driven — capture happens on its own thread and
     // encoded packets land in queued_pkts_.  capture_and_encode() returns
     // true if any new packets accumulated since the last call (so the
@@ -103,6 +114,12 @@ private:
     // first-frame latch); cap_w_/cap_h_ publication to the host_loop
     // thread is ordered by the first_frame_mu_/cv handshake in init().
     uint32_t cap_w_ = 0, cap_h_ = 0;
+
+    // VIV-147 hot-plug polling state.  `last_output_poll_` throttles the
+    // wl_output round-trip; `last_outputs_` is the signature (count + each
+    // output's position/size/name) we compare a fresh enumeration against.
+    std::chrono::steady_clock::time_point last_output_poll_{};
+    std::string last_outputs_;
     bool     geometry_seen_ = false;
     // Latest requested bitrate — cached even while the encoder is torn
     // down so a stop/start cycle resumes at the adaptive controller's

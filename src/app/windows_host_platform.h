@@ -23,7 +23,11 @@ public:
     bool init(uint32_t manual_bitrate_bps,
               vivora::EncoderKind kind,
               vivora::VideoCodec codec,
-              uint16_t stream_fps = 60);
+              uint16_t stream_fps = 60,
+              // Display to capture at startup.  --display N was documented but
+              // never reached DXGI on Windows: capture always came up on
+              // output 0 and the flag silently did nothing (VIV-147).
+              uint32_t display_index = 0);
 
     uint32_t capture_width()  const override;
     uint32_t capture_height() const override;
@@ -36,6 +40,8 @@ public:
     std::vector<vivora::protocol::MonitorDesc> list_monitors() override;
     bool select_monitor(uint32_t index, bool seed_cursor = true) override;
     bool supports_monitor_switch() const override { return true; }
+    bool poll_display_change() override;
+    bool refresh_capture() override;
     int32_t input_origin_x() const override;
     int32_t input_origin_y() const override;
 
@@ -57,6 +63,22 @@ public:
     void stop_encoder() override;
 
 private:
+    // Recompute the auto bitrate for the current capture resolution.  No-op
+    // when --bitrate pinned one.
+    void rederive_bitrate();
+
+    // The codec that can actually carry the current capture surface: `want`,
+    // unless it is 8-bit H.264 and DXGI is handing us FP16.
+    vivora::VideoCodec codec_for_capture(vivora::VideoCodec want) const;
+
+    // Tear down + rebuild the encoder for the capture's current geometry and
+    // pixel format, and latch geometry_changed_ for host_loop.
+    void rebuild_for_geometry();
+    // Set when the capture geometry/format moved and the encoder was rebuilt;
+    // consumed by refresh_capture() so host_loop re-sends StreamInfo, re-arms
+    // input mapping and forces a keyframe.
+    bool geometry_changed_ = false;
+
     // Capture-only wall time of the last frame; see HostPlatform.
     double last_capture_ms_ = 0.0;
 
@@ -74,6 +96,10 @@ private:
     vivora::VideoCodec  saved_codec_ = vivora::VideoCodec::HEVC;
     uint32_t              live_bitrate_bps_ = 0;
     uint16_t              saved_fps_        = 60;   // VIV-67 framerate cap
+    // Whether --bitrate pinned the rate.  When it didn't, a resolution change
+    // (monitor switch / mode change) re-derives the auto default for the new
+    // size instead of carrying the old display's budget over.
+    bool                  manual_bitrate_   = false;
 
     // Owned mirror of the most recently captured DXGI texture, fed to the
     // encoder by re_encode_last() when the screen is static and capture

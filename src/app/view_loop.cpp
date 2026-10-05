@@ -102,6 +102,19 @@ static bool ftrace() {
     return on;
 }
 
+void ViewLoopState::maybe_force_monitor(client::ClientSession& session) {
+    if (forced_monitor_ < 0 || forced_monitor_sent_) return;
+    if (session.state() != client::SessionState::Connected) return;
+    if (frames_decoded_ == 0) return;   // wait for a real stream first
+    auto since = std::chrono::duration_cast<std::chrono::milliseconds>(
+        Clock::now() - session_start_).count();
+    if (since < forced_monitor_ms_) return;
+    forced_monitor_sent_ = true;
+    log::info("VIEW", "VIVORA_SELECT_MONITOR: switching host to display %d",
+              forced_monitor_);
+    session.select_monitor(static_cast<uint8_t>(forced_monitor_));
+}
+
 int ViewLoopState::min_idr_interval_ms() {
     // Read once.  Lower = faster recovery retries under loss (shorter freezes)
     // at the cost of more IDRs on the wire; clamp to a sane range (VIV-82).
@@ -290,6 +303,7 @@ bool ViewLoopState::iter_threaded() {
         // on Windows).  The panel still re-requests on open for freshness.
         session.request_monitor_list();
     }
+    maybe_force_monitor(session);
 
     // Status overlay before the first frame (VIV-62).
     if (frames_decoded_ == 0) {
@@ -506,10 +520,14 @@ bool ViewLoopState::iter_threaded() {
             decode_sum_ms_ = decode_max_ms_ = 0.0; decode_count_ = 0;
             render_sum_ms_ = render_max_ms_ = 0.0; render_count_ = 0;
         }
-        log::info("VIEW", "Decoded: %llu, FPS: %.1f, RTT: %.1fms, bitrate: %u kbps, "
+        // "arrived" is frames the NETWORK layer finished assembling.  Without
+        // it a stalled picture is ambiguous — decoder wedged, or nothing
+        // reaching the decoder at all — and that is the first question every
+        // freeze report asks.
+        log::info("VIEW", "Decoded: %llu, FPS: %.1f (arrived %.1f), RTT: %.1fms, bitrate: %u kbps, "
                   "decode: %.2f/%.2f ms, render: %.2f/%.2f ms (avg/max) (threaded)",
-                  (unsigned long long)frames_decoded_, inst_fps, session.rtt_ms(),
-                  session.last_bitrate_bps() / 1000,
+                  (unsigned long long)frames_decoded_, inst_fps, last_arrived_fps_,
+                  session.rtt_ms(), session.last_bitrate_bps() / 1000,
                   dec_avg, dec_max, ren_avg, ren_max);
 
         StatsView v{};
@@ -563,6 +581,19 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
     // Poll → FEC recover → NACK → decode → render all runs on this loop;
     // preemption here shows up directly as render jitter.
     utils::boost_current_thread_priority();
+
+    // Test hook (VIV-147): drive a monitor switch from a headless viewer, so
+    // the host-side switch path can be exercised without a human clicking the
+    // in-stream panel.  "index" or "index,delay_ms".
+    if (const char* env = std::getenv("VIVORA_SELECT_MONITOR")) {
+        forced_monitor_ = std::atoi(env);
+        if (const char* comma = std::strchr(env, ',')) {
+            int ms = std::atoi(comma + 1);
+            if (ms > 0) forced_monitor_ms_ = ms;
+        }
+        log::info("VIEW", "VIVORA_SELECT_MONITOR=%d (after %d ms)",
+                  forced_monitor_, forced_monitor_ms_);
+    }
 
     // The host's static pubkey is mandatory — Noise_NK won't run without it.
     // --host-key is optional when connecting via a rendezvous --peer, in
@@ -867,6 +898,7 @@ bool ViewLoopState::iter() {
         // see the identical call in iter_threaded().
         session.request_monitor_list();
     }
+    maybe_force_monitor(session);
 
     // Status overlay (VIV-62): before the first frame, tell the user what's
     // happening instead of a blank window.  Cleared once frames flow.

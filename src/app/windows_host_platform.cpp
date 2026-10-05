@@ -14,32 +14,31 @@
 bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
                                vivora::EncoderKind kind,
                                vivora::VideoCodec codec,
-                               uint16_t stream_fps) {
+                               uint16_t stream_fps,
+                               uint32_t display_index) {
     capture_ = vivora::IScreenCapture::create();
     dxgi_ = dynamic_cast<vivora::DxgiCapture*>(capture_.get());
-    if (!capture_ || !capture_->init(0)) {
-        vivora::log::error("HOST", "Failed to init capture");
+    if (!capture_) {
+        vivora::log::error("HOST", "Failed to create capture");
         return false;
+    }
+    if (!capture_->init(display_index)) {
+        if (display_index != 0) {
+            vivora::log::warn("HOST", "Display %u could not be captured — falling back to 0",
+                              display_index);
+            if (!capture_->init(0)) {
+                vivora::log::error("HOST", "Failed to init capture");
+                return false;
+            }
+        } else {
+            vivora::log::error("HOST", "Failed to init capture");
+            return false;
+        }
     }
     auto res = capture_->get_resolution();
     vivora::log::info("HOST", "Capture: %ux%u", res.width, res.height);
 
-    // HDR carriage: H.264 is 8-bit only, but DXGI hands us FP16 surfaces
-    // when the source display is HDR.  AMF "falls back" to 8-bit by
-    // CopyResource'ing FP16 bytes into a BGRA surface — which just
-    // bit-reinterprets the FP16 channel pairs as BGRA pixels and
-    // produces green garbage on the wire.  Promote to HEVC Main10
-    // whenever capture is FP16 so HDR survives end-to-end; the client
-    // already negotiates the host's actual codec via the handshake, so
-    // it picks HEVC automatically.
-    auto effective_codec = codec;
-    if (effective_codec == vivora::VideoCodec::H264
-        && dxgi_ && dxgi_->get_capture_format() == DXGI_FORMAT_R16G16B16A16_FLOAT) {
-        vivora::log::warn("HOST",
-            "HDR capture (FP16) detected — promoting requested H.264 to "
-            "HEVC Main10 so 10-bit colour survives the encode");
-        effective_codec = vivora::VideoCodec::HEVC;
-    }
+    const auto effective_codec = codec_for_capture(codec);
 
     // Save the encoder config — start_encoder() rebuilds the encoder
     // from these whenever a viewer attaches.  Bitrate auto-derives from
@@ -47,6 +46,7 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     saved_kind_      = kind;
     saved_codec_     = effective_codec;
     saved_fps_       = stream_fps > 0 ? stream_fps : 60;   // VIV-67
+    manual_bitrate_  = manual_bitrate_bps != 0;
     live_bitrate_bps_ = manual_bitrate_bps != 0
         ? manual_bitrate_bps
         : vivora::codec::default_bitrate_for(res.width, res.height, saved_fps_);
@@ -63,8 +63,35 @@ bool WindowsHostPlatform::init(uint32_t manual_bitrate_bps,
     return true;
 }
 
+vivora::VideoCodec WindowsHostPlatform::codec_for_capture(vivora::VideoCodec want) const {
+    // Whatever DXGI hands us is what goes on the wire — we do not ask it to
+    // convert.  But H.264 is 8-bit only, and on an HDR display the surface is
+    // FP16: AMF "falls back" to 8 bits by CopyResource'ing FP16 bytes into a
+    // BGRA surface, which just bit-reinterprets the channel pairs as pixels and
+    // puts green garbage on the wire.  So the codec follows the capture rather
+    // than the capture following the codec — promote to HEVC Main10 and let the
+    // 10-bit data through intact.
+    //
+    // This applies at every encoder build, not only the first: displays on one
+    // desktop need not agree about HDR, so a monitor switch can move an
+    // H.264 session onto an FP16 surface (VIV-147).
+    if (want != vivora::VideoCodec::H264) return want;
+    if (!dxgi_ || dxgi_->get_capture_format() != DXGI_FORMAT_R16G16B16A16_FLOAT)
+        return want;
+    vivora::log::warn("HOST",
+        "HDR capture (FP16) detected — promoting requested H.264 to "
+        "HEVC Main10 so 10-bit colour survives the encode");
+    return vivora::VideoCodec::HEVC;
+}
+
 bool WindowsHostPlatform::start_encoder() {
     if (encoder_) return true;   // already running
+
+    // Re-check against the capture we are actually about to encode: a monitor
+    // switch may have moved us onto a display of a different bit depth since
+    // the last build.  Promotion sticks, so switching back to an SDR display
+    // does not silently drop the wire codec again mid-session.
+    saved_codec_ = codec_for_capture(saved_codec_);
 
     encoder_ = vivora::IVideoEncoder::create(saved_kind_);
     if (!encoder_) {
@@ -204,6 +231,7 @@ bool WindowsHostPlatform::select_monitor(uint32_t index, bool seed_cursor) {
         if (had_encoder) start_encoder();
         return false;
     }
+    rederive_bitrate();
     if (had_encoder && !start_encoder()) {
         vivora::log::error("HOST", "select_monitor: encoder rebuild failed after switch to %u", index);
         return false;
@@ -228,6 +256,56 @@ bool WindowsHostPlatform::select_monitor(uint32_t index, bool seed_cursor) {
     return true;
 }
 
+void WindowsHostPlatform::rederive_bitrate() {
+    // Only when the user didn't pin one: the auto default is a function of
+    // resolution, so carrying a 4K budget onto a 1080p display (or the other
+    // way round) after a switch is either wasteful or starved.
+    if (manual_bitrate_ || !capture_) return;
+    auto res = capture_->get_resolution();
+    if (res.width == 0 || res.height == 0) return;
+    const uint32_t derived =
+        vivora::codec::default_bitrate_for(res.width, res.height, saved_fps_);
+    if (derived == live_bitrate_bps_) return;
+    vivora::log::info("HOST", "Bitrate re-derived for %ux%u: %u -> %u kbps",
+                      res.width, res.height,
+                      live_bitrate_bps_ / 1000, derived / 1000);
+    live_bitrate_bps_ = derived;
+}
+
+void WindowsHostPlatform::rebuild_for_geometry() {
+    // The encoder is bound to the capture geometry AND pixel format it was
+    // built with; both can move under us (a mode change, a hot-plug, or DXGI
+    // delivering a different format than it described).  Rebuild, and latch
+    // the fact so host_loop re-syncs StreamInfo + input mapping (VIV-147).
+    const bool had_encoder = (encoder_ != nullptr);
+    if (had_encoder) stop_encoder();
+    // The heartbeat mirror was sized for the old geometry.
+    staging_tex_.Reset();
+    staging_valid_ = false;
+    rederive_bitrate();
+    if (had_encoder && !start_encoder())
+        vivora::log::error("HOST", "Encoder rebuild failed after display change");
+    geometry_changed_ = true;
+    auto res = capture_->get_resolution();
+    vivora::log::info("HOST", "Capture rebuilt for display change: %ux%u",
+                      res.width, res.height);
+}
+
+bool WindowsHostPlatform::poll_display_change() {
+    const bool moved = dxgi_ ? dxgi_->poll_display_change() : false;
+    return moved || geometry_changed_;
+}
+
+bool WindowsHostPlatform::refresh_capture() {
+    // Normally capture_and_encode() has already rebuilt (it sees the change on
+    // the very next frame, so there is no window of mis-encoded output); this
+    // catches the case where no frame arrived — an idle host with no encoder.
+    if (dxgi_ && dxgi_->take_geometry_change()) rebuild_for_geometry();
+    const bool changed = geometry_changed_;
+    geometry_changed_ = false;
+    return changed;
+}
+
 bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
                                               bool& content_changed,
                                               bool force) {
@@ -249,6 +327,24 @@ bool WindowsHostPlatform::capture_and_encode(uint64_t& pts_us,
     // Capture on its own, so the host loop can report it apart from encode.
     last_capture_ms_ = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - cap_start).count();
+
+    // The frame we just took may be the first off a duplication whose real
+    // format/size differ from what the encoder was built for (VIV-147).
+    // Rebuild the encoder before this frame is touched — and then go on to
+    // encode it, because on a static display it can be the ONLY frame DXGI
+    // ever hands us: everything after it is served by the heartbeat re-encode
+    // of the staged mirror, and dropping this one would leave the stream with
+    // nothing to repeat.
+    if (dxgi_ && dxgi_->take_geometry_change()) {
+        rebuild_for_geometry();
+        if (!encoder_) {           // rebuild failed — no one to encode into
+            capture_->release_frame(frame);
+            return false;
+        }
+        // The new encoder has nothing staged yet, so this frame must go
+        // through even if DXGI calls it unchanged.
+        force = true;
+    }
 
     // Stash cursor state before any early-return so get_cursor_state()
     // can report it even on content-unchanged ticks.

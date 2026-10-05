@@ -55,6 +55,20 @@ struct HostPlatform {
     // control that silently does nothing.
     virtual bool supports_monitor_switch() const { return false; }
 
+    // Display hot-plug / mode change (VIV-147).  host_loop polls this about
+    // once a second; returning true means the host's display configuration
+    // moved under us (a monitor attached, detached, rearranged, or changed
+    // mode) and the client's monitor list is now stale.  Implementations must
+    // be cheap — this runs on the capture loop.
+    virtual bool poll_display_change() { return false; }
+
+    // Called after poll_display_change() reports a change, to rebuild capture
+    // and the encoder for the captured display's (possibly new) geometry.
+    // Returns true if the capture geometry actually changed, i.e. the caller
+    // must refresh capture_width()/capture_height(), re-arm input mapping and
+    // push a fresh StreamInfo + keyframe.
+    virtual bool refresh_capture() { return false; }
+
     // The codec the encoder actually produces.  May differ from what the
     // caller requested if the backend had to fall back (e.g. NVENC refusing
     // H.264 and using HEVC instead).  Defaults to HEVC.

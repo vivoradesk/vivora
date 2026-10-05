@@ -6,6 +6,7 @@
 #include "app/mac_host_platform.h"
 #include "common/codec/bitrate_controller.h"
 #include "common/utils/log.h"
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -50,6 +51,23 @@ MacCaptureKeepalive& keepalive() {
     return g_keepalive;
 }
 
+// VIV-147: set by the CoreGraphics display-reconfiguration callback (which
+// fires on the main run loop, not the host loop) and cleared by
+// poll_display_change() on the host loop.  Process-global rather than a member
+// because CGDisplayRegisterReconfigurationCallback has no un-register that we
+// can reliably pair with a worker restart — a stale `this` in the callback
+// would be a use-after-free, and a flag never can be.
+std::atomic<bool> g_display_config_dirty{false};
+
+void display_reconfigure_cb(CGDirectDisplayID /*display*/,
+                            CGDisplayChangeSummaryFlags flags,
+                            void* /*userInfo*/) {
+    // BeginConfiguration is the "about to change" notice; act on the settled
+    // state only, or we re-enumerate mid-flight and read the old geometry.
+    if (flags & kCGDisplayBeginConfigurationFlag) return;
+    g_display_config_dirty.store(true, std::memory_order_release);
+}
+
 } // namespace
 
 bool MacHostPlatform::init(uint32_t display_index,
@@ -89,6 +107,7 @@ bool MacHostPlatform::init(uint32_t display_index,
     }
 
     manual_bitrate_bps_ = manual_bitrate_bps;
+    install_display_reconfigure_hook();
     if (!start_pipeline(display_index)) {
         init_error_ = "Failed to start the screen-capture pipeline.";
         return false;
@@ -255,6 +274,68 @@ std::vector<vivora::protocol::MonitorDesc> MacHostPlatform::list_monitors() {
         out.push_back(md);
     }
     return out;
+}
+
+void MacHostPlatform::install_display_reconfigure_hook() {
+    if (display_hook_installed_) return;
+    // Registered once per process; the callback only flips a global flag, so
+    // re-registration across worker restarts would just double-set it.
+    static bool s_registered = false;
+    if (!s_registered) {
+        CGError err = CGDisplayRegisterReconfigurationCallback(
+            display_reconfigure_cb, nullptr);
+        if (err != kCGErrorSuccess) {
+            vivora::log::warn("HOST",
+                "CGDisplayRegisterReconfigurationCallback failed (%d) — "
+                "display hot-plug will not refresh the monitor list", (int)err);
+            return;
+        }
+        s_registered = true;
+    }
+    display_hook_installed_ = true;
+    // A worker starting up should not inherit a change flagged before it
+    // existed; the list it advertises on connect is already current.
+    g_display_config_dirty.store(false, std::memory_order_release);
+}
+
+bool MacHostPlatform::poll_display_change() {
+    return g_display_config_dirty.exchange(false, std::memory_order_acq_rel);
+}
+
+bool MacHostPlatform::refresh_capture() {
+    // The captured display may have changed resolution (or vanished) under the
+    // running SCStream.  SCK keeps delivering at the size the stream was
+    // configured with, so compare against the display list and rebuild when
+    // they disagree — the encoder is bound to the old size (VIV-147).
+    auto displays = vivora::host::MacScreenCapture::enumerate_displays();
+    if (displays.empty()) {
+        vivora::log::warn("HOST", "refresh_capture: no displays enumerated");
+        return false;
+    }
+    uint32_t index = current_display_index_;
+    if (index >= displays.size()) {
+        vivora::log::warn("HOST", "Captured display %u is gone — falling back to display 0",
+                          index);
+        index = 0;
+    }
+    const uint32_t want_w = displays[index].width_px;
+    const uint32_t want_h = displays[index].height_px;
+    if (index == current_display_index_
+        && want_w == capture_width() && want_h == capture_height())
+        return false;   // topology moved, but not under us
+
+    const bool had_encoder = encoder_live_;
+    stop_encoder();
+    // Full teardown: the SCStream is configured for the old geometry, and a
+    // stow/adopt would hand the stale one straight back.
+    capture_.reset();
+    if (!start_pipeline(index) || (had_encoder && !start_encoder())) {
+        vivora::log::error("HOST", "refresh_capture: rebuild on display %u failed", index);
+        return true;    // geometry did change; the caller still re-syncs
+    }
+    vivora::log::info("HOST", "Capture rebuilt after display change: %ux%u",
+                      capture_width(), capture_height());
+    return true;
 }
 
 bool MacHostPlatform::select_monitor(uint32_t index, bool /*seed_cursor*/) {
