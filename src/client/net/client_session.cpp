@@ -657,6 +657,10 @@ void ClientSession::poll() {
                 connect_start_   = Clock::now();
                 last_hello_time_ = {};
                 send_hello();
+            } else if (relay_refused_) {
+                // Direct already failed and the relay said no: nothing is
+                // left to try, so stop now rather than at the connect timeout.
+                state_ = SessionState::Disconnected;
             } else {
                 log::error("ClientSession", "Relay BIND failed during fallback");
             }
@@ -1786,6 +1790,17 @@ bool ClientSession::relay_bind_blocking() {
             if (t != rly::MsgType::BindAck) continue;
             rly::BindAckPayload ack{};
             if (!rly::decode_bind_ack(rxbuf + poff, plen, ack)) continue;
+            // A BIND the relay will not serve is answered with an all-zero
+            // ack: ttl 0, alloc 0.  Taking that as "bound" sent every packet
+            // to allocation 0 and the connect just hung (VIV-143).
+            if (ack.ttl_seconds == 0) {
+                relay_refused_ = true;
+                log::error("ClientSession", "Relay refused the BIND (%s)",
+                           relay_license_set_
+                               ? "license expired or not Pro, or session already in use"
+                               : "no license attached");
+                return false;
+            }
             std::memcpy(relay_alloc_id_, ack.alloc_id, 8);
             relay_active_         = true;
             last_relay_keepalive_ = std::chrono::steady_clock::now();

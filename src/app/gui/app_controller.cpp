@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include "app/gui/app_controller.h"
 
@@ -296,6 +297,18 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     if (settings_) connect(settings_.get(), &Settings::changed,
                            this, &AppController::refreshLicense);
 
+    // VIV-143: the app sits in the tray for weeks, but a license only runs to
+    // the end of the billing period plus three days, and used to be re-read
+    // only at launch -- so Pro never dropped, and a renewed token stayed on
+    // the server until the next restart.  Re-check hourly.
+    licenseTimer_.setInterval(std::chrono::hours(1));
+    // Diagnostic: VIVORA_LICENSE_CHECK_S=N re-checks every N seconds, so a
+    // lapse can be watched live without waiting an hour.
+    if (const char* s = std::getenv("VIVORA_LICENSE_CHECK_S"); s && std::atoi(s) > 0)
+        licenseTimer_.setInterval(std::chrono::seconds(std::atoi(s)));
+    connect(&licenseTimer_, &QTimer::timeout, this, &AppController::checkLicenseLapse);
+    licenseTimer_.start();
+
     // VIV-52: wire the device mesh (model + heartbeat + SSE) BEFORE wireCloud,
     // which resumes a saved session and will kick off registration.
     wireDeviceMesh();
@@ -526,6 +539,13 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         const bool relayWouldHelp  =
             relayGatedThisDial &&
             vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::HostUnreachable;
+        // VIV-143: the relay rejected the token we hold.  Pull a fresh one now
+        // rather than at the next hourly check, so a retry can succeed.
+        if (vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::RelayRefused
+            && !settings_->accountToken().isEmpty()) {
+            cloud_.setBaseUrl(settings_->cloudUrl());
+            cloud_.fetchLicense();
+        }
         QString code, newHex, oldHex;
         bool    mismatch = false;
         if (trustBroken) {
@@ -777,6 +797,7 @@ void AppController::refreshLicense() {
     licenseValid_ = false;
     licensePro_   = false;
     licenseExpiry_.clear();
+    licenseExpUnix_ = 0;
 
     QString path = settings_ ? settings_->licenseFile() : QString();
     if (path.isEmpty()) {
@@ -794,9 +815,13 @@ void AppController::refreshLicense() {
             if (data.size() == static_cast<int>(crypto::LICENSE_TOKEN_SIZE)) {
                 crypto::LicenseClaims claims;
                 const int64_t now = QDateTime::currentSecsSinceEpoch();
-                if (crypto::verify_license(
+                const bool ok = crypto::verify_license(
                         reinterpret_cast<const uint8_t*>(data.constData()),
-                        crypto::LICENSE_PUBLIC_KEY, now, claims)) {
+                        crypto::LICENSE_PUBLIC_KEY, now, claims);
+                // verify_license fills the claims of a genuine token before
+                // its expiry check, so a lapsed one still tells us when.
+                licenseExpUnix_ = claims.exp_unix;
+                if (ok) {
                     licenseValid_   = true;
                     licensePro_     = (claims.tier == crypto::LicenseTier::Pro);
                     licenseExpiry_  = QDateTime::fromSecsSinceEpoch(claims.exp_unix)
@@ -804,9 +829,14 @@ void AppController::refreshLicense() {
                     log::info("AppController", "License OK: %s, expires %s",
                               licensePro_ ? "Pro" : "Trial",
                               licenseExpiry_.toUtf8().constData());
+                } else if (claims.exp_unix != 0) {
+                    log::warn("AppController", "License expired %s: %s",
+                              QDateTime::fromSecsSinceEpoch(claims.exp_unix)
+                                  .toUTC().toString(Qt::ISODate).toUtf8().constData(),
+                              path.toUtf8().constData());
                 } else {
                     log::warn("AppController",
-                              "License present but invalid/expired: %s",
+                              "License present but invalid: %s",
                               path.toUtf8().constData());
                 }
             } else {
@@ -830,6 +860,26 @@ void AppController::refreshLicense() {
         licenseExpiry_ != was_exp) {
         emit licenseChanged();
     }
+}
+
+void AppController::checkLicenseLapse() {
+    refreshLicense();   // drops Pro the moment the token on disk lapses
+    if (!settings_ || settings_->accountToken().isEmpty() || sessionExpired_) return;
+    // A renewal re-mints at the end of the billing period, and the old token
+    // runs three days past it.  Ask the cloud from a day before that end
+    // until well after: Paddle keeps retrying a failed payment for weeks, and
+    // a recovered subscription should come back without a restart.
+    constexpr qint64 kAskFrom  = 4 * 24 * 3600;    // before exp
+    constexpr qint64 kAskUntil = 30 * 24 * 3600;   // after exp
+    if (licenseExpUnix_ == 0) return;
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    if (now < licenseExpUnix_ - kAskFrom || now > licenseExpUnix_ + kAskUntil) return;
+    log::info("AppController", "License %s %s -- asking the cloud for a renewal",
+              now < licenseExpUnix_ ? "expires" : "expired",
+              QDateTime::fromSecsSinceEpoch(licenseExpUnix_).toUTC()
+                  .toString(Qt::ISODate).toUtf8().constData());
+    cloud_.setBaseUrl(settings_->cloudUrl());
+    cloud_.fetchLicense();
 }
 
 void AppController::importLicense(const QString& pathOrUrl) {

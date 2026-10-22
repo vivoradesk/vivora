@@ -368,6 +368,15 @@ bool ViewLoopState::iter_threaded() {
                                "between the two networks is blocking the "
                                "connection.";
             connect_failure_ = ConnectFailure::HostUnreachable;
+            if (session.relay_refused()) {
+                // Not the network: the relay was there and said no, which
+                // almost always means the Pro license has run out.
+                update_status("The relay refused this connection");
+                init_error_      = "The relay turned this connection down. Your "
+                                   "Pro license may have expired: use Refresh "
+                                   "license under Settings → Account.";
+                connect_failure_ = ConnectFailure::RelayRefused;
+            }
         }
         const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - disconnect_at_).count();
@@ -973,6 +982,15 @@ bool ViewLoopState::iter() {
                                "between the two networks is blocking the "
                                "connection.";
             connect_failure_ = ConnectFailure::HostUnreachable;
+            if (session.relay_refused()) {
+                // Not the network: the relay was there and said no, which
+                // almost always means the Pro license has run out.
+                update_status("The relay refused this connection");
+                init_error_      = "The relay turned this connection down. Your "
+                                   "Pro license may have expired: use Refresh "
+                                   "license under Settings → Account.";
+                connect_failure_ = ConnectFailure::RelayRefused;
+            }
         }
         const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
             Clock::now() - disconnect_at_).count();

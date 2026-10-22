@@ -187,6 +187,10 @@ public:
     // Every connect failure used to collapse into one tray balloon that said
     // "Could not connect" and nothing else.
     const std::string& last_error() const { return last_error_; }
+    // The relay answered our BIND with a refusal (VIV-143): the license we
+    // attached is missing, expired or not Pro, or the session is already
+    // taken.  The GUI says so instead of reporting a blocked network.
+    bool relay_refused() const { return relay_refused_; }
     double rtt_ms() const { return rtt_ms_; }
     // Wire path for the in-stream menu header (VIV-74).
     const char* transport_label() const { return relay_active_ ? "Relay" : "P2P"; }
@@ -405,6 +409,7 @@ private:
     TimePoint       last_relay_keepalive_{};
     uint8_t         relay_license_[95]    = {};
     bool            relay_license_set_    = false;
+    bool            relay_refused_        = false;
     bool relay_bind_blocking();          // synchronous BIND + ACK during start()
     bool transport_send(const uint8_t* data, size_t len);   // wrap or direct
     void relay_send_keepalive();
