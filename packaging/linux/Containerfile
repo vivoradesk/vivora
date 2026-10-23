@@ -26,6 +26,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # and it happened twice in one day. Retry rather than restart.
 RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-retries
 
+# Debian 11 moved to archive.debian.org when its LTS ended (Aug 2026): the
+# indices are still on deb.debian.org but the pool 404s.  Use the archive.
+RUN sed -i -e 's#http://deb.debian.org#http://archive.debian.org#g' \
+           -e 's#http://security.debian.org#http://archive.debian.org#g' \
+           /etc/apt/sources.list
+
 # Toolchain, then the libraries Vivora links, then the ones Qt needs to
 # produce a usable xcb/wayland platform plugin. A missing xcb dev package
 # does not fail the Qt build -- it silently produces a Qt that cannot open a
