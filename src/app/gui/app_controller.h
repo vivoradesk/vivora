@@ -371,6 +371,11 @@ private:
     bool    licenseValid_ = false;
     bool    licensePro_   = false;
     QString licenseExpiry_;
+    // VIV-143: expiry of the license file on disk, kept even once it has
+    // lapsed (0 = no genuine token).  Drives the hourly re-check below.
+    qint64  licenseExpUnix_ = 0;
+    QTimer  licenseTimer_;
+    void    checkLicenseLapse();
 
     // VIV-31 account/cloud.
     CloudClient cloud_;

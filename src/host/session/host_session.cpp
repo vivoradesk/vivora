@@ -1548,6 +1548,15 @@ bool HostSession::relay_bind_blocking() {
             if (t != rly::MsgType::BindAck) continue;
             rly::BindAckPayload ack{};
             if (!rly::decode_bind_ack(rxbuf + poff, plen, ack)) continue;
+            // ttl 0 is the relay's refusal (no / expired / non-Pro license,
+            // or a full session), not an allocation (VIV-143).
+            if (ack.ttl_seconds == 0) {
+                log::error("HostSession", "Relay refused the BIND (%s)",
+                           relay_license_set_
+                               ? "license expired or not Pro, or session already in use"
+                               : "no license attached");
+                return false;
+            }
             std::memcpy(relay_alloc_id_, ack.alloc_id, 8);
             relay_active_         = true;
             last_relay_keepalive_ = std::chrono::steady_clock::now();

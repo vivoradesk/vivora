@@ -110,6 +110,7 @@ public:
         RendezvousUnreachable,  // could not resolve or reach the rendezvous
         PeerNotFound,           // rendezvous answered, that peer is not there
         HostUnreachable,        // peer found, but the session never came up
+        RelayRefused,           // the relay turned our license down (VIV-143)
     };
     ConnectFailure connect_failure() const { return connect_failure_; }
 
