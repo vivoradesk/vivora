@@ -127,7 +127,10 @@ if(VIVORA_MAC_APP_BUNDLE)
         COMMAND bash "${CMAKE_SOURCE_DIR}/packaging/macos/codesign-app.sh"
                 "${VIVORA_MAC_CODESIGN_IDENTITY}"
                 $<TARGET_BUNDLE_DIR:vivora>
-        COMMENT "Codesigning Vivora.app (identity: ${VIVORA_MAC_CODESIGN_IDENTITY})")
+        COMMENT "Codesigning Vivora.app (identity: ${VIVORA_MAC_CODESIGN_IDENTITY})"
+        # A Developer ID name carries "(TEAMID)"; without VERBATIM the
+        # parentheses reach /bin/sh unquoted and the link step fails.
+        VERBATIM)
 endif()
 
 # GUI sources land on all three desktop platforms — same Qt 6 + QML +
