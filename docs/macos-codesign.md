@@ -49,10 +49,54 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build
 ```
 
-The post-build step signs `Vivora.app` with the cert and **skips** the
-`tccutil reset` (only ad-hoc builds reset). Grant Screen Recording +
-Accessibility once in System Settings → Privacy & Security; the grants now
-survive subsequent rebuilds and relaunches.
+The post-build step (`packaging/macos/codesign-app.sh`) signs `Vivora.app`
+with the cert as `dev.vivora.app`, then runs `tccutil reset` for Screen
+Recording and Accessibility. The reset is deliberate even though the grants
+would survive: each test run starts from the permission flow a new user sees.
+Launch the app and grant both again in System Settings → Privacy & Security.
+
+Sign from the Mac's own Terminal. Over SSH the login keychain is locked,
+codesign cannot reach the key, and the script falls back to ad-hoc with a
+warning rather than failing the build.
 
 If you ever switch back to ad-hoc, configure with
 `-DVIVORA_MAC_CODESIGN_IDENTITY=-` (the default).
+
+## Developer ID (the real certificate)
+
+A Developer ID Application certificate replaces "Vivora Dev" the same way;
+nothing else changes. Use the exact name `security find-identity` prints:
+
+```bash
+security find-identity -v -p codesigning
+# "Developer ID Application: Your Name (TEAMID1234)"
+cmake -B build -DVIVORA_MAC_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID1234)"
+cmake --build build
+```
+
+The certificate lives in the login keychain of the Mac it was created on
+(Xcode → Settings → Accounts → Manage Certificates → + → Developer ID
+Application). Only the Account Holder can create one, and Apple allows a
+handful per team, so export it with its private key (Keychain Access →
+right-click → Export, `.p12`) and keep the file somewhere safe rather than
+making new ones per machine.
+
+The first build asks "codesign wants to sign using key…": enter the login
+password and choose **Always Allow**, or every build will ask again.
+
+Check the result:
+
+```bash
+codesign -dv --verbose=4 build/bin/Vivora.app 2>&1 | grep -E 'Authority|TeamIdentifier'
+codesign --verify --strict --verbose=2 build/bin/Vivora.app
+```
+
+Expect three `Authority=` lines ending in `Apple Root CA` and
+`TeamIdentifier=` your team ID. The designated requirement is the identifier plus
+the team, so TCC treats every build signed this way, on any Mac, as the same
+app.
+
+This is a signed build, not a distributable one. Gatekeeper still refuses a
+downloaded copy until it is notarised, which needs the hardened runtime
+(`--options runtime`) and a secure timestamp (`--timestamp`); the script
+passes neither yet.
