@@ -68,6 +68,11 @@ APP="$STAGE/Vivora.app"
 echo "==> macdeployqt"
 "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/qml" -verbose=1
 
+# QtQuick.LocalStorage drags in QtSql and with it every SQL driver, three of
+# which link databases that are not on this machine or any user's (ODBC,
+# Postgres, Mimer).  Vivora uses no SQL at all.
+rm -rf "$APP/Contents/PlugIns/sqldrivers"
+
 # Anything still pointing outside the bundle would work here and fail on
 # every other Mac, which is exactly the failure this step exists to prevent.
 leaks=$(find "$APP/Contents" -type f \( -perm -u+x -o -name '*.dylib' \) -print0 |
