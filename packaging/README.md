@@ -126,9 +126,30 @@ libxkbcommon pair split between bundle and host (segfault before the first
 window), and a Qt built against the wrong OpenSSL major (no HTTPS at all,
 which the app is perfectly happy to start without).
 
-## Windows code signing notes (future)
+## Windows code signing
 
-For an MSI installer the same `dev.vivora.app` string goes into the
-manifest `assemblyIdentity name`.  Use SignTool with whichever signing
-cert we pick up (likely DigiCert EV — works without Defender SmartScreen
-nag).
+Releases are signed with a Certum Open Source Code Signing certificate kept in
+Certum's cloud (SimplySign).  The private key never leaves the cloud: SimplySign
+Desktop exposes it to Windows as a virtual smart card, and only while a session
+is open.  A session needs a one-time code from the SimplySign phone app and
+lasts about two hours, so signing is a manual release step and cannot run in
+CI.
+
+```powershell
+# 1. Connect SimplySign Desktop (tray icon -> Connect, code from the phone app)
+# 2. Build and package as usual, adding -Sign
+scripts\package-windows.ps1 -Msi -Sign
+```
+
+`-Sign` signs `vivora.exe` in staging, before it is zipped and packed into the
+MSI, then signs the MSI, and verifies each signature as it goes.  It needs the
+Windows SDK for `signtool`.  With one code-signing certificate in the user's
+store it picks that one; with several, pass `-SignThumbprint`.
+
+Every signature carries an RFC 3161 timestamp from `time.certum.pl`, so it
+stays valid after the certificate's one-year term ends.  A renewed certificate
+changes nothing here.
+
+SmartScreen still warns about a new certificate until it builds up reputation
+through downloads; an OV certificate only shortens that period.  The signature
+already replaces "Unknown publisher" with the certificate's name.
