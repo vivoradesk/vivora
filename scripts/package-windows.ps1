@@ -7,6 +7,13 @@
 #   pwsh -File scripts/package-windows.ps1                 # zip only
 #   pwsh -File scripts/package-windows.ps1 -Msi            # zip + msi
 #   pwsh -File scripts/package-windows.ps1 -BuildDir build -DistDir dist
+#   pwsh -File scripts/package-windows.ps1 -Msi -Sign      # signed zip + msi
+#
+# -Sign uses the code-signing certificate in the CurrentUser store (for the
+# Certum cloud cert, SimplySign Desktop must be connected first).  With exactly
+# one such certificate it is picked automatically; otherwise pass
+# -SignThumbprint.  The exe is signed in staging, before it is zipped or packed
+# into the MSI, so both carry a signed binary; the MSI is then signed itself.
 #
 # Everything is staged through `cmake --install`, never by copying from the
 # source tree: the working tree contains license.sk, and a packaging script
@@ -17,10 +24,53 @@ param(
     [string]$BuildDir = "build",
     [string]$DistDir  = "dist",
     [string]$Config   = "Release",
-    [switch]$Msi
+    [switch]$Msi,
+    [switch]$Sign,
+    [string]$SignThumbprint = "",
+    [string]$TimestampUrl   = "http://time.certum.pl"
 )
 
 $ErrorActionPreference = "Stop"
+
+function Find-SignTool {
+    $cmd = Get-Command signtool -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    $found = Get-ChildItem $kits -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -eq "x64" } |
+        Sort-Object { [version]$_.Directory.Parent.Name } -ErrorAction SilentlyContinue |
+        Select-Object -Last 1
+    if (-not $found) { throw "signtool.exe not found. Install the Windows SDK." }
+    return $found.FullName
+}
+
+function Resolve-SignCert([string]$thumb) {
+    $certs = @(Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
+        Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) })
+    if ($thumb) {
+        $certs = @($certs | Where-Object { $_.Thumbprint -eq $thumb.ToUpper() })
+    }
+    if ($certs.Count -eq 0) {
+        throw "No usable code-signing certificate in CurrentUser\My. Is SimplySign Desktop connected?"
+    }
+    if ($certs.Count -gt 1) {
+        $list = ($certs | ForEach-Object { "  $($_.Thumbprint)  $($_.Subject)" }) -join "`n"
+        throw "Several code-signing certificates found; pick one with -SignThumbprint:`n$list"
+    }
+    return $certs[0]
+}
+
+# Sign and immediately verify, so a release can never ship a file whose
+# signature or timestamp did not take.  The RFC 3161 timestamp keeps the
+# signature valid after the one-year certificate expires.
+function Invoke-Sign([string]$tool, [string]$thumb, [string]$file) {
+    & $tool sign /sha1 $thumb /fd sha256 /tr $TimestampUrl /td sha256 `
+        /d "Vivora" /du "https://vivora.dev" $file
+    if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $file" }
+    & $tool verify /pa /q $file
+    if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $file" }
+    Write-Host "signed $file"
+}
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
@@ -57,6 +107,13 @@ try {
         }
     }
 
+    if ($Sign) {
+        $signTool = Find-SignTool
+        $cert = Resolve-SignCert $SignThumbprint
+        Write-Host "signing with $($cert.Subject) ($($cert.Thumbprint))"
+        Invoke-Sign $signTool $cert.Thumbprint (Join-Path $stage "vivora.exe")
+    }
+
     New-Item -ItemType Directory -Force $DistDir | Out-Null
     $zip = Join-Path $DistDir "$base.zip"
     Remove-Item $zip -ErrorAction SilentlyContinue
@@ -89,6 +146,7 @@ try {
         & wix @wixArgs
         if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
         Write-Host "wrote $msiPath"
+        if ($Sign) { Invoke-Sign $signTool $cert.Thumbprint $msiPath }
         $artefacts += $msiPath
     }
 
