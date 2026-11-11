@@ -29,6 +29,24 @@ static const char* TAG = "ENCODE";
 AmfEncoder::AmfEncoder() = default;
 
 AmfEncoder::~AmfEncoder() {
+    // After a GPU reset (VIV-149) the AMF runtime's own state for this device
+    // is garbage: Drain() spins on feedback the dead device never delivers,
+    // and the teardown that follows dereferences null inside amdxx64.dll and
+    // takes the whole process down.  The only safe move is to not touch the
+    // component again -- leak it, and the runtime DLL it lives in, once per
+    // reset.  A TDR is rare enough that the leak never adds up to anything;
+    // a crash on every driver update would.
+    if (device_ && device_->GetDeviceRemovedReason() != S_OK) {
+        log::warn(TAG, "D3D11 device was lost — abandoning the AMF encoder "
+                       "instead of tearing it down");
+        encoder_ = nullptr;
+        context_ = nullptr;
+        amf_dll_ = nullptr;
+        // ComPtr members (textures, context, device) release normally: a
+        // removed device's COM objects are still valid to Release.
+        return;
+    }
+
     staging_texture_.Reset();
     d3d_context_.Reset();
 
@@ -85,7 +103,7 @@ bool AmfEncoder::init(const EncoderConfig& config, ID3D11Device* device) {
         return false;
     }
 
-    res = context_->InitDX11(device_);
+    res = context_->InitDX11(device_.Get());
     if (res != AMF_OK) {
         log::error(TAG, "InitDX11 failed: %d", res);
         return false;

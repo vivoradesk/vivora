@@ -87,6 +87,25 @@ vivora::VideoCodec WindowsHostPlatform::codec_for_capture(vivora::VideoCodec wan
 bool WindowsHostPlatform::start_encoder() {
     if (encoder_) return true;   // already running
 
+    // An idle host captures nothing, so a GPU reset since the last session
+    // has gone unnoticed: the device we are about to hand the encoder is dead
+    // and every connect would fail with EncoderFailed until a restart
+    // (VIV-149).  Rebuild the capture first.  A live session never gets here
+    // with a dead device -- capture_frame() notices and rebuilds on its own.
+    if (dxgi_ && dxgi_->device_lost()) {
+        staging_tex_.Reset();     // allocated on the old device
+        staging_valid_ = false;
+        if (!dxgi_->recover_device()) {
+            vivora::log::error("HOST", "GPU reset: capture device could not be rebuilt yet");
+            return false;
+        }
+        // Nothing is built on the new device yet, so there is nothing for the
+        // geometry latch to make anyone rebuild; the size may have moved,
+        // though, and the bitrate follows it.
+        dxgi_->take_geometry_change();
+        rederive_bitrate();
+    }
+
     // Re-check against the capture we are actually about to encode: a monitor
     // switch may have moved us onto a display of a different bit depth since
     // the last build.  Promotion sticks, so switching back to an SDR display
