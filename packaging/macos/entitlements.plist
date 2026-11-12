@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the distributed Vivora.app.
+
+  Notarisation requires the hardened runtime, which by default forbids
+  writable+executable memory.  The QML engine's JIT needs exactly that; without
+  this entitlement it falls back to the bytecode interpreter, which works but
+  makes the UI slower than it should be.  Nothing else is needed: screen and
+  audio capture go through ScreenCaptureKit (a TCC prompt, not an
+  entitlement), input through CGEventPost (Accessibility), and the app is not
+  sandboxed, so network access needs no entitlement either.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

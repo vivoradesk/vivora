@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 cmake_minimum_required(VERSION 3.20)
+
+# macOS floor.  Must be set before project().  14 because the viewer renders
+# through AVSampleBufferVideoRenderer, which macOS 13 does not have; keep
+# LSMinimumSystemVersion in packaging/macos/Info.plist.in in step.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
+
 project(Vivora VERSION 0.1.0 LANGUAGES C CXX)
 
 # Distribution artefact naming.  The build produces vivora.exe / vivora /

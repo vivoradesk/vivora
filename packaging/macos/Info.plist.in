@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Vivora.app/Contents/Info.plist template.
-  CMake should configure_file() this into the built .app bundle once the
-  macOS GUI is wired up (see project_phase5_gui_state — Mac GUI pending).
-
-  After bundle ID is registered with Apple Developer:
-    - sign:    codesign -s "Developer ID Application: <Team>" Vivora.app
-    - notarize: xcrun notarytool submit ...
+  Vivora.app/Contents/Info.plist template, configured by CMake
+  (MACOSX_BUNDLE_INFO_PLIST).  Signing and notarisation happen in
+  scripts/package-macos.sh.
 -->
 <plist version="1.0">
 <dict>
@@ -43,8 +39,9 @@
     <key>CFBundleVersion</key>
     <string>@PROJECT_VERSION@</string>
 
+    <!-- Keep in step with CMAKE_OSX_DEPLOYMENT_TARGET in the top CMakeLists. -->
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>14.0</string>
 
     <key>NSHighResolutionCapable</key>
     <true/>
