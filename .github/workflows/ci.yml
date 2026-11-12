@@ -30,7 +30,7 @@ jobs:
             build-essential ninja-build pkg-config git ca-certificates curl \
             libpulse-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -101,7 +101,7 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libx11-xcb-dev libxcb1-dev libfontconfig1-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -155,7 +155,7 @@ jobs:
     # nothing but the developer's machine could satisfy it.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -191,7 +191,7 @@ jobs:
     name: hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The signing key for Pro licences lives in the working tree of whoever
       # runs the relay, next to a .gitignore entry telling git to skip it. One

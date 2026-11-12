@@ -1,6 +1,6 @@
 # Vivora — Project Status
 
-Last updated: 2026-08-19
+Last updated: 2026-11-13 (0.1.1)
 
 A snapshot of what works, what's planned, and the open questions.
 For the architectural overview see `docs/ARCHITECTURE.md`.
@@ -77,11 +77,11 @@ Listed so we know what to say when someone reports "doesn't work on my X."
 2. **No software encoder fallback anywhere.** If hardware encoder init fails (driver mismatch, headless server, container without DRM nodes) the host bails. An x264 path would buy server / VM / very-old-hardware compatibility at the cost of CPU.
 3. **NVENC on Windows: HEVC only.** Deliberate — AMF and QSV cover H.264, and codec negotiation picks a common one. It does mean an NVIDIA-only Windows host cannot serve an H.264-only client.
 4. **Client software decode fallback on Windows / macOS** — same shape as Linux's. Not in today.
-5. **macOS key injection is unverified.** All three hosts now press the
-   physical key the wire carries rather than a layout-derived virtual key, and
-   the mapping tables are unit-tested in both directions, but the macOS half
-   has only been compiled — it has not been driven from a viewer on a non-Latin
-   layout the way Windows and Linux have.
+5. **Windows host cannot reach elevated windows or the secure desktop.** It runs
+   as the signed-in user, so Windows' UIPI drops its input into any window
+   running as administrator, and UAC prompts and the lock screen are on a
+   desktop it cannot capture. Running Vivora as administrator fixes the first;
+   the fix for all of it is running the host as a SYSTEM service.
 6. **Linux host cannot switch monitors.** It enumerates displays and advertises them, but `select_monitor` is unimplemented, so the client's picker cannot actually change the captured display.
 
 ### Measured pipeline latency
@@ -136,15 +136,16 @@ time. Worth fixing before quoting a Linux number.
 
 ## What's pending
 
-### Before 0.1 ships
+### Releases
 
-- **Publishing.** The artefacts build and have been smoke-tested — Windows
-  installer and portable zip, Linux AppImage (glibc floor 2.30, verified on
-  Fedora 40, Rocky 9 and Ubuntu 22.04), and a server tarball that installs on
-  Debian 11. Nothing is published yet; the repository is still private.
-- **CI.** Linux and Windows both build and test on every push. The Linux
-  AppImage and the server tarball are built on tag; the Windows zip and MSI
-  are still made by hand and attached to the draft.
+- **0.1.0** (2026-08-27): Windows installer and portable zip, Linux AppImage,
+  server tarball.
+- **0.1.1**: adds a signed and notarised universal macOS `.dmg`, and signs the
+  Windows exe and MSI.
+- **CI.** Linux and Windows build and test on every push. The Linux AppImage
+  and the server tarball are built on tag. The Windows zip and MSI (signing
+  needs a SimplySign session) and the macOS `.dmg` (signing and notarisation
+  need the Mac's login keychain) are made by hand and attached to the draft.
 
 ### After 0.1
 
@@ -154,7 +155,7 @@ time. Worth fixing before quoting a Linux number.
 - **File transfer** — drag and drop into the stream window. The approval dialog already reserves a grant for it.
 - **Cheaper loss recovery.** Long-term reference frames or partial-GOP recovery instead of a full keyframe on every unrecoverable loss: at this point the visible freeze *is* the keyframe.
 - **Path MTU discovery.** Datagrams are a fixed 1360 bytes, which breaks on sub-1400 paths (some VPNs, IPv6 tunnels, cellular).
-- **macOS distribution.** Needs an Apple Developer account for signing and notarisation.
+- **Windows host as a SYSTEM service**, so remote input reaches elevated windows, UAC prompts, the lock screen and the sign-in screen after a reboot.
 
 ### Shelved (intentionally not on the roadmap)
 

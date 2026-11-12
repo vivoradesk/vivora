@@ -26,8 +26,8 @@ relay are all here, and you can run every piece of the infrastructure yourself.
 
 | | Windows | Linux | macOS |
 | --- | --- | --- | --- |
-| Host (share your screen) | yes | yes | yes, build from source |
-| Client (view a screen) | yes | yes | yes, build from source |
+| Host (share your screen) | yes | yes | yes |
+| Client (view a screen) | yes | yes | yes |
 | Hardware encode | NVENC, AMD AMF, Intel QSV | VAAPI, NVENC | VideoToolbox |
 | Hardware decode | MediaFoundation / D3D11VA | VAAPI, software fallback | VideoToolbox |
 | HDR passthrough | yes (HEVC Main10) | no, 8-bit pipeline | yes |
@@ -36,9 +36,8 @@ relay are all here, and you can run every piece of the infrastructure yourself.
 | Multi-monitor pick | yes | host advertises, switching not yet implemented | yes |
 | Start at login | yes | yes | not yet |
 
-We publish binaries for **Windows and Linux**. macOS builds and runs from
-source; signed and notarised macOS downloads need an Apple Developer account
-and are the first thing on the 0.1.1 list.
+We publish signed binaries for **Windows** and **macOS** (14 or newer,
+universal) and an AppImage for **Linux**.
 
 **Not here yet:** file transfer, gamepad forwarding, mobile clients, software
 encoder fallback for machines with no usable GPU encoder.
@@ -50,9 +49,15 @@ encoder fallback for machines with no usable GPU encoder.
 Grab the latest build from [Releases](https://github.com/vivoradesk/vivora/releases).
 
 **Windows** — run the `.msi` (installs per-user, no administrator prompt), or
-unzip the portable build anywhere. Windows will warn about an unrecognised app:
-the binaries are not code-signed yet, so verify the SHA-256 against
-`SHA256SUMS.txt` in the release and choose *More info → Run anyway*.
+unzip the portable build anywhere. Both are code-signed; the certificate is
+new, so SmartScreen may still warn until it builds up reputation — choose
+*More info → Run anyway*. Windows does not let a normal program send input to
+one running as administrator, so to control elevated windows on a host, start
+Vivora there with *Run as administrator*.
+
+**macOS** — open the `.dmg` and drag Vivora to Applications. It is signed and
+notarised. To share this Mac, grant **Screen Recording** and **Accessibility**
+in System Settings → Privacy & Security when asked, then reopen Vivora.
 
 **Linux** — download the `.AppImage`, `chmod +x` it, run it. If your system has
 no libfuse2 and the AppImage refuses to mount, run it with
@@ -165,6 +170,8 @@ OpenSSL either way — TLS is Schannel — and a shared-Qt build never asks for 
 
 ### macOS
 
+For a local build, Homebrew's Qt is the quickest:
+
 ```sh
 brew install qt cmake ninja
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -183,6 +190,10 @@ changes on every rebuild, so macOS treats each build as a new application and
 asks for both permissions again — see
 [`docs/macos-codesign.md`](docs/macos-codesign.md) for a self-signed
 certificate that makes the grants stick.
+
+A Homebrew-Qt build only runs on the macOS version Homebrew built Qt for. The
+distributable `.dmg` is built against the official Qt instead — see
+[`packaging/README.md`](packaging/README.md#building-the-macos-artefact).
 
 ---
 
