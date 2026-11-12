@@ -383,6 +383,44 @@ bool DxgiCapture::take_geometry_change() {
     return v;
 }
 
+bool DxgiCapture::device_lost() const {
+    // A null device means an earlier recover_device() could not create one
+    // yet; that is still "lost" as far as anyone building on it is concerned.
+    return !device_ || device_->GetDeviceRemovedReason() != S_OK;
+}
+
+bool DxgiCapture::recover_device() {
+    if (device_) {
+        log::warn(TAG, "D3D11 device lost (reason 0x%08X) — rebuilding capture",
+                  static_cast<unsigned>(device_->GetDeviceRemovedReason()));
+    }
+    if (frame_acquired_ && duplication_) duplication_->ReleaseFrame();
+    frame_acquired_ = false;
+    duplication_.Reset();
+    output5_.Reset();
+    context_.Reset();
+    device_.Reset();
+    // The adapter object belongs to the dead device's factory, and after a
+    // driver crash the adapter LUID itself can change, so learn it afresh.
+    factory_.Reset();
+    adapter_.Reset();
+    adapter_luid_ = {};
+
+    if (!init_d3d11()) return false;   // driver still resetting
+    if (!init_output_duplication(monitor_index_)) {
+        // The device is fine but the desktop may still be settling (the same
+        // E_ACCESSDENIED window a mode change has).  capture_frame() retries
+        // the duplication on its own; nothing else needs to happen here.
+        log::warn(TAG, "Device rebuilt, duplication not ready yet — will retry");
+    }
+    // Everything built on the old device -- the encoder, the host's heartbeat
+    // mirror -- is now unusable, whatever the geometry did.
+    geometry_dirty_ = true;
+    log::info(TAG, "Capture device rebuilt: %ux%u on monitor %u",
+              resolution_.width, resolution_.height, monitor_index_);
+    return true;
+}
+
 bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
     // Silently recreate the duplication if it was dropped on a previous tick
     // (exclusive fullscreen enter/exit, UAC, secure-desktop, mode switch).
@@ -400,7 +438,14 @@ bool DxgiCapture::capture_frame(CapturedFrame& frame, uint32_t timeout_ms) {
                    now - last_dup_attempt_).count() < DUP_RETRY_MS)
             return false;
         last_dup_attempt_ = now;
-        if (!init_output_duplication(monitor_index_)) return false;
+        // After a GPU reset the duplication was dropped because the device
+        // under it is gone; re-duplicating on that device fails every time.
+        if (device_lost()) {
+            if (!recover_device()) return false;
+            if (!duplication_) return false;
+        } else if (!init_output_duplication(monitor_index_)) {
+            return false;
+        }
     }
 
     // Release previous frame if held

@@ -50,7 +50,9 @@ private:
     amf::AMFComponent* encoder_ = nullptr;
 
     // D3D11 references
-    ID3D11Device* device_ = nullptr;  // not owned
+    // Owned reference: the destructor asks it whether a GPU reset killed it,
+    // and by then the capture that created it may have dropped its own.
+    ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> d3d_context_;
 
     // Staging texture for DXGI frames (DXGI textures lack bind flags)

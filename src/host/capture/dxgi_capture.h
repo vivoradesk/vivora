@@ -68,6 +68,19 @@ public:
     // encoder when this returns true.
     bool take_geometry_change();
 
+    // GPU reset (TDR, driver update/crash, `dxcap -forcetdr`; VIV-149).  The
+    // D3D11 device is removed for good once that happens: re-duplicating on it
+    // fails forever, and so does every encoder built on get_device().  Both
+    // are therefore rebuilt from scratch rather than retried.
+    //
+    // device_lost() is cheap (GetDeviceRemovedReason).  recover_device()
+    // drops the duplication, device, context and factory, creates new ones
+    // and re-duplicates the same display; it latches the geometry flag so a
+    // caller holding an encoder or textures from the old device rebuilds them.
+    // Returns false while the driver is still coming back -- try again later.
+    bool device_lost() const;
+    bool recover_device();
+
     // Desktop origin of the captured display (top-left corner in virtual
     // desktop coordinates).  (0,0) for the primary; non-primary displays
     // sit at an offset that input injection must add (VIV-50).
