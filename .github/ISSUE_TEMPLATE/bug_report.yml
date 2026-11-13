@@ -46,7 +46,7 @@ body:
     attributes:
       label: Vivora version
       description: Settings → About, or `vivora --help` on the first line.
-      placeholder: "0.1.0"
+      placeholder: "0.1.1"
     validations:
       required: true
 

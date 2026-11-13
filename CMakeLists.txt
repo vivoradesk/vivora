@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.20)
 # LSMinimumSystemVersion in packaging/macos/Info.plist.in in step.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
 
-project(Vivora VERSION 0.1.0 LANGUAGES C CXX)
+project(Vivora VERSION 0.1.1 LANGUAGES C CXX)
 
 # Distribution artefact naming.  The build produces vivora.exe / vivora /
 # Vivora.app at build/bin/ regardless of platform — these strings drive

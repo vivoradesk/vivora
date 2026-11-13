@@ -2,16 +2,17 @@
 
 Templates and identity files for OS-specific bundling.  The GUI binary is
 `vivora` on all three platforms and all three are bootstrapped; what
-differs is distribution.  Windows and Linux get published artefacts
-(installer / portable zip / AppImage); macOS builds from source until the
-signing certificate is in place.
+differs is distribution: a signed installer and portable zip on Windows, a
+signed and notarised `.dmg` on macOS, an AppImage on Linux.
 
 ## Layout
 
 ```
 packaging/
 ├── macos/
-│   └── Info.plist.in                 configure_file()'d into Vivora.app
+│   ├── Info.plist.in                 configure_file()'d into Vivora.app
+│   └── entitlements.plist            hardened-runtime entitlements for the
+│                                     release signature
 ├── linux/
 │   ├── vivora.desktop.in             installed as dev.vivora.app.desktop
 │   ├── dev.vivora.app.metainfo.xml   AppStream metainfo (Flathub, GNOME
@@ -37,24 +38,58 @@ packaging/
 | GCD dispatch_queue labels   | `dev.vivora.audio_capture`, `dev.vivora.capture` |
 | QSettings org domain        | `vivora.dev` (Qt reverse-DNS'es it for macOS) |
 
-## Apple Developer notes (for whoever does notarization)
+## Building the macOS artefact
 
-The bundle id `dev.vivora.app` must be registered in App Store Connect
-*before* a Developer ID Application certificate can be issued for it.
-That's a separate step from the $99/year membership — go to
-"Identifiers" in developer.apple.com and add an explicit App ID.
+`scripts/package-macos.sh` turns a build into a universal, signed and
+notarised `Vivora-<version>-macos-universal.dmg`.
 
-Notarization flow once the cert is in hand:
+**Use the official Qt, not Homebrew's.** Homebrew bottles are built for the
+macOS they were bottled on — its QtQuick currently requires macOS 26 — so a
+bundle made from them would not start on anything older. Install the
+official universal Qt with [aqt](https://github.com/miurahr/aqtinstall):
 
 ```bash
-codesign --deep --force --options runtime \
-    --sign "Developer ID Application: Vivora Contributors (TEAMID)" \
-    Vivora.app
-xcrun notarytool submit Vivora.app.zip \
-    --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PW \
-    --wait
-xcrun stapler staple Vivora.app
+python3 -m venv ~/aqtvenv && ~/aqtvenv/bin/pip install aqtinstall
+~/aqtvenv/bin/aqt install-qt mac desktop 6.8.3 clang_64 --outputdir ~/Qt
 ```
+
+Configure for both architectures (the macOS floor, 14, is set in
+`CMakeLists.txt`) and build:
+
+```bash
+cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH=$HOME/Qt/6.8.3/macos \
+    "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+cmake --build build-rel
+```
+
+Package it. The identity is the name of a *Developer ID Application*
+certificate in the login keychain (`security find-identity -v -p codesigning`
+lists it), or `-` for an ad-hoc dry run that exercises every other step:
+
+```bash
+scripts/package-macos.sh build-rel dist "Developer ID Application: …" --notarize
+```
+
+The script runs `macdeployqt`, drops the SQL driver plugins (pulled in by
+QtQuick.LocalStorage, unused, and linked against libraries no user has),
+refuses a bundle that still links outside itself, signs every nested binary
+inside out with the hardened runtime and a secure timestamp, builds and signs
+the `.dmg`, and with `--notarize` submits it, staples the ticket and checks it
+with `spctl`. It appends the `.dmg` to `dist/SHA256SUMS.txt`.
+
+`--notarize` uses a notarytool keychain profile named `vivora`
+(`VIVORA_NOTARY_PROFILE` overrides). Create it once, with an app-specific
+password from account.apple.com:
+
+```bash
+xcrun notarytool store-credentials vivora
+```
+
+**Run all of this from the Mac's own Terminal**, not over SSH: codesign and
+notarytool need the login keychain unlocked, and an SSH session never has it.
+See [`docs/macos-codesign.md`](../docs/macos-codesign.md) for the development
+signing setup that keeps permission grants across rebuilds.
 
 ## Building the Windows artefacts
 

@@ -52,7 +52,14 @@
          Discover show no changelog at all.  The date is the publication
          date, not the date the branch was cut. -->
     <releases>
-        <release version="0.1.0" date="2026-08-19">
+        <release version="0.1.1" date="2026-11-13">
+            <url type="details">https://github.com/vivoradesk/vivora/releases/tag/v0.1.1</url>
+            <description>
+                <p>Signed Windows builds, the first macOS download, and recovery
+                from a GPU driver reset on Windows hosts.</p>
+            </description>
+        </release>
+        <release version="0.1.0" date="2026-08-27">
             <url type="details">https://github.com/vivoradesk/vivora/releases/tag/v0.1.0</url>
             <description>
                 <p>First public release.</p>

@@ -22,13 +22,14 @@ permissions:
 # image is built once by build-image.yml and pushed to the registry, so this
 # job pulls it and does a normal incremental compile.
 #
-# The Windows artefacts are still produced by hand. The build itself no longer
-# needs a machine-local Qt (VIV-121), but the zip and the MSI have never been
-# made on a runner, and a release is the wrong place to find out.
+# The Windows and macOS artefacts are produced by hand. Both are signed with
+# keys a runner cannot reach: the Windows certificate lives in Certum's cloud
+# behind a phone one-time code (SimplySign), and the Developer ID key and the
+# notarisation profile sit in the Mac's login keychain.
 #
 # That is why the release is created as a DRAFT: publishing it before the
-# Windows artefacts are attached would leave people on the download page with
-# half of what the notes promise.
+# Windows and macOS artefacts are attached would leave people on the download
+# page with half of what the notes promise.
 jobs:
   servers:
     name: server tarball
@@ -46,7 +47,7 @@ jobs:
             build-essential ninja-build pkg-config git ca-certificates curl \
             libpulse-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -72,7 +73,7 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -94,7 +95,7 @@ jobs:
     # container of its own, which a job already inside one cannot do.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:
@@ -116,7 +117,7 @@ jobs:
     needs: [servers, appimage, smoke]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4
         with:
@@ -158,5 +159,5 @@ jobs:
             --notes-file "$notes" \
             dist/*
           echo "Draft created with the server tarball and the AppImage."
-          echo "Attach the Windows zip and msi, add their lines to"
+          echo "Attach the Windows zip and msi and the macOS dmg, add their lines to"
           echo "SHA256SUMS.txt so it still covers the whole release, then publish."

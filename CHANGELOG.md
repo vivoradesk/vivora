@@ -4,7 +4,49 @@ Notable changes per release. Dates are the release date, not the merge date.
 This project follows [semantic versioning](https://semver.org/) loosely: until
 1.0, minor versions may change the wire protocol.
 
-## 0.1.0 — unreleased
+## 0.1.1 — 2026-11-13
+
+Signed builds on Windows, the first macOS download, and a set of host fixes
+found in daily use since 0.1.0.
+
+### Packaging
+
+- **macOS download.** A universal (Apple silicon and Intel) `.dmg`, signed with
+  a Developer ID certificate, notarised by Apple and stapled, so Gatekeeper
+  opens it without a warning. macOS 14 or newer.
+- **Signed Windows builds.** `vivora.exe` and the `.msi` are signed with a code
+  signing certificate and timestamped. Windows shows the publisher instead of
+  "Unknown publisher"; SmartScreen may still warn until the certificate builds
+  up reputation.
+
+### Fixes
+
+- Windows host: recovers on its own from a GPU driver reset (TDR). Before, a
+  reset left the host unable to start an encoder until it was restarted — every
+  connection ended in an encoder error — and a reset during a session crashed
+  the host on AMD GPUs.
+- Hosts notice a monitor being plugged in or out, refresh the monitor list on
+  connected clients, and switch codec when a session moves onto an HDR display
+  (H.264 to HEVC Main10) instead of sending a wrongly coloured picture.
+- The host tells connected viewers when its codec changes mid-session, and
+  viewers rebuild their decoder to match. Older viewers ignore the message.
+- macOS viewer: HDR streams are presented through the extended-range path
+  instead of the SDR one (flat, wrong colours).
+- A viewer that had to fall back to the relay could fail to connect at all,
+  most reliably on Linux.
+- Pro license: a running app now notices an expired or renewed license without
+  a restart, and a relay refusing the connection is reported as such instead
+  of looking like a connection that hangs.
+- The release's `SHA256SUMS.txt` covers every artefact.
+
+### Known limitations
+
+- On Windows, remote input does not reach windows running as administrator
+  (an elevated terminal, Task Manager, installers) or the UAC prompt and lock
+  screen. Starting Vivora as administrator fixes the first; the rest needs the
+  host to run as a system service, which is planned.
+
+## 0.1.0 — 2026-08-27
 
 First public release. Everything below is "new" in the sense that this is the
 first build anyone outside the project could download, so the list describes
@@ -87,4 +129,4 @@ what 0.1 *is* rather than what changed.
 - Linux relative-mouse capture works on X11 only; Wayland forbids the pointer
   warp it needs.
 - macOS binaries are not published — build from source until the signing
-  certificate is in place.
+  certificate is in place. (Published from 0.1.1.)
