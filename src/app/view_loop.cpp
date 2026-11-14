@@ -340,17 +340,7 @@ bool ViewLoopState::iter_threaded() {
         // VIV-52: the host ended the session on purpose (declined approval or
         // removed this device).  Show the terminal reason and linger briefly,
         // whether or not frames were flowing — never a reconnect banner.
-        if (session.host_disconnected()) {
-            if (!disconnecting_) {
-                disconnecting_ = true;
-                disconnect_at_ = Clock::now();
-                update_status(session.disconnect_status_text());
-            }
-            const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
-                Clock::now() - disconnect_at_).count();
-            if (waited > DISCONNECT_LINGER_MS) return false;
-            return true;
-        }
+        if (session.host_disconnected()) return linger_host_disconnect(session);
         if (frames_decoded_ > 0) {
             log::info("VIEW", "Disconnected from host");
             return false;
@@ -602,6 +592,25 @@ bool ViewLoopState::iter_threaded() {
 
     if (rendered == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     return true;
+}
+
+bool ViewLoopState::linger_host_disconnect(client::ClientSession& session) {
+    if (!disconnecting_) {
+        disconnecting_ = true;
+        disconnect_at_ = Clock::now();
+        update_status(session.disconnect_status_text());
+        // VIV-151: the GUI reopens its password prompt on these.
+        const auto r = session.disconnect_reason();
+        if (r == protocol::DisconnectReason::WrongPassword
+            || r == protocol::DisconnectReason::PasswordLocked) {
+            init_error_      = session.disconnect_status_text();
+            connect_failure_ = r == protocol::DisconnectReason::WrongPassword
+                ? ConnectFailure::WrongPassword : ConnectFailure::PasswordLocked;
+        }
+    }
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+        Clock::now() - disconnect_at_).count();
+    return waited <= DISCONNECT_LINGER_MS;
 }
 
 bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
@@ -962,6 +971,9 @@ bool ViewLoopState::iter() {
     // reaches Disconnected after the connect/silence timeouts in
     // ClientSession, so the initial Connecting phase is unaffected.
     if (session.state() == client::SessionState::Disconnected) {
+        // Host ended it on purpose (declined, kicked, wrong password): same
+        // terminal handling as iter_threaded(), not the "unreachable" guess.
+        if (session.host_disconnected()) return linger_host_disconnect(session);
         if (frames_decoded_ > 0) {
             log::info("VIEW", "Disconnected from host");
             return false;

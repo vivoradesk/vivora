@@ -96,6 +96,7 @@ bool ViewSession::start(const GuiViewConfig& cfg) {
     loop_cfg_.relay_server       = cfg_.relay_server.empty()       ? nullptr : cfg_.relay_server.c_str();
     loop_cfg_.relay_session_hex  = cfg_.relay_session_hex.empty()  ? nullptr : cfg_.relay_session_hex.c_str();
     loop_cfg_.license_file       = cfg_.license_file.empty()       ? nullptr : cfg_.license_file.c_str();
+    loop_cfg_.access_password    = cfg_.access_password;
     loop_cfg_.stop_flag          = &stop_flag_;
     // VIV-23: GUI asks the user before trusting a new / changed peer key.
     loop_cfg_.interactive_trust  = true;

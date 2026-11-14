@@ -37,6 +37,7 @@ struct GuiViewConfig {
     std::string relay_server;
     std::string relay_session_hex;
     std::string license_file;
+    std::string access_password;   // VIV-151; empty = ask the host's user
     // User viewing caps from Settings (0 = none).
     int view_fps_cap  = 0;
     int view_max_kbps = 0;

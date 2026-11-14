@@ -29,6 +29,7 @@ constexpr const char* K_START_AT_LOGIN     = "general/startAtLogin";
 constexpr const char* K_APPROVAL_MODE      = "security/approvalMode";
 constexpr const char* K_SINGLE_SESSION     = "security/singleSessionLock";
 constexpr const char* K_AUDIO_GRANT_DEFAULT= "security/audioGrantDefault";
+constexpr const char* K_REMEMBER_PW_DEVICES= "security/rememberPasswordDevices";
 constexpr const char* K_THEME              = "appearance/theme";
 constexpr const char* K_HDR_PASSTHROUGH    = "capture/hdrPassthrough";
 constexpr const char* K_HOST_FPS           = "capture/hostFps";
@@ -186,6 +187,8 @@ void Settings::setSingleSessionLock(bool v)   { if (v != singleSessionLock()) { 
 
 bool Settings::audioGrantDefault() const      { return q_.value(K_AUDIO_GRANT_DEFAULT, DEF_AUDIO_GRANT).toBool(); }
 void Settings::setAudioGrantDefault(bool v)   { if (v != audioGrantDefault()) { q_.setValue(K_AUDIO_GRANT_DEFAULT, v); emit changed(); } }
+bool Settings::rememberPasswordDevices() const { return q_.value(K_REMEMBER_PW_DEVICES, true).toBool(); }
+void Settings::setRememberPasswordDevices(bool v) { if (v != rememberPasswordDevices()) { q_.setValue(K_REMEMBER_PW_DEVICES, v); emit changed(); } }
 
 int Settings::theme() const                   { return q_.value(K_THEME, DEF_THEME).toInt(); }
 void Settings::setTheme(int v)                { if (v != theme()) { q_.setValue(K_THEME, v); emit changed(); } }

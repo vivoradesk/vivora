@@ -62,6 +62,10 @@ ApplicationWindow {
             window.show()
             window.raise()
         }
+        // VIV-151: the host refused our access password; ask again.
+        function onPasswordRequired(peer, message) {
+            window.askPassword(peer, message)
+        }
         function onShowWindowRequested() {
             window.show()
             window.raise()
@@ -168,6 +172,20 @@ ApplicationWindow {
             peer: relayProLoader.peer
             onUpgradeRequested: App.openUpgradePage()
             onClosed: relayProLoader.active = false
+        }
+    }
+    // VIV-151 access-password prompt.  One at a time: connects are user-driven.
+    Loader {
+        id: passwordLoader
+        active: false
+        property string peer: ""
+        property string message: ""
+        sourceComponent: PasswordPromptDialog {
+            visible: true
+            peer: passwordLoader.peer
+            message: passwordLoader.message
+            onSubmitted: (pw) => App.connectWithPassword(passwordLoader.peer, pw)
+            onClosed: passwordLoader.active = false
         }
     }
     // VIV-111 macOS Screen Recording permission prompt.  One at a time is fine
@@ -972,6 +990,25 @@ ApplicationWindow {
                     color: theme.red
                     font.pixelSize: 11
                 }
+                // Unattended access: dial with the host's password instead of
+                // waiting for someone there to accept.
+                Label {
+                    visible: peerInput.looksValid
+                    text: "Connect with password…"
+                    color: pwLinkHover.containsMouse ? theme.ink : theme.inkMid
+                    font.pixelSize: 11
+                    font.underline: pwLinkHover.containsMouse
+                    MouseArea {
+                        id: pwLinkHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            window.askPassword(peerInput.trimmed, "")
+                            peerInput.text = ""
+                        }
+                    }
+                }
 
                 // Divider — sets the Recent list (which mixes outgoing ↑ and
                 // incoming ↓ peers) apart from the "connect to a peer" input above.
@@ -1065,6 +1102,13 @@ ApplicationWindow {
         if (code.length === 0 || !peerInput.looksValid) return
         App.connectToPeer(code)
         peerInput.text = ""
+    }
+
+    // Opens the access-password prompt for `peer`; `message` explains a retry.
+    function askPassword(peer, message) {
+        passwordLoader.peer = peer
+        passwordLoader.message = message
+        passwordLoader.active = true
     }
 
     function showToast(text) {

@@ -69,6 +69,10 @@ class AppController : public QObject {
     // VIV-23: this device's key fingerprint (canonical short form) —
     // read-only, shown in Settings for out-of-band comparison.
     Q_PROPERTY(QString myFingerprint READ myFingerprint NOTIFY identityChanged)
+    // VIV-151 unattended access: a password is set for this host.
+    Q_PROPERTY(bool    accessPasswordSet READ accessPasswordSet NOTIFY accessPasswordChanged)
+    // True while a new password is being stretched (a few hundred ms).
+    Q_PROPERTY(bool    accessPasswordBusy READ accessPasswordBusy NOTIFY accessPasswordChanged)
     Q_PROPERTY(int     activeViews   READ activeViews   NOTIFY activeViewsChanged)
     Q_PROPERTY(vivora::gui::Settings* settings    READ settings    CONSTANT)
     Q_PROPERTY(vivora::gui::AddressBook* peers    READ peers       CONSTANT)
@@ -179,7 +183,12 @@ public slots:
     void startSharing();
     void stopSharing();
     void connectToPeer(const QString& peerCodeOrHex,
-                       const QString& accountPubkeyHex = QString());
+                       const QString& accountPubkeyHex = QString(),
+                       const QString& accessPassword = QString());
+    // VIV-151: dial with the host's unattended-access password.  A wrong or
+    // locked-out password comes back as passwordRequired().
+    Q_INVOKABLE void connectWithPassword(const QString& peerCodeOrHex,
+                                         const QString& password);
     // VIV-52: connect to one of our own account devices.  Pre-pins the
     // device's known mesh key (when it's a current active member) so the
     // viewer skips the first-connect TOFU dialog, then dials its peer code.
@@ -212,6 +221,16 @@ public slots:
     // Force an immediate rendezvous re-registration.  QML calls this
     // from the Refresh button in the sharing card.
     Q_INVOKABLE void refreshRendezvous();
+
+    // VIV-151: set (or replace) / remove this host's unattended-access
+    // password.  set returns false at once for a too-short password; the
+    // rest happens off the GUI thread and ends in accessPasswordChanged
+    // plus a toast.
+    Q_INVOKABLE bool setAccessPassword(const QString& password);
+    Q_INVOKABLE void clearAccessPassword();
+    Q_INVOKABLE int  minAccessPasswordLength() const;
+    bool accessPasswordSet() const  { return accessPasswordSet_; }
+    bool accessPasswordBusy() const { return accessPasswordBusy_; }
 
     // VIV-23 TOFU trust prompt resolution — QML calls this from the
     // TrustPromptDialog buttons.  trust=true pins (or replaces) the peer's
@@ -262,6 +281,11 @@ signals:
     // entirely, and QSystemTrayIcon::supportsMessages() is false on plenty of
     // desktops that do have one, so balloons get silently dropped.
     void toastRequested(const QString& message);
+    // VIV-151 unattended-access password state changed.
+    void accessPasswordChanged();
+    // VIV-151: dialling `peer` needs a (different) password.  `message` says
+    // why ("Wrong password", locked out) and is empty for a first ask.
+    void passwordRequired(const QString& peer, const QString& message);
     // A connection failed in the one way the Vivora-operated relay would have
     // fixed -- the peer was found, the direct path did not come up -- and the
     // relay was skipped for want of a Pro licence.  QML turns this into an
@@ -342,6 +366,10 @@ private:
     // approveConnection() record/pin the viewer in the address book once
     // the user decides (VIV-61).  Cleared on approve/reject.
     QHash<QString, QPair<QString, QString>> pendingApprovals_;
+    // VIV-151 access password state (mirrors the access_psk file).
+    bool accessPasswordSet_  = false;
+    bool accessPasswordBusy_ = false;
+    void refreshAccessPasswordState();
     // One ViewSession per "Connect to peer" click.  Owned here so the
     // stream window survives even when QML drops its reference.
     std::vector<std::unique_ptr<ViewSession>> viewSessions_;

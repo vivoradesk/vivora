@@ -52,6 +52,10 @@ class Settings : public QObject {
     // VIV-65: initial value of the approval dialog's Audio grant toggle.
     // When on, freshly prompted connections default to receiving host audio.
     Q_PROPERTY(bool    audioGrantDefault READ audioGrantDefault WRITE setAudioGrantDefault NOTIFY changed)
+    // VIV-151: a viewer that got in with the access password is added to the
+    // address book as trusted, so it is not asked for the password again.
+    Q_PROPERTY(bool    rememberPasswordDevices READ rememberPasswordDevices
+               WRITE setRememberPasswordDevices NOTIFY changed)
     // Appearance.  theme: 0=light, 1=dark, 2=system.  Stored now; the
     // app is light-only today, dark/system land with the theme engine.
     Q_PROPERTY(int     theme           READ theme           WRITE setTheme           NOTIFY changed)
@@ -90,6 +94,7 @@ public:
     int     approvalMode() const;        void setApprovalMode(int);
     bool    singleSessionLock() const;   void setSingleSessionLock(bool);
     bool    audioGrantDefault() const;   void setAudioGrantDefault(bool);
+    bool    rememberPasswordDevices() const; void setRememberPasswordDevices(bool);
     int     theme() const;               void setTheme(int);
     bool    hdrPassthrough() const;      void setHdrPassthrough(bool);
     int     hostFps() const;             void setHostFps(int);

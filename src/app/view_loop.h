@@ -114,6 +114,8 @@ public:
         PeerNotFound,           // rendezvous answered, that peer is not there
         HostUnreachable,        // peer found, but the session never came up
         RelayRefused,           // the relay turned our license down (VIV-143)
+        WrongPassword,          // the host refused our access password (VIV-151)
+        PasswordLocked,         // ...and is refusing more attempts for now
     };
     ConnectFailure connect_failure() const { return connect_failure_; }
 
@@ -199,6 +201,10 @@ private:
     TimePoint   disconnect_at_{};
     static constexpr int DISCONNECT_LINGER_MS = 1800;
     void update_status(const char* text);
+    // The host ended the session on purpose (declined, kicked, wrong
+    // password): show why and linger briefly.  Returns false once the loop
+    // should exit.
+    bool linger_host_disconnect(client::ClientSession& session);
 
     // VIV-54 auto-reconnect UI driving.  peer_label_ backs the banner text;
     // prev_state_ lets iter() spot the Reconnecting → Connected edge so it can

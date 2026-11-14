@@ -863,6 +863,152 @@ Window {
                             onActivated: App.settings.approvalMode = currentIndex
                         }
                     }
+                    // VIV-151 unattended access.  The password itself is never
+                    // shown again or stored: only a key derived from it.
+                    Field {
+                        id: unattendedField
+                        title: "Unattended access"
+                        help: "Anyone with this password can connect and control this "
+                              + "computer without you accepting. Leave it off unless "
+                              + "you need to reach this machine when nobody is at it."
+                        property bool editing: false
+                        property string err: ""
+
+                        ColumnLayout {
+                            spacing: 8
+                            // State + actions.
+                            RowLayout {
+                                visible: !unattendedField.editing
+                                spacing: 8
+                                Label {
+                                    text: App.accessPasswordSet ? "On" : "Off"
+                                    color: App.accessPasswordSet ? theme.accent : theme.textMuted
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    Layout.preferredWidth: 32
+                                }
+                                Rectangle {
+                                    Layout.preferredHeight: 32
+                                    Layout.preferredWidth: setPwLbl.implicitWidth + 28
+                                    radius: 8; color: theme.ctrlBg
+                                    border.color: theme.border; border.width: 1
+                                    Label { id: setPwLbl; anchors.centerIn: parent
+                                            text: App.accessPasswordSet ? "Change password…"
+                                                                        : "Set password…"
+                                            color: theme.text; font.pixelSize: 13 }
+                                    MouseArea { anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { unattendedField.err = ""
+                                                     unattendedField.editing = true
+                                                     newPw.forceActiveFocus() } }
+                                }
+                                Rectangle {
+                                    visible: App.accessPasswordSet
+                                    Layout.preferredHeight: 32
+                                    Layout.preferredWidth: offPwLbl.implicitWidth + 28
+                                    radius: 8; color: theme.ctrlBg
+                                    border.color: theme.border; border.width: 1
+                                    Label { id: offPwLbl; anchors.centerIn: parent
+                                            text: "Turn off"
+                                            color: theme.warn; font.pixelSize: 13 }
+                                    MouseArea { anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: App.clearAccessPassword() }
+                                }
+                            }
+                            // Entry.
+                            ColumnLayout {
+                                visible: unattendedField.editing
+                                spacing: 6
+                                CreamField {
+                                    id: newPw
+                                    Layout.preferredWidth: 260
+                                    placeholderText: "New password (at least "
+                                                     + App.minAccessPasswordLength() + " characters)"
+                                    echoMode: TextInput.Password
+                                    onAccepted: repeatPw.forceActiveFocus()
+                                }
+                                CreamField {
+                                    id: repeatPw
+                                    Layout.preferredWidth: 260
+                                    placeholderText: "Repeat password"
+                                    echoMode: TextInput.Password
+                                    onAccepted: unattendedField.save()
+                                }
+                                Label {
+                                    visible: unattendedField.err.length > 0
+                                    text: unattendedField.err
+                                    color: theme.warn
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                    Layout.preferredWidth: 260
+                                }
+                                RowLayout {
+                                    spacing: 8
+                                    Rectangle {
+                                        Layout.preferredHeight: 32
+                                        Layout.preferredWidth: savePwLbl.implicitWidth + 28
+                                        radius: 8; color: theme.accent
+                                        opacity: App.accessPasswordBusy ? 0.5 : 1
+                                        Label { id: savePwLbl; anchors.centerIn: parent
+                                                text: "Save"; color: "#ffffff"
+                                                font.pixelSize: 13; font.bold: true }
+                                        MouseArea { anchors.fill: parent
+                                            enabled: !App.accessPasswordBusy
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: unattendedField.save() }
+                                    }
+                                    Rectangle {
+                                        Layout.preferredHeight: 32
+                                        Layout.preferredWidth: cancelPwLbl.implicitWidth + 28
+                                        radius: 8; color: theme.ctrlBg
+                                        border.color: theme.border; border.width: 1
+                                        Label { id: cancelPwLbl; anchors.centerIn: parent
+                                                text: "Cancel"; color: theme.text
+                                                font.pixelSize: 13 }
+                                        MouseArea { anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: unattendedField.reset() }
+                                    }
+                                    BusyIndicator {
+                                        running: App.accessPasswordBusy
+                                        visible: App.accessPasswordBusy
+                                        Layout.preferredHeight: 24
+                                        Layout.preferredWidth: 24
+                                    }
+                                }
+                            }
+                        }
+
+                        function reset() {
+                            newPw.text = ""
+                            repeatPw.text = ""
+                            err = ""
+                            editing = false
+                        }
+                        function save() {
+                            if (newPw.text.length < App.minAccessPasswordLength()) {
+                                err = "Use at least " + App.minAccessPasswordLength() + " characters."
+                                return
+                            }
+                            if (newPw.text !== repeatPw.text) {
+                                err = "The two passwords don't match."
+                                return
+                            }
+                            if (App.setAccessPassword(newPw.text)) reset()
+                        }
+                    }
+                    Field {
+                        visible: App.accessPasswordSet
+                        title: "Remember password devices"
+                        help: "A device that connected with the password is trusted "
+                              + "from then on and skips it. To revoke, choose "
+                              + "“Stop auto-accepting” on it under Recent."
+                        CreamSwitch {
+                            checked: App.settings.rememberPasswordDevices
+                            onToggled: App.settings.rememberPasswordDevices = checked
+                        }
+                    }
                     Field {
                         title: "Audio on by default"
                         help: "Pre-select the Audio grant when approving a new connection."

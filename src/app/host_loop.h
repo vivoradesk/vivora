@@ -80,6 +80,10 @@ struct HostLoopConfig {
     // poll iteration.  Cleared by the loop after firing.
     std::atomic<bool>* rendezvous_refresh_flag = nullptr;
 
+    // VIV-151: set after the access-password file changed (Settings); the
+    // loop asks the session to re-read it.  Cleared by the loop.
+    std::atomic<bool>* access_password_reload_flag = nullptr;
+
     // VIV-22 clipboard sync (GUI mode only).  When set, each loop tick
     // drains the bridge's outbound slot into session.send_clipboard() and
     // pushes any reassembled viewer clipboard into the inbound slot for

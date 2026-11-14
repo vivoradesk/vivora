@@ -139,6 +139,7 @@ void HostWorker::runOnWorkerThread() {
     lcfg.approval_gate      = cfg_.approval_gate;
     lcfg.clipboard          = cfg_.clipboard;   // VIV-22
     lcfg.rendezvous_refresh_flag = &rendezvous_refresh_flag_;
+    lcfg.access_password_reload_flag = &access_password_reload_flag_;
     // Bounce the idle warning through a queued connection so the toast
     // is raised on the GUI thread.  Lambda capture is fine — the worker
     // thread outlives the run_host_loop call.

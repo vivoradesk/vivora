@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <thread>
 #include "app/gui/app_controller.h"
 
 #include <QFontDatabase>
@@ -18,6 +20,7 @@
 #include "app/gui/view_session.h"
 #endif
 
+#include "common/crypto/access_password.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/license_pubkey.h"
 #include "common/crypto/license_token.h"
@@ -34,6 +37,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -209,6 +213,31 @@ AppController::AppController(QObject* parent) : QObject(parent) {
                 QString("A peer (%1) wants to view your desktop.").arg(ip));
             emit connectionApprovalRequested(k, code, pubkey, ip,
                                              recognized, seenCount, name);
+        }, Qt::QueuedConnection);
+    });
+    // VIV-151: a viewer got in with the unattended-access password.  Nobody
+    // clicked anything, so say so, and remember the device if the user asked
+    // for that (it then skips the password next time, and can be revoked by
+    // clearing its trusted flag in the address book).
+    approvalGate_->set_password_login_callback([this](uint64_t,
+                                                      const std::string& peer_code,
+                                                      const std::string& pubkey_hex,
+                                                      const std::string& ip_port,
+                                                      const std::string& device_name) {
+        const QString code   = QString::fromStdString(peer_code);
+        const QString pubkey = QString::fromStdString(pubkey_hex);
+        const QString ip     = QString::fromStdString(ip_port);
+        const QString name   = QString::fromStdString(device_name);
+        QMetaObject::invokeMethod(this, [this, code, pubkey, ip, name] {
+            if (peers_ && !pubkey.isEmpty()) {
+                peers_->touchIncoming(pubkey, code);
+                if (settings_ && settings_->rememberPasswordDevices())
+                    peers_->setTrustedByPubkey(pubkey, true);
+            }
+            const QString who = name.isEmpty() ? (code.isEmpty() ? ip : code) : name;
+            const QString msg = QString("%1 connected with your access password.").arg(who);
+            emit toastRequested(msg);
+            if (tray_) tray_->notify("Vivora", msg);
         }, Qt::QueuedConnection);
     });
     connect(hostWorker_.get(), &HostWorker::stopped, this, [this] {
@@ -392,6 +421,75 @@ void AppController::loadIdentity() {
     // VIV-23: canonical short fingerprint for out-of-band verification.
     myFingerprint_ = QString::fromStdString(crypto::key_fingerprint(kp.public_key));
     emit identityChanged();
+    refreshAccessPasswordState();
+}
+
+// -- Unattended access (VIV-151) ---------------------------------------------
+
+void AppController::refreshAccessPasswordState() {
+    crypto::KeyPair kp;
+    bool set = false;
+    if (crypto::load_or_create_host_identity(kp, "")) {
+        uint8_t psk[crypto::ACCESS_PSK_SIZE];
+        set = crypto::load_access_psk(crypto::access_psk_path_for(), kp.public_key, psk);
+        std::memset(psk, 0, sizeof(psk));
+    }
+    kp.wipe();
+    if (set != accessPasswordSet_) {
+        accessPasswordSet_ = set;
+        emit accessPasswordChanged();
+    }
+}
+
+int AppController::minAccessPasswordLength() const {
+    return static_cast<int>(crypto::MIN_ACCESS_PASSWORD_LEN);
+}
+
+bool AppController::setAccessPassword(const QString& password) {
+    std::string pw = password.toStdString();
+    if (pw.size() < crypto::MIN_ACCESS_PASSWORD_LEN || accessPasswordBusy_) return false;
+    accessPasswordBusy_ = true;
+    emit accessPasswordChanged();
+    // Argon2id takes a few hundred ms and 64 MiB: keep it off the GUI thread.
+    QPointer<AppController> self(this);
+    std::thread([self, pw = std::move(pw)]() mutable {
+        bool ok = false;
+        crypto::KeyPair kp;
+        if (crypto::load_or_create_host_identity(kp, "")) {
+            uint8_t psk[crypto::ACCESS_PSK_SIZE];
+            ok = crypto::derive_access_psk(pw, kp.public_key, psk)
+              && crypto::save_access_psk(crypto::access_psk_path_for(), kp.public_key, psk);
+            std::memset(psk, 0, sizeof(psk));
+        }
+        kp.wipe();
+        std::fill(pw.begin(), pw.end(), '\0');
+        QMetaObject::invokeMethod(qApp, [self, ok] {
+            if (!self) return;
+            self->accessPasswordBusy_ = false;
+            self->refreshAccessPasswordState();
+            emit self->accessPasswordChanged();
+            if (self->hostWorker_) self->hostWorker_->requestAccessPasswordReload();
+            log::info("AppController", "Access password %s", ok ? "saved" : "NOT saved");
+            emit self->toastRequested(ok
+                ? QStringLiteral("Access password saved")
+                : QStringLiteral("Could not save the access password"));
+        }, Qt::QueuedConnection);
+    }).detach();
+    return true;
+}
+
+void AppController::clearAccessPassword() {
+    const bool ok = crypto::clear_access_psk(crypto::access_psk_path_for());
+    refreshAccessPasswordState();
+    if (hostWorker_) hostWorker_->requestAccessPasswordReload();
+    log::info("AppController", "Access password %s", ok ? "cleared" : "NOT cleared");
+    emit toastRequested(ok ? QStringLiteral("Password access turned off")
+                           : QStringLiteral("Could not remove the access password"));
+}
+
+void AppController::connectWithPassword(const QString& peerCodeOrHex,
+                                        const QString& password) {
+    connectToPeer(peerCodeOrHex, QString(), password);
 }
 
 void AppController::startSharing() {
@@ -479,7 +577,8 @@ void AppController::stopSharing() {
 }
 
 void AppController::connectToPeer(const QString& peerCodeOrHex,
-                                 const QString& accountPubkeyHex) {
+                                 const QString& accountPubkeyHex,
+                                 const QString& accessPassword) {
     log::info("AppController", "Connect requested: %s",
               peerCodeOrHex.toUtf8().constData());
 #if defined(VIVORA_WINDOWS) || defined(VIVORA_MACOS) || defined(VIVORA_LINUX)
@@ -508,6 +607,7 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         relayGatedThisDial = gated;
     }
     vc.license_file       = settings_->licenseFile().toStdString();
+    vc.access_password    = accessPassword.toStdString();
     vc.view_fps_cap       = settings_->viewFpsCap();
     vc.view_max_kbps      = settings_->viewMaxKbps();
     // VIV-54: keep the stream window open and auto-reconnect for up to the
@@ -539,6 +639,10 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
         const bool relayWouldHelp  =
             relayGatedThisDial &&
             vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::HostUnreachable;
+        // VIV-151: the host refused our password -- ask again rather than toast.
+        const bool passwordRefused =
+            vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::WrongPassword
+            || vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::PasswordLocked;
         // VIV-143: the relay rejected the token we hold.  Pull a fresh one now
         // rather than at the next hourly check, so a retry can succeed.
         if (vs_ptr->connectFailure() == ViewLoopState::ConnectFailure::RelayRefused
@@ -568,7 +672,8 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
                 break;
             }
         }
-        log::info("AppController", "View session ended (%d remaining)", activeViews_);
+        log::info("AppController", "View session ended (%d remaining, failure=%d)", activeViews_,
+                  static_cast<int>(vs_ptr->connectFailure()));
         // Raise the same VIV-23 dialog the initial-connect path uses; on
         // consent resolveTrustPrompt() re-pins and re-dials `dial`.
         if (trustBroken) {
@@ -580,6 +685,9 @@ void AppController::connectToPeer(const QString& peerCodeOrHex,
             const QString oldFp = QString::fromStdString(
                 crypto::key_fingerprint_hex(oldHex.toStdString()));
             emit trustPromptRequested(code, newFp, oldFp, mismatch);
+            emit showWindowRequested();
+        } else if (passwordRefused) {
+            emit passwordRequired(dial, failReason);
             emit showWindowRequested();
         } else if (neverConnected) {
             // Say WHY.  This used to be one balloon reading "Could not connect

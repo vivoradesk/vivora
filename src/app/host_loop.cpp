@@ -321,6 +321,10 @@ int run_host_loop(HostPlatform& platform, const HostLoopConfig& cfg) {
             && cfg.rendezvous_refresh_flag->exchange(false)) {
             session.request_rendezvous_refresh();
         }
+        if (cfg.access_password_reload_flag
+            && cfg.access_password_reload_flag->exchange(false)) {
+            session.request_access_password_reload();
+        }
 
         // VIV-52: kick any live viewer whose device just lost account
         // membership.  The GUI thread queues its static pubkey on the shared

@@ -208,6 +208,7 @@ set(VIVORA_QML_FILES
         ${CMAKE_SOURCE_DIR}/qml/MyDevicesBlock.qml
         ${CMAKE_SOURCE_DIR}/qml/MyDevicesSettings.qml
         ${CMAKE_SOURCE_DIR}/qml/ProGate.qml
+        ${CMAKE_SOURCE_DIR}/qml/PasswordPromptDialog.qml
         ${CMAKE_SOURCE_DIR}/qml/RelayProDialog.qml
         ${CMAKE_SOURCE_DIR}/qml/RemoveDeviceDialog.qml
         ${CMAKE_SOURCE_DIR}/qml/ScreenRecordingPermissionDialog.qml

@@ -81,6 +81,12 @@ public:
         rendezvous_refresh_flag_.store(true, std::memory_order_release);
     }
 
+    // The access-password file was set or cleared (VIV-151): the running
+    // host re-reads it on its next poll.  A stopped host reads it at start.
+    void requestAccessPasswordReload() {
+        access_password_reload_flag_.store(true, std::memory_order_release);
+    }
+
     bool running() const { return running_.load(std::memory_order_relaxed); }
     int  clientCount() const { return client_count_.load(std::memory_order_relaxed); }
     int  state() const       { return state_.load(std::memory_order_relaxed); }
@@ -114,6 +120,7 @@ private:
     std::atomic<int>                 state_{0};
     std::atomic<bool>                running_{false};
     std::atomic<bool>                rendezvous_refresh_flag_{false};
+    std::atomic<bool>                access_password_reload_flag_{false};
     std::unique_ptr<HostPlatform>    platform_;   // lives on worker thread
 };
 
