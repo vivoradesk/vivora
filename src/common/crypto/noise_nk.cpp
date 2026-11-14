@@ -15,7 +15,10 @@ namespace vivora::crypto {
 // Protocol name fixes the handshake pattern, DH, cipher, and hash so that
 // any mismatch between peers shows up as a handshake failure rather than
 // silent interop. See Noise spec §8.
-static const char kProtocolName[] = "Noise_IK_25519_ChaChaPoly_BLAKE2b";
+static const char kProtocolName[]    = "Noise_IK_25519_ChaChaPoly_BLAKE2b";
+// IK with a pre-shared key mixed in after `ss` (Noise spec §9).  The distinct
+// protocol name keeps the two variants from ever deriving the same keys.
+static const char kProtocolNamePsk[] = "Noise_IKpsk1_25519_ChaChaPoly_BLAKE2b";
 // BLAKE2b produces 64-byte digests — Noise HASHLEN for this variant.
 static constexpr size_t HASHLEN    = 64;
 // BLAKE2b internal block size — needed for HMAC construction.
@@ -88,6 +91,25 @@ static void noise_hkdf2(uint8_t out1[HASHLEN], uint8_t out2[HASHLEN],
     crypto_wipe(msg2_buf, sizeof(msg2_buf));
 }
 
+// Noise HKDF with three outputs, needed by MixKeyAndHash (psk token).
+static void noise_hkdf3(uint8_t out1[HASHLEN], uint8_t out2[HASHLEN],
+                        uint8_t out3[HASHLEN], const uint8_t ck[HASHLEN],
+                        const uint8_t* ikm, size_t ikm_len) {
+    uint8_t temp_k[HASHLEN];
+    hmac_blake2b(temp_k, ck, HASHLEN, ikm, ikm_len);
+    uint8_t one = 0x01;
+    hmac_blake2b(out1, temp_k, HASHLEN, &one, 1);
+    uint8_t buf[HASHLEN + 1];
+    std::memcpy(buf, out1, HASHLEN);
+    buf[HASHLEN] = 0x02;
+    hmac_blake2b(out2, temp_k, HASHLEN, buf, HASHLEN + 1);
+    std::memcpy(buf, out2, HASHLEN);
+    buf[HASHLEN] = 0x03;
+    hmac_blake2b(out3, temp_k, HASHLEN, buf, HASHLEN + 1);
+    crypto_wipe(temp_k, sizeof(temp_k));
+    crypto_wipe(buf, sizeof(buf));
+}
+
 // 12-byte IETF ChaCha20-Poly1305 nonce: 4 zero bytes || 8-byte LE counter.
 // Noise spec §5.2 pins this encoding to keep the derived cipher-state nonce
 // interoperable across implementations.
@@ -141,6 +163,20 @@ struct SymmetricState {
         has_key = true;
         n = 0;
         crypto_wipe(new_ck, sizeof(new_ck));
+        crypto_wipe(temp_k, sizeof(temp_k));
+    }
+
+    // MixKeyAndHash (Noise §5.2), used for the psk token.
+    void mix_key_and_hash(const uint8_t* input_key_material, size_t len) {
+        uint8_t new_ck[HASHLEN], temp_h[HASHLEN], temp_k[HASHLEN];
+        noise_hkdf3(new_ck, temp_h, temp_k, ck, input_key_material, len);
+        std::memcpy(ck, new_ck, HASHLEN);
+        mix_hash(temp_h, HASHLEN);
+        std::memcpy(k, temp_k, 32);
+        has_key = true;
+        n = 0;
+        crypto_wipe(new_ck, sizeof(new_ck));
+        crypto_wipe(temp_h, sizeof(temp_h));
         crypto_wipe(temp_k, sizeof(temp_k));
     }
 
@@ -255,6 +291,19 @@ struct HandshakeStateNK::State {
     uint8_t        remote_static[32] = {};  // initiator: set at init; responder: from msg1
     bool           has_remote_static = false;
     uint8_t        remote_ephemeral[32] = {};
+    uint8_t        psk[32] = {};
+    bool           has_psk = false;
+
+    // Token `e` in a psk handshake also runs MixKey(e.public_key) (Noise §9.2).
+    void mix_ephemeral(const uint8_t pub[32]) {
+        ss.mix_hash(pub, 32);
+        if (has_psk) ss.mix_key(pub, 32);
+    }
+    void set_psk(const uint8_t* key) {
+        has_psk = key != nullptr;
+        if (has_psk) std::memcpy(psk, key, 32);
+        else crypto_wipe(psk, sizeof(psk));
+    }
 };
 
 // --- KeyPair ----------------------------------------------------------------
@@ -279,16 +328,21 @@ HandshakeStateNK::~HandshakeStateNK() {
     if (s_) {
         s_->local_static.wipe();
         s_->local_ephemeral.wipe();
+        crypto_wipe(s_->psk, sizeof(s_->psk));
     }
 }
 
+bool HandshakeStateNK::uses_psk() const { return s_ && s_->has_psk; }
+
 bool HandshakeStateNK::init_initiator(const uint8_t remote_static_pk[32],
-                                      const KeyPair& local_static) {
+                                      const KeyPair& local_static,
+                                      const uint8_t* psk) {
     if (!remote_static_pk) return false;
     role_ = Role::Initiator;
     complete_ = false;
     step_ = 0;
-    s_->ss.init_symmetric(kProtocolName);
+    s_->set_psk(psk);
+    s_->ss.init_symmetric(psk ? kProtocolNamePsk : kProtocolName);
     s_->local_static = local_static;   // our identity — sent (encrypted) in msg1
     // IK pre-message: hash the responder's static public key into h so both
     // sides start from the same state.  The responder side mirrors this.
@@ -298,11 +352,13 @@ bool HandshakeStateNK::init_initiator(const uint8_t remote_static_pk[32],
     return true;
 }
 
-bool HandshakeStateNK::init_responder(const KeyPair& local_static) {
+bool HandshakeStateNK::init_responder(const KeyPair& local_static,
+                                      const uint8_t* psk) {
     role_ = Role::Responder;
     complete_ = false;
     step_ = 0;
-    s_->ss.init_symmetric(kProtocolName);
+    s_->set_psk(psk);
+    s_->ss.init_symmetric(psk ? kProtocolNamePsk : kProtocolName);
     s_->local_static = local_static;
     s_->has_remote_static = false;      // learned from msg1 (initiator's static)
     s_->ss.mix_hash(s_->local_static.public_key, 32);
@@ -327,7 +383,7 @@ size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_le
 
         if (!generate_x25519_keypair(s_->local_ephemeral)) return 0;
         std::memcpy(out, s_->local_ephemeral.public_key, 32);
-        s_->ss.mix_hash(s_->local_ephemeral.public_key, 32);
+        s_->mix_ephemeral(s_->local_ephemeral.public_key);
 
         // es: DH(initiator_e_priv, responder_s_pub) — keys the channel so the
         // static below is encrypted.
@@ -344,6 +400,10 @@ size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_le
         s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
+        // psk (IKpsk1 only): the payload below opens only for a responder
+        // holding the same key.
+        if (s_->has_psk) s_->ss.mix_key_and_hash(s_->psk, 32);
+
         // payload, encrypted under the post-ss key.
         uint8_t* payload_out = out + 32 + 32 + TAGLEN;
         if (payload_len) std::memcpy(payload_out, payload, payload_len);
@@ -359,7 +419,7 @@ size_t HandshakeStateNK::write_message(const uint8_t* payload, size_t payload_le
 
         if (!generate_x25519_keypair(s_->local_ephemeral)) return 0;
         std::memcpy(out, s_->local_ephemeral.public_key, 32);
-        s_->ss.mix_hash(s_->local_ephemeral.public_key, 32);
+        s_->mix_ephemeral(s_->local_ephemeral.public_key);
 
         // ee: DH(responder_e_priv, initiator_e_pub)
         uint8_t dh[DHLEN];
@@ -396,7 +456,7 @@ int HandshakeStateNK::read_message(const uint8_t* wire, size_t wire_len,
         if (payload_out_capacity < payload_len) return -1;
 
         std::memcpy(s_->remote_ephemeral, wire, 32);
-        s_->ss.mix_hash(s_->remote_ephemeral, 32);
+        s_->mix_ephemeral(s_->remote_ephemeral);
 
         // es: DH(responder_s_priv, initiator_e_pub)
         uint8_t dh[DHLEN];
@@ -419,6 +479,11 @@ int HandshakeStateNK::read_message(const uint8_t* wire, size_t wire_len,
         s_->ss.mix_key(dh, DHLEN);
         crypto_wipe(dh, sizeof(dh));
 
+        // psk (IKpsk1 only).  A wrong key fails the payload tag below, after
+        // the initiator's static is already known, so peer_static_key() still
+        // names who tried.  The host logs that.
+        if (s_->has_psk) s_->ss.mix_key_and_hash(s_->psk, 32);
+
         // payload
         uint8_t tmp[1500];
         if (payload_len + TAGLEN > sizeof(tmp)) return -1;
@@ -437,7 +502,7 @@ int HandshakeStateNK::read_message(const uint8_t* wire, size_t wire_len,
         if (payload_out_capacity < payload_len) return -1;
 
         std::memcpy(s_->remote_ephemeral, wire, 32);
-        s_->ss.mix_hash(s_->remote_ephemeral, 32);
+        s_->mix_ephemeral(s_->remote_ephemeral);
 
         // ee: DH(initiator_e_priv, responder_e_pub)
         uint8_t dh[DHLEN];

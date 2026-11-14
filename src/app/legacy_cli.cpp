@@ -4,11 +4,16 @@
 #include "app/legacy_cli.h"
 #include "app/host_loop.h"
 #include "app/view_loop.h"
+#include "common/crypto/access_password.h"
+#include "common/crypto/host_identity.h"
 #include "common/utils/log.h"
 #include "host/encode/video_encoder.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 #ifdef VIVORA_WINDOWS
 // winsock_socket.h must come first — it includes winsock2.h which must
@@ -73,6 +78,70 @@ static void print_usage(const char* prog) {
     std::printf("  --relay HP        Relay server \"host:port\"\n");
     std::printf("  --relay-session HEX  64-char hex shared 32-byte session id\n");
     std::printf("  --license PATH    95-byte license token file (Pro relay)\n");
+    std::printf("\nUnattended access (a viewer with the password needs no approval):\n");
+    std::printf("  --set-access-password    (host) Read a new password from stdin and save it\n");
+    std::printf("  --clear-access-password  (host) Turn password access off\n");
+    std::printf("  --password-file PATH     (view) Connect with the password in this file\n");
+    std::printf("                           (or set VIVORA_ACCESS_PASSWORD)\n");
+}
+
+// Reads the first line of `path`, without the line ending.
+static bool read_first_line(const char* path, std::string& out) {
+    FILE* fp = std::fopen(path, "rb");
+    if (!fp) return false;
+    char buf[1024];
+    const bool ok = std::fgets(buf, sizeof(buf), fp) != nullptr;
+    std::fclose(fp);
+    if (!ok) return false;
+    out = buf;
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return true;
+}
+
+// --set-access-password / --clear-access-password (VIV-151).  The password
+// comes from stdin, never argv, so it stays out of shell history and process
+// listings.  Applies to the per-user host key; a running host picks it up on
+// its next start.
+static int manage_access_password(bool set, const std::string& host_key_path) {
+    vivora::crypto::KeyPair id;
+    if (!vivora::crypto::load_or_create_host_identity(id, host_key_path)) {
+        std::fprintf(stderr, "Error: cannot load the host key\n");
+        return 1;
+    }
+    const std::string path = vivora::crypto::access_psk_path_for(host_key_path);
+    if (!set) {
+        if (!vivora::crypto::clear_access_psk(path)) {
+            std::fprintf(stderr, "Error: cannot remove %s\n", path.c_str());
+            return 1;
+        }
+        std::printf("Password access is off.\n");
+        return 0;
+    }
+    std::fprintf(stderr, "New access password: ");
+    char buf[1024];
+    if (!std::fgets(buf, sizeof(buf), stdin)) {
+        std::fprintf(stderr, "\nError: no password on stdin\n");
+        return 1;
+    }
+    std::string pw = buf;
+    std::memset(buf, 0, sizeof(buf));
+    while (!pw.empty() && (pw.back() == '\n' || pw.back() == '\r')) pw.pop_back();
+    if (pw.size() < vivora::crypto::MIN_ACCESS_PASSWORD_LEN) {
+        std::fprintf(stderr, "Error: use at least %zu characters\n",
+                     vivora::crypto::MIN_ACCESS_PASSWORD_LEN);
+        return 1;
+    }
+    uint8_t psk[vivora::crypto::ACCESS_PSK_SIZE];
+    const bool ok = vivora::crypto::derive_access_psk(pw, id.public_key, psk)
+                 && vivora::crypto::save_access_psk(path, id.public_key, psk);
+    std::fill(pw.begin(), pw.end(), '\0');
+    std::memset(psk, 0, sizeof(psk));
+    if (!ok) {
+        std::fprintf(stderr, "Error: cannot save %s\n", path.c_str());
+        return 1;
+    }
+    std::printf("Password access is on.\n");
+    return 0;
 }
 
 int run_legacy_cli(int argc, char** argv) {
@@ -92,6 +161,8 @@ int run_legacy_cli(int argc, char** argv) {
     const char* relay_server = nullptr;
     const char* relay_session_hex = nullptr;
     const char* license_file = nullptr;
+    const char* password_file = nullptr;
+    int access_action = 0;   // 1 = set, 2 = clear
 
     for (int i = 1; i < argc; ++i) {
         const char* v = nullptr;
@@ -144,6 +215,12 @@ int run_legacy_cli(int argc, char** argv) {
             relay_session_hex = v;
         } else if ((v = flag_value("--license", argv, argc, i)) != nullptr) {
             license_file = v;
+        } else if ((v = flag_value("--password-file", argv, argc, i)) != nullptr) {
+            password_file = v;
+        } else if (std::strcmp(argv[i], "--set-access-password") == 0) {
+            access_action = 1;
+        } else if (std::strcmp(argv[i], "--clear-access-password") == 0) {
+            access_action = 2;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -154,6 +231,7 @@ int run_legacy_cli(int argc, char** argv) {
         std::fprintf(stderr, "Error: cannot use --host and --view together\n");
         return 1;
     }
+    if (access_action) return manage_access_password(access_action == 1, {});
 
     if (mode_host) {
 #ifdef VIVORA_WINDOWS
@@ -232,6 +310,14 @@ int run_legacy_cli(int argc, char** argv) {
         vcfg.relay_server = relay_server;
         vcfg.relay_session_hex = relay_session_hex;
         vcfg.license_file = license_file;
+        if (password_file) {
+            if (!read_first_line(password_file, vcfg.access_password)) {
+                std::fprintf(stderr, "Error: cannot read %s\n", password_file);
+                return 1;
+            }
+        } else if (const char* pw = std::getenv("VIVORA_ACCESS_PASSWORD")) {
+            vcfg.access_password = pw;
+        }
         return vivora::run_view_loop(platform, vcfg);
     }
 

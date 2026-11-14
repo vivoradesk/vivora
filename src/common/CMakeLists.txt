@@ -21,6 +21,8 @@ add_library(vivora_common STATIC
     audio/audio_platform_stub.cpp
     crypto/random.cpp
     crypto/noise_nk.cpp
+    crypto/access_password.cpp
+    crypto/access_throttle.cpp
     crypto/host_identity.cpp
     crypto/license_token.cpp
     crypto/packet_crypto.cpp

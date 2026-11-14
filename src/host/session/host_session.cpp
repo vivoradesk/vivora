@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "host/session/host_session.h"
+#include "common/crypto/access_password.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
 #include "common/net/relay_protocol.h"
@@ -39,6 +40,7 @@ bool HostSession::start(uint16_t port) {
         log::info("HostSession", "Host public key: %s",
                   crypto::hex_encode(host_identity_.public_key, 32).c_str());
     }
+    load_access_password();
 
     socket_ = net::IUdpSocket::create();
     if (!socket_) return false;
@@ -223,6 +225,8 @@ void HostSession::stop() {
 
 void HostSession::poll() {
     if (!socket_) return;
+
+    if (access_reload_pending_.exchange(false)) load_access_password();
 
     // Reset retransmit budget so NACK handling doesn't starve capture.
     if (sender_) sender_->reset_retx_budget();
@@ -826,6 +830,37 @@ bool HostSession::send_sealed(ClientInfo& client, const std::vector<uint8_t>& wi
     return transport_send(sealed, sealed_len, client.addr) >= 0;
 }
 
+void HostSession::load_access_password() {
+    const std::string path = crypto::access_psk_path_for(host_identity_path_);
+    const bool was_set = access_psk_set_;
+    access_psk_set_ = crypto::load_access_psk(path, host_identity_.public_key, access_psk_);
+    if (!access_psk_set_) std::memset(access_psk_, 0, sizeof(access_psk_));
+    if (access_psk_set_ != was_set || !was_set)
+        log::info("HostSession", "Unattended access password: %s",
+                  access_psk_set_ ? "on" : "off");
+}
+
+void HostSession::send_access_reply(const net::SocketAddr& to,
+                                    protocol::AccessReplyCode code,
+                                    int64_t retry_after_ms) {
+    protocol::AccessReply reply;
+    reply.code = code;
+    const int64_t s = (retry_after_ms + 999) / 1000;
+    reply.retry_after_s = static_cast<uint16_t>(std::min<int64_t>(s, 0xFFFF));
+    uint8_t body[protocol::AccessReply::WIRE_SIZE];
+    reply.serialize(body);
+
+    protocol::Packet pkt;
+    pkt.header.type = protocol::PacketType::Control;
+    pkt.header.seq_no = 0;
+    pkt.header.timestamp = 0;
+    pkt.header.flags = 0;
+    pkt.payload.assign(body, body + sizeof(body));
+    pkt.header.payload_len = static_cast<uint16_t>(pkt.payload.size());
+    auto wire = pkt.serialize();
+    transport_send(wire.data(), wire.size(), to);
+}
+
 void HostSession::handle_hello(const uint8_t* payload, size_t len,
                                const net::SocketAddr& sender) {
     // Replay/flood damping (VIV-92): a valid msg1 that's captured and
@@ -855,6 +890,54 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
 
     uint8_t inner[128] = {};
     int inner_len = handshake->read_message(payload, len, inner, sizeof(inner));
+
+    // VIV-151: a msg1 that does not open as plain IK may be a viewer using
+    // the unattended-access password (IKpsk1).  Plain goes first so viewers
+    // without a password are never slowed down or counted by the throttle.
+    bool via_password = false;
+    if (inner_len < 0 && access_psk_set_) {
+        const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            hello_now.time_since_epoch()).count();
+        char ip[32];
+        std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u:%u",
+            (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
+            (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
+
+        if (const int64_t wait = access_throttle_.blocked_for_ms(sender.ip, now_ms)) {
+            // Locked out: do not even try the key, so a locked attacker learns
+            // nothing from further guesses.
+            send_access_reply(sender, protocol::AccessReplyCode::LockedOut, wait);
+            return;
+        }
+        handshake = std::make_unique<crypto::HandshakeStateNK>();
+        if (!handshake->init_responder(host_identity_, access_psk_)) return;
+        inner_len = handshake->read_message(payload, len, inner, sizeof(inner));
+        if (inner_len < 0) {
+            // Only a msg1 whose static key opened is a real password attempt;
+            // anything else is noise or a viewer pinned to another host key,
+            // and counting it would let junk packets lock the owner out.
+            uint8_t who[32];
+            if (!handshake->peer_static_key(who)) {
+                log::warn("HostSession", "Noise msg1 rejected from %s", ip);
+                return;
+            }
+            const std::string who_hex = crypto::hex_encode(who, 32);
+            const bool locked = access_throttle_.record_failure(sender.ip, now_ms);
+            log::warn("HostSession", "Wrong access password from %s (viewer %s)",
+                      ip, crypto::key_fingerprint_hex(who_hex).c_str());
+            if (locked) {
+                log::warn("HostSession",
+                          "Too many wrong access passwords; password logins paused");
+                send_access_reply(sender, protocol::AccessReplyCode::LockedOut,
+                                  access_throttle_.blocked_for_ms(sender.ip, now_ms));
+            } else {
+                send_access_reply(sender, protocol::AccessReplyCode::WrongPassword, 0);
+            }
+            return;
+        }
+        access_throttle_.record_success(sender.ip);
+        via_password = true;
+    }
     if (inner_len < 0) {
         log::warn("HostSession", "Noise msg1 rejected from %u.%u.%u.%u:%u",
                   (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
@@ -1017,7 +1100,9 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
     const bool dev_auto = util::env_flag("VIVORA_AUTO_ACCEPT");
     // prior_approved: same viewer re-handshaking an already-approved session —
     // keep it approved and skip the popup (VIV-92).
-    if (!approval_gate_ || dev_auto || prior_approved) {
+    // via_password: the viewer proved the unattended-access password inside
+    // the handshake (VIV-151), so nobody needs to be at the host to click.
+    if (!approval_gate_ || dev_auto || prior_approved || via_password) {
         client.approved = true;
         // VIV-65: honour the audio grant here too.  For a CLI/dev host with
         // no gate the grant defaults to audio=true; on a prior_approved
@@ -1033,8 +1118,24 @@ void HostSession::handle_hello(const uint8_t* payload, size_t len,
                       (client.audio_dest.ip >> 16) & 0xFF, (client.audio_dest.ip >> 24) & 0xFF,
                       client_audio_port);
         }
-        if (approval_gate_) approval_gate_->preapprove(
-            host::HostApprovalGate::make_key(sender.ip, sender.port));
+        const uint64_t gate_key = host::HostApprovalGate::make_key(sender.ip, sender.port);
+        if (approval_gate_ && via_password && !prior_approved) {
+            std::string peer_code, pubkey_hex;
+            if (have_client_pubkey) {
+                pubkey_hex = crypto::hex_encode(client_pubkey, 32);
+                peer_code  = peer_code::encode(client_pubkey);
+            }
+            char ip[32];
+            std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u:%u",
+                (sender.ip >> 0) & 0xFF, (sender.ip >> 8) & 0xFF,
+                (sender.ip >> 16) & 0xFF, (sender.ip >> 24) & 0xFF, sender.port);
+            approval_gate_->notify_password_login(gate_key, peer_code, pubkey_hex,
+                                                  ip, client_name);
+        } else if (approval_gate_) {
+            approval_gate_->preapprove(gate_key);
+        }
+        if (via_password)
+            log::info("HostSession", "Viewer let in with the access password");
     } else {
         // Pending — fire the popup.  The viewer's peer code + pubkey
         // fingerprint come from the static key the IK handshake just

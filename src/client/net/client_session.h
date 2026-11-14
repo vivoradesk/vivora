@@ -78,6 +78,16 @@ public:
     // Input is a raw 32-byte pubkey (hex-decoded at the CLI layer).
     void set_host_key(const uint8_t host_pk[32]);
 
+    // Unattended-access password for this host (VIV-151).  Empty = none:
+    // the host's approval prompt decides as before.  With a password the
+    // handshake runs as IKpsk1 and a host that accepts it lets us in without
+    // a prompt.  The key is stretched with Argon2id once the host key is
+    // known (in start(), a few hundred ms), so call start() off the UI thread.
+    void set_access_password(const std::string& password);
+    // Seconds the host said to wait after too many wrong passwords; 0 if it
+    // did not say.  Meaningful when disconnect_reason() is PasswordLocked.
+    int access_retry_after_s() const { return access_retry_after_s_; }
+
     // Connect to host at given IP:port. Non-blocking — call poll() to drive.
     bool start(const char* host_ip, uint16_t port);
     void stop();
@@ -370,6 +380,15 @@ private:
     crypto::KeyPair client_identity_{};
     bool client_identity_loaded_ = false;
     bool ensure_client_identity();
+    // VIV-151 access password and the key derived from it for host_static_pk_.
+    std::string access_password_;
+    uint8_t     access_psk_[32] = {};
+    uint8_t     access_psk_host_[32] = {};   // host key the psk was derived for
+    bool        access_psk_ready_ = false;
+    int         access_retry_after_s_ = 0;
+    bool ensure_access_psk();
+    // nullptr when no password is set.
+    const uint8_t* access_psk() const { return access_psk_ready_ ? access_psk_ : nullptr; }
     crypto::HandshakeStateNK handshake_;
     crypto::CipherState send_cs_;
     crypto::CipherState recv_cs_;

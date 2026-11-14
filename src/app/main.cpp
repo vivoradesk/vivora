@@ -56,6 +56,8 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--host") == 0
          || std::strcmp(argv[i], "--view") == 0
+         || std::strcmp(argv[i], "--set-access-password") == 0
+         || std::strcmp(argv[i], "--clear-access-password") == 0
          || std::strcmp(argv[i], "--help") == 0
          || std::strcmp(argv[i], "-h")     == 0) {
             cli_mode = true;

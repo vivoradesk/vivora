@@ -82,6 +82,11 @@ target_link_libraries(noise_test PRIVATE vivora_common)
 target_include_directories(noise_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME noise_test COMMAND noise_test)
 
+add_executable(access_password_test access_password_test.cpp)
+target_link_libraries(access_password_test PRIVATE vivora_common)
+target_include_directories(access_password_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME access_password_test COMMAND access_password_test)
+
 # Lock-free pipeline primitives (VIV-81): header-only, so the test only needs
 # a threading library.  Threads::Threads keeps it correct on Linux/macOS too.
 find_package(Threads REQUIRED)

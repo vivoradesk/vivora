@@ -64,6 +64,9 @@ struct ViewLoopConfig {
     // Display label for the reconnect banner ("Reconnecting to <peer>…").
     // Empty falls back to a generic wording.
     const char* peer_label = nullptr;
+    // Unattended-access password for this host (VIV-151).  Empty = ask the
+    // host's user to approve, as before.
+    std::string access_password;
 };
 
 // Iterable view-loop state machine.  Split out of the legacy

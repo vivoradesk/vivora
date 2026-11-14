@@ -651,6 +651,8 @@ bool ViewLoopState::init(ViewPlatform& platform, const ViewLoopConfig& cfg) {
         return false;
     }
 
+    session_.set_access_password(cfg.access_password);
+
     if (cfg.stun_server && *cfg.stun_server) {
         net::SocketAddr stun = net::resolve_host_port(cfg.stun_server);
         if (stun.ip == 0) {

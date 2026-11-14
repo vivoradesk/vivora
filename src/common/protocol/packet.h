@@ -68,6 +68,45 @@ enum class DisconnectReason : uint8_t {
     IdleTimeout   = 5,  // No input for the host's idle window.  Also terminal:
                         // an auto-reconnect here would immediately restart the
                         // idle timer and undo the disconnect.
+    // The next two never travel in a Disconnect packet.  The viewer sets them
+    // itself from an AccessReply (below), so the status text and the
+    // no-reconnect latch work the same way as for the reasons above.
+    WrongPassword = 6,  // The unattended-access password was wrong.
+    PasswordLocked = 7, // Too many wrong passwords; the host refuses more for now.
+};
+
+// Host → viewer answer to a password handshake that failed (VIV-151).  It
+// rides a Control packet in place of Noise msg2, unencrypted, because no keys
+// exist yet:
+//     "VVAU" | code(1) | retry_after_s(2, LE)
+// Being unauthenticated, it is only a hint for the viewer's status text.  A
+// forged one can make a viewer stop early, which anyone able to inject
+// packets on the path could do anyway by dropping msg2.  It is 7 bytes, so it
+// can never be mistaken for a msg2 (48 bytes or more).
+enum class AccessReplyCode : uint8_t {
+    WrongPassword = 1,
+    LockedOut     = 2,
+};
+
+struct AccessReply {
+    static constexpr size_t WIRE_SIZE = 7;
+    AccessReplyCode code = AccessReplyCode::WrongPassword;
+    uint16_t retry_after_s = 0;   // LockedOut only; 0 = unknown
+
+    void serialize(uint8_t out[WIRE_SIZE]) const {
+        out[0] = 'V'; out[1] = 'V'; out[2] = 'A'; out[3] = 'U';
+        out[4] = static_cast<uint8_t>(code);
+        out[5] = static_cast<uint8_t>(retry_after_s & 0xFF);
+        out[6] = static_cast<uint8_t>(retry_after_s >> 8);
+    }
+    static bool parse(const uint8_t* p, size_t len, AccessReply& out) {
+        if (len != WIRE_SIZE || p[0] != 'V' || p[1] != 'V' || p[2] != 'A' || p[3] != 'U')
+            return false;
+        if (p[4] != 1 && p[4] != 2) return false;
+        out.code = static_cast<AccessReplyCode>(p[4]);
+        out.retry_after_s = static_cast<uint16_t>(p[5] | (p[6] << 8));
+        return true;
+    }
 };
 
 enum PacketFlags : uint8_t {

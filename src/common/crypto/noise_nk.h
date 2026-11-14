@@ -129,10 +129,24 @@ public:
     // (obtained out-of-band — host identity) AND the initiator's own
     // long-term keypair, which is sent encrypted in msg1 so the responder
     // can authenticate / recognise the viewer.
+    //
+    // `psk` (optional, 32 bytes) switches the handshake to
+    // Noise_IKpsk1_25519_ChaChaPoly_BLAKE2b: the key is mixed in right after
+    // `ss` in msg1, so only a peer holding the same key can open msg1's
+    // payload.  Vivora uses it for the unattended-access password (VIV-151,
+    // see access_password.h).  nullptr = plain IK, byte-identical to before.
     bool init_initiator(const uint8_t remote_static_pk[32],
-                        const KeyPair& local_static);
-    // Responder configuration: must supply its own long-term keypair.
-    bool init_responder(const KeyPair& local_static);
+                        const KeyPair& local_static,
+                        const uint8_t* psk = nullptr);
+    // Responder configuration: must supply its own long-term keypair, and
+    // the same `psk` as the initiator when running the IKpsk1 variant.  A
+    // responder that accepts both kinds tries plain IK first and, if msg1
+    // does not open, a fresh state with the psk.
+    bool init_responder(const KeyPair& local_static,
+                        const uint8_t* psk = nullptr);
+
+    // True when this handshake runs the IKpsk1 variant.
+    bool uses_psk() const;
 
     // Build the next outbound handshake message.
     //   - Initiator calls this once to produce msg1.

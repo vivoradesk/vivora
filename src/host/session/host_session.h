@@ -4,7 +4,9 @@
 #pragma once
 
 #include "common/codec/video_codec.h"
+#include "common/crypto/access_throttle.h"
 #include "common/crypto/noise_nk.h"
+#include "common/protocol/packet.h"
 #include "common/net/socket.h"
 #include "common/protocol/clipboard_message.h"
 #include "common/protocol/cursor_message.h"
@@ -135,6 +137,14 @@ public:
     // the platform-native path from default_host_key_path().  Must be called
     // before start() — we load the key once at startup.
     void set_host_identity_path(const std::string& path) { host_identity_path_ = path; }
+
+    // Unattended-access password (VIV-151).  start() loads the derived key
+    // from access_psk_path_for(host identity path); no file = no password,
+    // and every viewer goes through the approval gate as before.  Call this
+    // from any thread after the file changed (set or cleared in Settings):
+    // the next poll() re-reads it.
+    void request_access_password_reload() { access_reload_pending_ = true; }
+    bool access_password_enabled() const { return access_psk_set_; }
 
     // Host's long-term Curve25519 public key, as a 64-char lowercase hex
     // string.  Use this to print on startup / show in a QR so the client can
@@ -570,6 +580,15 @@ private:
     // client so Noise_NK can authenticate us.
     crypto::KeyPair host_identity_{};
     std::string     host_identity_path_;
+
+    // Unattended-access password key (VIV-151), see access_password.h.
+    uint8_t           access_psk_[32] = {};
+    bool              access_psk_set_ = false;
+    std::atomic<bool> access_reload_pending_{false};
+    crypto::AccessThrottle access_throttle_;
+    void load_access_password();
+    void send_access_reply(const net::SocketAddr& to, protocol::AccessReplyCode code,
+                           int64_t retry_after_ms);
 
     // Bandwidth probe constants.
     static constexpr uint16_t BW_PROBE_COUNT = 1000;

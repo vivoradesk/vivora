@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "client/net/client_session.h"
+#include "common/crypto/access_password.h"
 #include "common/crypto/host_identity.h"
 #include "common/crypto/packet_crypto.h"
 #include "common/crypto/peer_pin.h"
@@ -46,6 +47,30 @@ static std::string local_device_name() {
 void ClientSession::set_host_key(const uint8_t host_pk[32]) {
     std::memcpy(host_static_pk_, host_pk, 32);
     host_key_set_ = true;
+}
+
+void ClientSession::set_access_password(const std::string& password) {
+    access_password_ = password;
+    access_psk_ready_ = false;
+    std::memset(access_psk_, 0, sizeof(access_psk_));
+}
+
+bool ClientSession::ensure_access_psk() {
+    if (access_password_.empty()) return true;
+    if (access_psk_ready_ && std::memcmp(access_psk_host_, host_static_pk_, 32) == 0)
+        return true;
+    const auto t0 = Clock::now();
+    if (!crypto::derive_access_psk(access_password_, host_static_pk_, access_psk_)) {
+        log::error("ClientSession", "Not enough memory to derive the access password key");
+        last_error_ = "Not enough memory to check the password";
+        return false;
+    }
+    std::memcpy(access_psk_host_, host_static_pk_, 32);
+    access_psk_ready_ = true;
+    log::info("ClientSession", "Access password key derived in %lldms",
+              static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                  Clock::now() - t0).count()));
+    return true;
 }
 
 bool ClientSession::ensure_client_identity() {
@@ -118,6 +143,10 @@ const char* ClientSession::disconnect_status_text() const {
             return "The host has no working video encoder";
         case protocol::DisconnectReason::IdleTimeout:
             return "Disconnected after a period of inactivity";
+        case protocol::DisconnectReason::WrongPassword:
+            return "Wrong password";
+        case protocol::DisconnectReason::PasswordLocked:
+            return "Too many wrong passwords. Try again later";
         default:
             return "Disconnected by host";
     }
@@ -397,7 +426,8 @@ bool ClientSession::establish(bool is_reconnect) {
     }
 
     if (!ensure_client_identity()) return false;
-    if (!handshake_.init_initiator(host_static_pk_, client_identity_)) {
+    if (!ensure_access_psk()) return false;
+    if (!handshake_.init_initiator(host_static_pk_, client_identity_, access_psk())) {
         log::error("ClientSession", "Noise init_initiator failed");
         return false;
     }
@@ -652,7 +682,7 @@ void ClientSession::poll() {
                 // Reset Noise state and HELLO timers so the next send_hello
                 // starts a clean handshake on the relay path.
                 ensure_client_identity();
-                handshake_.init_initiator(host_static_pk_, client_identity_);
+                handshake_.init_initiator(host_static_pk_, client_identity_, access_psk());
                 handshake_complete_ = false;
                 connect_start_   = Clock::now();
                 last_hello_time_ = {};
@@ -1096,6 +1126,26 @@ void ClientSession::handle_control(const uint8_t* payload, size_t len) {
     // a prior handshake — ignore.  Rekey is not implemented yet.
     if (handshake_complete_) return;
 
+    // VIV-151: the host could not open our password handshake.  Only listen
+    // when we actually sent a password; the reply is unauthenticated, so a
+    // viewer without one has no reason to believe it.
+    protocol::AccessReply access;
+    if (protocol::AccessReply::parse(payload, len, access)) {
+        if (!access_psk()) return;
+        const bool locked = access.code == protocol::AccessReplyCode::LockedOut;
+        disconnect_reason_ = locked ? protocol::DisconnectReason::PasswordLocked
+                                    : protocol::DisconnectReason::WrongPassword;
+        access_retry_after_s_ = locked ? access.retry_after_s : 0;
+        host_disconnected_ = true;
+        state_ = SessionState::Disconnected;
+        if (locked)
+            log::warn("ClientSession", "Host refused the password: too many attempts, retry in %us",
+                      static_cast<unsigned>(access.retry_after_s));
+        else
+            log::warn("ClientSession", "Host refused the password");
+        return;
+    }
+
     // Expected shape: Noise msg2 = ephemeral(32) + encrypted(HELLO_ACK+codec) + tag(16).
     uint8_t inner[32] = {};
     int inner_len = handshake_.read_message(payload, len, inner, sizeof(inner));
@@ -1281,7 +1331,7 @@ void ClientSession::send_hello() {
     // msg1s reached the host, and each carries its own ephemeral DH share.
     // The host mirrors this — a new msg1 always resets its side.
     if (!ensure_client_identity()) return;
-    if (!handshake_.init_initiator(host_static_pk_, client_identity_)) {
+    if (!handshake_.init_initiator(host_static_pk_, client_identity_, access_psk())) {
         log::error("ClientSession", "Noise init_initiator failed on retry");
         return;
     }

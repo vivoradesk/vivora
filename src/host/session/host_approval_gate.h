@@ -63,6 +63,28 @@ public:
         cb_ = std::move(cb);
     }
 
+    // Fired (worker thread) when a viewer got in with the unattended-access
+    // password and so skipped the prompt (VIV-151).  Same arguments as the
+    // pending callback.  The GUI uses it to tell the user someone connected
+    // and, if enabled, to remember the viewer as trusted.
+    void set_password_login_callback(OnPendingCallback cb) {
+        std::lock_guard<std::mutex> lock(mu_);
+        password_cb_ = std::move(cb);
+    }
+    void notify_password_login(uint64_t key,
+                               const std::string& peer_code,
+                               const std::string& pubkey_hex,
+                               const std::string& ip_port,
+                               const std::string& device_name) {
+        OnPendingCallback cb_copy;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            states_[key] = ApprovalState::Approved;
+            cb_copy = password_cb_;
+        }
+        if (cb_copy) cb_copy(key, peer_code, pubkey_hex, ip_port, device_name);
+    }
+
     // Called by HostSession when a new client has just finished its
     // handshake but is held back from receiving frames until approval.
     // Records Pending and fires the callback (which must be safe to
@@ -147,6 +169,7 @@ private:
     std::unordered_map<uint64_t, CapabilityGrant> grants_;
     std::unordered_set<std::string> kick_pubkeys_;
     OnPendingCallback cb_;
+    OnPendingCallback password_cb_;
 };
 
 } // namespace vivora::host
